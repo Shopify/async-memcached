@@ -1,4 +1,3 @@
-
 use bytes::BytesMut;
 use tokio::net::TcpStream;
 use tokio::io::{BufReader, BufWriter, AsyncBufRead, AsyncRead, AsyncWrite, AsyncReadExt};
@@ -167,41 +166,4 @@ impl Client {
                 })
         }
     }*/
-}
-
-pub struct FillBuf<'a, 'b, R: ?Sized> {
-    reader: Option<&'a mut R>,
-    buf: &'b mut BytesMut,
-}
-
-pub(crate) fn fill_buf<'a, 'b, R>(reader: &'a mut R, buf: &'b mut BytesMut) -> FillBuf<'a, 'b, R>
-where
-    R: AsyncBufRead + ?Sized + Unpin,
-{
-    FillBuf {
-        reader: Some(reader),
-        buf,
-    }
-}
-
-impl<'a, 'b, R: AsyncBufRead + ?Sized + Unpin> Future for FillBuf<'a, 'b, R> {
-    type Output = io::Result<usize>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let mut reader = Pin::new(self.reader.take().expect("FillBuf polled after completion"));
-        let n = match reader.as_mut().poll_fill_buf(cx) {
-            Poll::Pending => {
-                self.reader = Some(reader.get_mut());
-                return Poll::Pending;
-            }
-            Poll::Ready(result) => {
-                let buf = result?;
-                self.buf.extend_from_slice(buf);
-                buf.len()
-            },
-        };
-
-        reader.as_mut().consume(n);
-        Poll::Ready(Ok(n))
-    }
 }
