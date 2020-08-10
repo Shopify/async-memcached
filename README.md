@@ -2,8 +2,6 @@
 async-memcache is an async [memcached](https://memcached.org/) client implementation for Tokio.
 
 ## Features
-The crate implements the protocol on any stream implementing `AsyncRead + AsyncWrite`.
-
 - [ ] Binary protocol
 - [x] ASCII protocol
 - [x] TCP connection
