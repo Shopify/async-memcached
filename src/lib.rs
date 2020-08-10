@@ -1,11 +1,12 @@
 use bytes::BytesMut;
 use pin_project::pin_project;
 use std::fmt;
-use std::future::Future;
 use std::io;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tokio::io::{AsyncBufRead, AsyncRead, AsyncReadExt, AsyncWrite, BufReader, BufWriter};
+use tokio::io::{
+    AsyncBufRead, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader, BufWriter,
+};
 use tokio::net::TcpStream;
 
 mod parser;
@@ -160,7 +161,7 @@ impl Client {
         }
     }
 
-    /*pub async fn get<K: AsRef<[u8]>>(&mut self, key: K) -> Result<Value<'_>, Status<'_>> {
+    pub async fn get<K: AsRef<[u8]>>(&mut self, key: K) -> Result<Value<'_>, Status<'_>> {
         self.conn.write_all(b"get ").await?;
         self.conn.write_all(key.as_ref()).await?;
         self.conn.write_all(b"\r\n").await?;
@@ -169,14 +170,13 @@ impl Client {
         match self.get_response().await? {
             Response::Status(s) => Err(s),
             Response::IncrDecr(_) => Err(Status::Error(ErrorKind::Protocol)),
-            Response::Data(d) => d.ok_or(Status::NotFound)
-                .and_then(|mut xs| {
-                    if xs.len() != 1 {
-                        Err(Status::Error(ErrorKind::Protocol))
-                    } else {
-                        Ok(xs.remove(0))
-                    }
-                })
+            Response::Data(d) => d.ok_or(Status::NotFound).and_then(|mut xs| {
+                if xs.len() != 1 {
+                    Err(Status::Error(ErrorKind::Protocol))
+                } else {
+                    Ok(xs.remove(0))
+                }
+            }),
         }
-    }*/
+    }
 }
