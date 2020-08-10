@@ -1,0 +1,26 @@
+[package]
+name = "async-memcached"
+version = "0.1.0"
+authors = ["Toby Lawrence <toby@nuclearfurnace.com>"]
+edition = "2018"
+readme = "README.md"
+license = "MIT"
+description = "An Tokio-based memcached client for Rust."
+keywords = ["memcached", "async"]
+
+[dependencies]
+bytes = "0.5"
+nom = "5.0"
+dsn = "1.0"
+btoi = "0.4"
+pin-project = "0.4"
+futures = "0.3"
+tokio = { version = "0.2", default-features = false, features = ["dns", "io-util"] }
+
+[dev-dependencies]
+lazy_static = "1.4"
+
+[features]
+default = ["tcp"]
+tcp = ["tokio/tcp"]
+udp = ["tokio/udp"]
