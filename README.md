@@ -5,8 +5,8 @@ async-memcache is an async [memcached](https://memcached.org/) client implementa
 - [ ] Binary protocol
 - [x] ASCII protocol
 - [x] TCP connection
-- [x] UDP connection
-- [x] UNIX Domain socket connection
+- [ ] UDP connection
+- [ ] UNIX Domain socket connection
 - [ ] Automatically compress
 - [ ] Automatically serialize to JSON / msgpack etc.
 - [ ] Typed interface
