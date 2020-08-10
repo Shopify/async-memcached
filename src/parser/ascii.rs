@@ -1,15 +1,15 @@
 use btoi::btou;
 use nom::{
-    IResult,
     branch::alt,
     bytes::streaming::{tag, take, take_until, take_while1, take_while_m_n},
     character::{is_digit, streaming::crlf},
-    sequence::{terminated, preceded, tuple},
-    combinator::{map, map_res, value, opt},
+    combinator::{map, map_res, opt, value},
     multi::fold_many0,
+    sequence::{preceded, terminated, tuple},
+    IResult,
 };
 
-use super::{Value, Status, Response, ErrorKind};
+use super::{ErrorKind, Response, Status, Value};
 
 pub fn parse_ascii_status(buf: &[u8]) -> IResult<&[u8], Response> {
     terminated(
@@ -21,7 +21,7 @@ pub fn parse_ascii_status(buf: &[u8]) -> IResult<&[u8], Response> {
             value(Response::Status(Status::Exists), tag(b"EXISTS")),
             value(Response::Status(Status::NotFound), tag(b"NOT_FOUND")),
         )),
-        crlf
+        crlf,
     )(buf)
 }
 
@@ -30,15 +30,14 @@ fn parse_ascii_error(buf: &[u8]) -> IResult<&[u8], Response> {
         alt((
             value(ErrorKind::Generic, tag(b"ERROR")),
             map_res(preceded(tag(b"CLIENT_ERROR "), take_until("\r\n")), |s| {
-                std::str::from_utf8(s)
-                    .map(|s| ErrorKind::Client(s))
+                std::str::from_utf8(s).map(|s| ErrorKind::Client(s))
             }),
             map_res(preceded(tag(b"SERVER_ERROR "), take_until("\r\n")), |s| {
-                std::str::from_utf8(s)
-                    .map(|s| ErrorKind::Server(s))
+                std::str::from_utf8(s).map(|s| ErrorKind::Server(s))
             }),
         )),
-        crlf);
+        crlf,
+    );
 
     map(parser, |e| Response::Status(Status::Error(e)))(buf)
 }
@@ -60,27 +59,41 @@ fn is_key_char(chr: u8) -> bool {
 }
 
 fn parse_ascii_value(buf: &[u8]) -> IResult<&[u8], Value> {
-    let kf = take_while1(is_key_char); 
+    let kf = take_while1(is_key_char);
     let (buf, (_, key, _, flags, _, len, _, cas, _)) = tuple((
         // VALUE key flags data_len [cas id]\r\n
         // data block\r\n
-        tag("VALUE "), kf, tag(" "), parse_ascii_u32, tag(" "), parse_ascii_u64, opt(tag(" ")), opt(parse_ascii_u64), crlf
+        tag("VALUE "),
+        kf,
+        tag(" "),
+        parse_ascii_u32,
+        tag(" "),
+        parse_ascii_u64,
+        opt(tag(" ")),
+        opt(parse_ascii_u64),
+        crlf,
     ))(buf)?;
     let (buf, data) = terminated(take(len), crlf)(buf)?;
-    Ok((buf, Value {
-        key,
-        cas,
-        flags,
-        data,
-    }))
+    Ok((
+        buf,
+        Value {
+            key,
+            cas,
+            flags,
+            data,
+        },
+    ))
 }
 
 fn parse_ascii_data(buf: &[u8]) -> IResult<&[u8], Response> {
-    let values = map(fold_many0(parse_ascii_value, None, |xs, x| {
-        let mut xs = xs.unwrap_or_else(|| Vec::new());
-        xs.push(x);
-        Some(xs)
-    }), Response::Data);
+    let values = map(
+        fold_many0(parse_ascii_value, None, |xs, x| {
+            let mut xs = xs.unwrap_or_else(|| Vec::new());
+            xs.push(x);
+            Some(xs)
+        }),
+        Response::Data,
+    );
 
     terminated(values, tag("END\r\n"))(buf)
 }
@@ -96,10 +109,9 @@ pub fn parse_ascii_response(buf: &[u8]) -> IResult<&[u8], Response> {
 
 #[cfg(test)]
 mod tests {
+    use super::{parse_ascii_response, ErrorKind, Response, Status, Value};
     use lazy_static::lazy_static;
-    use super::{ErrorKind, Value, Status, Response, parse_ascii_response};
 
-    
     static FOO_KEY: &[u8] = b"foo";
     static BAR_KEY: &[u8] = b"bar";
     static FOO_STR: &str = "foo";

@@ -1,15 +1,15 @@
 use bytes::BytesMut;
-use tokio::net::TcpStream;
-use tokio::io::{BufReader, BufWriter, AsyncBufRead, AsyncRead, AsyncWrite, AsyncReadExt};
 use pin_project::pin_project;
 use std::fmt;
-use std::task::{Context, Poll};
-use std::pin::Pin;
-use std::io;
 use std::future::Future;
+use std::io;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use tokio::io::{AsyncBufRead, AsyncRead, AsyncReadExt, AsyncWrite, BufReader, BufWriter};
+use tokio::net::TcpStream;
 
 mod parser;
-use self::parser::{Value, Status, Response, ErrorKind, parse_ascii_response};
+use self::parser::{parse_ascii_response, ErrorKind, Response, Status, Value};
 
 #[derive(Debug)]
 pub enum Error {
@@ -38,7 +38,11 @@ enum Connection {
 }
 
 impl AsyncRead for Connection {
-    fn poll_read(self: Pin<&mut Self>, cx: &mut Context, buf: &mut [u8]) -> Poll<io::Result<usize>> {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context,
+        buf: &mut [u8],
+    ) -> Poll<io::Result<usize>> {
         match self.project() {
             ConnectionProjection::Tcp(s) => s.poll_read(cx, buf),
         }
@@ -89,21 +93,30 @@ impl Client {
     pub async fn new<D: AsRef<str>>(d: D) -> Result<Client, Error> {
         let dsn = dsn::parse(d.as_ref())?;
         if dsn.driver != "memcached" {
-            return Err(Error::InvalidConnectionString("expected 'memcached' driver".to_string()))
+            return Err(Error::InvalidConnectionString(
+                "expected 'memcached' driver".to_string(),
+            ));
         }
 
         let connection = match dsn.protocol.as_ref() {
             #[cfg(feature = "tcp")]
             "tcp" => {
-                let host = dsn.host.as_deref().ok_or_else(|| Error::InvalidConnectionString("'host' must be set".to_string()))?;
+                let host = dsn.host.as_deref().ok_or_else(|| {
+                    Error::InvalidConnectionString("'host' must be set".to_string())
+                })?;
                 let port = dsn.port.unwrap_or(11211);
                 let connection = TcpStream::connect((host.as_ref(), port))
                     .await
                     .map_err(Error::FailedToConnect)?;
 
                 Connection::Tcp(BufReader::new(BufWriter::new(connection)))
-            },
-            x => return Err(Error::InvalidConnectionString(format!("unknown protocol '{}'", x))),
+            }
+            x => {
+                return Err(Error::InvalidConnectionString(format!(
+                    "unknown protocol '{}'",
+                    x
+                )))
+            }
         };
 
         Ok(Client {
@@ -114,14 +127,14 @@ impl Client {
     }
 
     pub async fn get_response(&mut self) -> Result<Response<'_>, Status<'_>> {
-         // If we serviced a previous request, advance our buffer forward.
+        // If we serviced a previous request, advance our buffer forward.
         if let Some(n) = self.last_read_n {
-            let _  = self.buf.split_to(n);
+            let _ = self.buf.split_to(n);
         }
-    
+
         loop {
             self.buf.reserve(1024);
-        
+
             match self.conn {
                 Connection::Tcp(ref mut s) => {
                     //let _ = fill_buf(s, &mut self.buf).await?;
@@ -137,10 +150,10 @@ impl Client {
                 // We got a response.
                 Ok((rbuf, response)) => {
                     self.last_read_n = Some(self.buf.len() - rbuf.len());
-                    return Ok(response)
-                },
+                    return Ok(response);
+                }
                 // Need more data.
-                Err(nom::Err::Incomplete(_)) => {},
+                Err(nom::Err::Incomplete(_)) => {}
                 // Invalid data not matching the protocol.
                 Err(_) => return Err(Status::Error(ErrorKind::Protocol)),
             }

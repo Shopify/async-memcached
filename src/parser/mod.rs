@@ -1,4 +1,3 @@
-
 use std::io;
 mod ascii;
 pub use ascii::parse_ascii_response;
