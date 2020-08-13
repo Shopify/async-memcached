@@ -1,4 +1,4 @@
-use std::io;
+use std::fmt;
 mod ascii;
 pub use ascii::parse_ascii_response;
 
@@ -25,7 +25,6 @@ pub enum Status {
 pub enum ErrorKind {
     Generic,
     Protocol,
-    Io(io::ErrorKind),
     Client(String),
     Server(String),
 }
@@ -37,14 +36,27 @@ pub enum Response {
     IncrDecr(u64),
 }
 
-impl From<io::Error> for Status {
-    fn from(e: io::Error) -> Self {
-        Status::Error(ErrorKind::Io(e.kind()))
+impl fmt::Display for Status {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Stored => write!(f, "stored"),
+            Self::NotStored => write!(f, "not stored"),
+            Self::Deleted => write!(f, "deleted"),
+            Self::Touched => write!(f, "touched"),
+            Self::Exists => write!(f, "exists"),
+            Self::NotFound => write!(f, "not found"),
+            Self::Error(ek) => write!(f, "error: {}", ek),
+        }
     }
 }
 
-impl From<io::Error> for ErrorKind {
-    fn from(e: io::Error) -> Self {
-        ErrorKind::Io(e.kind())
+impl fmt::Display for ErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Generic => write!(f, "generic"),
+            Self::Protocol => write!(f, "protocol"),
+            Self::Client(s) => write!(f, "client: {}", s),
+            Self::Server(s) => write!(f, "server: {}", s),
+        }
     }
 }

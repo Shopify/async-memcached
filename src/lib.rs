@@ -1,89 +1,15 @@
 use bytes::BytesMut;
-use pin_project::pin_project;
-use std::fmt;
-use std::io;
-use std::pin::Pin;
-use std::task::{Context, Poll};
-use tokio::io::{
-    AsyncBufRead, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader, BufWriter,
-};
-use tokio::net::TcpStream;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+mod connection;
+use self::connection::Connection;
+
+mod error;
+pub use self::error::Error;
 
 mod parser;
 use self::parser::{parse_ascii_response, Response};
-pub use self::parser::{Value, Status, ErrorKind};
-
-#[derive(Debug)]
-pub enum Error {
-    InvalidConnectionString(String),
-    FailedToConnect(io::Error),
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::InvalidConnectionString(s) => write!(f, "invalid connection string: {}", s),
-            Self::FailedToConnect(e) => write!(f, "failed to connect: {}", e),
-        }
-    }
-}
-
-impl From<dsn::ParseError> for Error {
-    fn from(pe: dsn::ParseError) -> Self {
-        Error::InvalidConnectionString(pe.to_string())
-    }
-}
-
-#[pin_project(project = ConnectionProjection)]
-enum Connection {
-    Tcp(#[pin] BufReader<BufWriter<TcpStream>>),
-}
-
-impl AsyncRead for Connection {
-    fn poll_read(
-        self: Pin<&mut Self>,
-        cx: &mut Context,
-        buf: &mut [u8],
-    ) -> Poll<io::Result<usize>> {
-        match self.project() {
-            ConnectionProjection::Tcp(s) => s.poll_read(cx, buf),
-        }
-    }
-}
-
-impl AsyncWrite for Connection {
-    fn poll_write(self: Pin<&mut Self>, cx: &mut Context, buf: &[u8]) -> Poll<io::Result<usize>> {
-        match self.project() {
-            ConnectionProjection::Tcp(s) => s.poll_write(cx, buf),
-        }
-    }
-
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<()>> {
-        match self.project() {
-            ConnectionProjection::Tcp(s) => s.poll_flush(cx),
-        }
-    }
-
-    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<()>> {
-        match self.project() {
-            ConnectionProjection::Tcp(s) => s.poll_shutdown(cx),
-        }
-    }
-}
-
-impl AsyncBufRead for Connection {
-    fn poll_fill_buf(self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<&[u8]>> {
-        match self.project() {
-            ConnectionProjection::Tcp(s) => s.poll_fill_buf(cx),
-        }
-    }
-
-    fn consume(self: Pin<&mut Self>, amt: usize) {
-        match self.project() {
-            ConnectionProjection::Tcp(s) => s.consume(amt),
-        }
-    }
-}
+pub use self::parser::{ErrorKind, Status, Value};
 
 pub struct Client {
     buf: BytesMut,
@@ -92,11 +18,8 @@ pub struct Client {
 }
 
 impl Client {
-    pub async fn new<D: AsRef<str>>(d: D) -> Result<Client, Error> {
-        let connection = TcpStream::connect(d.as_ref())
-            .await
-            .map_err(Error::FailedToConnect)
-            .map(|c| Connection::Tcp(BufReader::new(BufWriter::new(c))))?;
+    pub async fn new<S: AsRef<str>>(dsn: S) -> Result<Client, Error> {
+        let connection = Connection::new(dsn).await?;
 
         Ok(Client {
             buf: BytesMut::new(),
@@ -105,7 +28,7 @@ impl Client {
         })
     }
 
-    pub async fn get_response(&mut self) -> Result<Response, Status> {
+    pub async fn get_response(&mut self) -> Result<Response, Error> {
         // If we serviced a previous request, advance our buffer forward.
         if let Some(n) = self.last_read_n {
             let _ = self.buf.split_to(n);
@@ -117,7 +40,7 @@ impl Client {
                     //buf.reserve(1024);
                     let n = s.read_buf(&mut self.buf).await?;
                     if n == 0 {
-                        panic!("placeholder for now");
+                        return Err(Error::Io(std::io::ErrorKind::UnexpectedEof.into()));
                     }
                 }
             }
@@ -132,23 +55,23 @@ impl Client {
                 // Need more data.
                 Ok(None) => continue,
                 // Invalid data not matching the protocol.
-                Err(kind) => return Err(Status::Error(kind)),
+                Err(kind) => return Err(Status::Error(kind).into()),
             }
         }
     }
 
-    pub async fn get<K: AsRef<[u8]>>(&mut self, key: K) -> Result<Value, Status> {
+    pub async fn get<K: AsRef<[u8]>>(&mut self, key: K) -> Result<Value, Error> {
         self.conn.write_all(b"get ").await?;
         self.conn.write_all(key.as_ref()).await?;
         self.conn.write_all(b"\r\n").await?;
         self.conn.flush().await?;
 
         match self.get_response().await? {
-            Response::Status(s) => Err(s),
-            Response::IncrDecr(_) => Err(Status::Error(ErrorKind::Protocol)),
-            Response::Data(d) => d.ok_or(Status::NotFound).and_then(|mut xs| {
+            Response::Status(s) => Err(s.into()),
+            Response::IncrDecr(_) => Err(Error::Protocol(Status::Error(ErrorKind::Protocol))),
+            Response::Data(d) => d.ok_or(Status::NotFound.into()).and_then(|mut xs| {
                 if xs.len() != 1 {
-                    Err(Status::Error(ErrorKind::Protocol))
+                    Err(Status::Error(ErrorKind::Protocol).into())
                 } else {
                     Ok(xs.remove(0))
                 }
@@ -156,7 +79,7 @@ impl Client {
         }
     }
 
-    pub async fn get_many<I, K>(&mut self, keys: I) -> Result<Vec<Value>, Status>
+    pub async fn get_many<I, K>(&mut self, keys: I) -> Result<Vec<Value>, Error>
     where
         I: IntoIterator<Item = K>,
         K: AsRef<[u8]>,
@@ -170,9 +93,9 @@ impl Client {
         self.conn.flush().await?;
 
         match self.get_response().await? {
-            Response::Status(s) => Err(s),
-            Response::IncrDecr(_) => Err(Status::Error(ErrorKind::Protocol)),
-            Response::Data(d) => d.ok_or(Status::NotFound),
+            Response::Status(s) => Err(s.into()),
+            Response::IncrDecr(_) => Err(Status::Error(ErrorKind::Protocol).into()),
+            Response::Data(d) => d.ok_or(Status::NotFound.into()),
         }
     }
 
@@ -182,7 +105,7 @@ impl Client {
         value: V,
         ttl: i64,
         flags: Option<u32>,
-    ) -> Result<(), Status>
+    ) -> Result<(), Error>
     where
         K: AsRef<[u8]>,
         V: AsRef<[u8]>,
@@ -213,8 +136,8 @@ impl Client {
 
         match self.get_response().await? {
             Response::Status(Status::Stored) => Ok(()),
-            Response::Status(s) => Err(s),
-            _ => Err(Status::Error(ErrorKind::Protocol)),
+            Response::Status(s) => Err(s.into()),
+            _ => Err(Status::Error(ErrorKind::Protocol).into()),
         }
     }
 }
