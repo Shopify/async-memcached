@@ -19,8 +19,10 @@ tokio = { version = "0.2", default-features = false, features = ["dns", "io-util
 
 [dev-dependencies]
 lazy_static = "1.4"
+tokio = { version = "0.2", features = ["full"] }
 
 [features]
 default = ["tcp"]
+polonius = []
 tcp = ["tokio/tcp"]
 udp = ["tokio/udp"]

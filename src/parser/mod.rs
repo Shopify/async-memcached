@@ -3,42 +3,48 @@ mod ascii;
 pub use ascii::parse_ascii_response;
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Value<'a> {
-    key: &'a [u8],
+pub struct Value {
+    key: Vec<u8>,
     cas: Option<u64>,
     flags: u32,
-    data: &'a [u8],
+    data: Vec<u8>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum Status<'a> {
+pub enum Status {
     Stored,
     NotStored,
     Deleted,
     Touched,
     Exists,
     NotFound,
-    Error(ErrorKind<'a>),
+    Error(ErrorKind),
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum ErrorKind<'a> {
+pub enum ErrorKind {
     Generic,
     Protocol,
     Io(io::ErrorKind),
-    Client(&'a str),
-    Server(&'a str),
+    Client(String),
+    Server(String),
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum Response<'a> {
-    Status(Status<'a>),
-    Data(Option<Vec<Value<'a>>>),
+pub enum Response {
+    Status(Status),
+    Data(Option<Vec<Value>>),
     IncrDecr(u64),
 }
 
-impl<'a> From<io::Error> for Status<'a> {
+impl From<io::Error> for Status {
     fn from(e: io::Error) -> Self {
         Status::Error(ErrorKind::Io(e.kind()))
+    }
+}
+
+impl From<io::Error> for ErrorKind {
+    fn from(e: io::Error) -> Self {
+        ErrorKind::Io(e.kind())
     }
 }

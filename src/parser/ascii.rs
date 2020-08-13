@@ -30,10 +30,10 @@ fn parse_ascii_error(buf: &[u8]) -> IResult<&[u8], Response> {
         alt((
             value(ErrorKind::Generic, tag(b"ERROR")),
             map_res(preceded(tag(b"CLIENT_ERROR "), take_until("\r\n")), |s| {
-                std::str::from_utf8(s).map(|s| ErrorKind::Client(s))
+                std::str::from_utf8(s).map(|s| ErrorKind::Client(s.to_string()))
             }),
             map_res(preceded(tag(b"SERVER_ERROR "), take_until("\r\n")), |s| {
-                std::str::from_utf8(s).map(|s| ErrorKind::Server(s))
+                std::str::from_utf8(s).map(|s| ErrorKind::Server(s.to_string()))
             }),
         )),
         crlf,
@@ -77,10 +77,10 @@ fn parse_ascii_value(buf: &[u8]) -> IResult<&[u8], Value> {
     Ok((
         buf,
         Value {
-            key,
+            key: key.to_vec(),
             cas,
             flags,
-            data,
+            data: data.to_vec(),
         },
     ))
 }
@@ -98,13 +98,23 @@ fn parse_ascii_data(buf: &[u8]) -> IResult<&[u8], Response> {
     terminated(values, tag("END\r\n"))(buf)
 }
 
-pub fn parse_ascii_response(buf: &[u8]) -> IResult<&[u8], Response> {
-    alt((
+pub fn parse_ascii_response(buf: &[u8]) -> Result<Option<(usize, Response)>, ErrorKind> {
+    let bufn = buf.len();
+    let result = alt((
         parse_ascii_status,
         parse_ascii_error,
         parse_ascii_incrdecr,
         parse_ascii_data,
-    ))(buf)
+    ))(buf);
+
+    match result {
+        Ok((left, response)) => {
+            let n = bufn - left.len();
+            Ok(Some((n, response)))
+        }
+        Err(nom::Err::Incomplete(_)) => Ok(None),
+        Err(_) => Err(ErrorKind::Protocol),
+    }
 }
 
 #[cfg(test)]
@@ -120,7 +130,7 @@ mod tests {
 
     lazy_static! {
         // (buffer to parse, expected number of bytes read, expected response)
-        static ref VALID_CASES: Vec<(&'static [u8], usize, Response<'static>)> = {
+        static ref VALID_CASES: Vec<(&'static [u8], usize, Response)> = {
             vec![
                 // Normal examples: no dangling data, no curveballs.
                 (b"STORED\r\n", 8, Response::Status(Status::Stored)),
@@ -130,18 +140,18 @@ mod tests {
                 (b"EXISTS\r\n", 8, Response::Status(Status::Exists)),
                 (b"NOT_FOUND\r\n", 11, Response::Status(Status::NotFound)),
                 (b"ERROR\r\n", 7, Response::Status(Status::Error(ErrorKind::Generic))),
-                (b"CLIENT_ERROR foo\r\n", 18, Response::Status(Status::Error(ErrorKind::Client(FOO_STR)))),
-                (b"SERVER_ERROR bar\r\n", 18, Response::Status(Status::Error(ErrorKind::Server(BAR_STR)))),
+                (b"CLIENT_ERROR foo\r\n", 18, Response::Status(Status::Error(ErrorKind::Client(FOO_STR.to_string())))),
+                (b"SERVER_ERROR bar\r\n", 18, Response::Status(Status::Error(ErrorKind::Server(BAR_STR.to_string())))),
                 (b"42\r\n", 4, Response::IncrDecr(42)),
                 (b"END\r\n", 5, Response::Data(None)),
                 (b"VALUE foo 42 11\r\nhello world\r\nEND\r\n", 35, Response::Data(Some(
-                    vec![Value { key: FOO_KEY, flags: 42, cas: None, data: HELLO_WORLD_DATA }]
+                    vec![Value { key: FOO_KEY.to_vec(), flags: 42, cas: None, data: HELLO_WORLD_DATA.to_vec() }]
                 ))),
                 (b"VALUE foo 42 11\r\nhello world\r\nVALUE bar 43 11 15\r\nhello world\r\nEND\r\n", 68,
                     Response::Data(Some(
                         vec![
-                            Value { key: FOO_KEY, flags: 42, cas: None, data: HELLO_WORLD_DATA },
-                            Value { key: BAR_KEY, flags: 43, cas: Some(15), data: HELLO_WORLD_DATA },
+                            Value { key: FOO_KEY.to_vec(), flags: 42, cas: None, data: HELLO_WORLD_DATA.to_vec() },
+                            Value { key: BAR_KEY.to_vec(), flags: 43, cas: Some(15), data: HELLO_WORLD_DATA.to_vec() },
                         ]
                     ))
                 ),
@@ -153,10 +163,10 @@ mod tests {
     fn test_complete_parsing() {
         // We assume all data has arrived for these tests.
         for (data, data_read, expected) in VALID_CASES.iter() {
-            let (remaining, result) = parse_ascii_response(data).unwrap();
+            let (n, result) = parse_ascii_response(data).unwrap().unwrap();
 
             assert_eq!(&result, expected);
-            assert_eq!(data.len() - remaining.len(), *data_read);
+            assert_eq!(n, *data_read);
         }
     }
 
@@ -168,13 +178,13 @@ mod tests {
             let mut i = 0;
             while i < *data_read {
                 let subbuf = &data[..i];
-                assert!(parse_ascii_response(subbuf).is_err());
+                assert_eq!(parse_ascii_response(subbuf), Ok(None));
                 i += 1;
             }
 
-            let (remaining, result) = parse_ascii_response(data).unwrap();
+            let (n, result) = parse_ascii_response(data).unwrap().unwrap();
             assert_eq!(&result, expected);
-            assert_eq!(data.len() - remaining.len(), *data_read);
+            assert_eq!(n, *data_read);
         }
     }
 }
