@@ -1,5 +1,5 @@
 use bytes::BytesMut;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 
 mod connection;
 use self::connection::Connection;
@@ -139,5 +139,16 @@ impl Client {
             Response::Status(s) => Err(s.into()),
             _ => Err(Status::Error(ErrorKind::Protocol).into()),
         }
+    }
+
+    pub async fn version(&mut self) -> Result<String, Error> {
+        self.conn.write_all(b"version\r\n").await?;
+        self.conn.flush().await?;
+
+        let mut version = String::new();
+        let _ = self.conn.read_line(&mut version).await?;
+
+        // Peel off the leading "VERSION " header.
+        Ok(version.split_off(8))
     }
 }
