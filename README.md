@@ -1,6 +1,8 @@
 # async-memcache
 async-memcache is an async [memcached](https://memcached.org/) client implementation for Tokio.
 
+*Warning*: This is a work in progress crate.
+
 ## Features
 - [ ] Binary protocol
 - [x] ASCII protocol
