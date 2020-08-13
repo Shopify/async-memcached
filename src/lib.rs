@@ -10,7 +10,8 @@ use tokio::io::{
 use tokio::net::TcpStream;
 
 mod parser;
-use self::parser::{parse_ascii_response, ErrorKind, Response, Status, Value};
+use self::parser::{parse_ascii_response, Response};
+pub use self::parser::{Value, Status, ErrorKind};
 
 #[derive(Debug)]
 pub enum Error {
