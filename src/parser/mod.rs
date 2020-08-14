@@ -4,10 +4,10 @@ pub use ascii::parse_ascii_response;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Value {
-    key: Vec<u8>,
-    cas: Option<u64>,
-    flags: u32,
-    data: Vec<u8>,
+    pub key: Vec<u8>,
+    pub cas: Option<u64>,
+    pub flags: u32,
+    pub data: Vec<u8>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
