@@ -1,6 +1,6 @@
 [package]
 name = "async-memcached"
-version = "0.1.2"
+version = "0.1.3"
 authors = ["Toby Lawrence <toby@nuclearfurnace.com>"]
 edition = "2018"
 readme = "README.md"
@@ -16,6 +16,7 @@ btoi = "0.4"
 pin-project = "0.4"
 futures = "0.3"
 tokio = { version = "0.2", default-features = false, features = ["dns", "io-util"] }
+async-stream = "0.3"
 
 [dev-dependencies]
 lazy_static = "1.4"

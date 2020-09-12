@@ -1,6 +1,6 @@
 use std::fmt;
 mod ascii;
-pub use ascii::parse_ascii_response;
+pub use ascii::{parse_ascii_metadump_response, parse_ascii_response};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Value {
@@ -34,6 +34,25 @@ pub enum Response {
     Status(Status),
     Data(Option<Vec<Value>>),
     IncrDecr(u64),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum MetadumpResponse {
+    Busy(String),
+    BadClass(String),
+    Entry(KeyMetadata),
+    End,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct KeyMetadata {
+    pub key: Vec<u8>,
+    pub expiration: i64,
+    pub last_accessed: u64,
+    pub cas: u64,
+    pub fetched: bool,
+    pub class_id: u32,
+    pub size: u32,
 }
 
 impl fmt::Display for Status {

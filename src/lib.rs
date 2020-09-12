@@ -1,3 +1,4 @@
+#![deny(warnings)]
 use bytes::BytesMut;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 
@@ -8,8 +9,8 @@ mod error;
 pub use self::error::Error;
 
 mod parser;
-use self::parser::{parse_ascii_response, Response};
-pub use self::parser::{ErrorKind, Status, Value};
+use self::parser::{parse_ascii_metadump_response, parse_ascii_response, Response};
+pub use self::parser::{ErrorKind, KeyMetadata, MetadumpResponse, Status, Value};
 
 pub struct Client {
     buf: BytesMut,
@@ -28,7 +29,7 @@ impl Client {
         })
     }
 
-    pub async fn get_response(&mut self) -> Result<Response, Error> {
+    pub(crate) async fn get_normal_response(&mut self) -> Result<Response, Error> {
         // If we serviced a previous request, advance our buffer forward.
         if let Some(n) = self.last_read_n {
             let _ = self.buf.split_to(n);
@@ -37,7 +38,7 @@ impl Client {
         loop {
             match self.conn {
                 Connection::Tcp(ref mut s) => {
-                    //buf.reserve(1024);
+                    self.buf.reserve(1024);
                     let n = s.read_buf(&mut self.buf).await?;
                     if n == 0 {
                         return Err(Error::Io(std::io::ErrorKind::UnexpectedEof.into()));
@@ -60,13 +61,45 @@ impl Client {
         }
     }
 
+    pub(crate) async fn get_metadump_response(&mut self) -> Result<MetadumpResponse, Error> {
+        // If we serviced a previous request, advance our buffer forward.
+        if let Some(n) = self.last_read_n {
+            let _ = self.buf.split_to(n);
+        }
+
+        loop {
+            // Try and parse out a response.
+            match parse_ascii_metadump_response(&self.buf) {
+                // We got a response.
+                Ok(Some((n, response))) => {
+                    self.last_read_n = Some(n);
+                    return Ok(response);
+                }
+                // Need more data.
+                Ok(None) => {}
+                // Invalid data not matching the protocol.
+                Err(kind) => return Err(Status::Error(kind).into()),
+            }
+
+            match self.conn {
+                Connection::Tcp(ref mut s) => {
+                    self.buf.reserve(1024);
+                    let n = s.read_buf(&mut self.buf).await?;
+                    if n == 0 {
+                        return Err(Error::Io(std::io::ErrorKind::UnexpectedEof.into()));
+                    }
+                }
+            }
+        }
+    }
+
     pub async fn get<K: AsRef<[u8]>>(&mut self, key: K) -> Result<Value, Error> {
         self.conn.write_all(b"get ").await?;
         self.conn.write_all(key.as_ref()).await?;
         self.conn.write_all(b"\r\n").await?;
         self.conn.flush().await?;
 
-        match self.get_response().await? {
+        match self.get_normal_response().await? {
             Response::Status(s) => Err(s.into()),
             Response::IncrDecr(_) => Err(Error::Protocol(Status::Error(ErrorKind::Protocol))),
             Response::Data(d) => d.ok_or(Status::NotFound.into()).and_then(|mut xs| {
@@ -92,7 +125,7 @@ impl Client {
         self.conn.write_all(b"\r\n").await?;
         self.conn.flush().await?;
 
-        match self.get_response().await? {
+        match self.get_normal_response().await? {
             Response::Status(s) => Err(s.into()),
             Response::IncrDecr(_) => Err(Status::Error(ErrorKind::Protocol).into()),
             Response::Data(d) => d.ok_or(Status::NotFound.into()),
@@ -134,7 +167,7 @@ impl Client {
         self.conn.write_all(b"\r\n").await?;
         self.conn.flush().await?;
 
-        match self.get_response().await? {
+        match self.get_normal_response().await? {
             Response::Status(Status::Stored) => Ok(()),
             Response::Status(s) => Err(s.into()),
             _ => Err(Status::Error(ErrorKind::Protocol).into()),
@@ -150,5 +183,39 @@ impl Client {
 
         // Peel off the leading "VERSION " header.
         Ok(version.split_off(8))
+    }
+
+    pub async fn dump_keys(&mut self) -> Result<MetadumpIter<'_>, Error> {
+        self.conn.write_all(b"lru_crawler metadump all\r\n").await?;
+        self.conn.flush().await?;
+
+        Ok(MetadumpIter {
+            client: self,
+            done: false,
+        })
+    }
+}
+
+pub struct MetadumpIter<'a> {
+    client: &'a mut Client,
+    done: bool,
+}
+
+impl<'a> MetadumpIter<'a> {
+    pub async fn next(&mut self) -> Option<Result<KeyMetadata, Error>> {
+        if self.done {
+            return None;
+        }
+
+        match self.client.get_metadump_response().await {
+            Ok(MetadumpResponse::End)
+            | Ok(MetadumpResponse::BadClass(_))
+            | Ok(MetadumpResponse::Busy(_)) => {
+                self.done = true;
+                None
+            }
+            Ok(MetadumpResponse::Entry(km)) => Some(Ok(km)),
+            Err(e) => Some(Err(e)),
+        }
     }
 }
