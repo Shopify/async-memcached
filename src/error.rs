@@ -1,9 +1,13 @@
 use crate::parser::Status;
 use std::{fmt, io};
 
+/// Error type for [`Client`](crate::Client) operations.
 #[derive(Debug)]
 pub enum Error {
+    /// I/O-related error.
     Io(io::Error),
+    /// A protocol-level error i.e. a failed operation or message that
+    /// does not match the protocol specification.
     Protocol(Status),
 }
 

@@ -31,7 +31,7 @@ pub fn parse_ascii_status(buf: &[u8]) -> IResult<&[u8], Response> {
 fn parse_ascii_error(buf: &[u8]) -> IResult<&[u8], Response> {
     let parser = terminated(
         alt((
-            value(ErrorKind::Generic, tag(b"ERROR")),
+            value(ErrorKind::NonexistentCommand, tag(b"ERROR")),
             map_res(preceded(tag(b"CLIENT_ERROR "), take_until("\r\n")), |s| {
                 std::str::from_utf8(s).map(|s| ErrorKind::Client(s.to_string()))
             }),
@@ -128,7 +128,9 @@ pub fn parse_ascii_response(buf: &[u8]) -> Result<Option<(usize, Response)>, Err
             Ok(Some((n, response)))
         }
         Err(nom::Err::Incomplete(_)) => Ok(None),
-        Err(_) => Err(ErrorKind::Protocol),
+        Err(nom::Err::Error((_, e))) | Err(nom::Err::Failure((_, e))) => {
+            Err(ErrorKind::Protocol(Some(e.description().to_string())))
+        }
     }
 }
 
@@ -198,7 +200,9 @@ pub fn parse_ascii_metadump_response(
             Ok(Some((n, response)))
         }
         Err(nom::Err::Incomplete(_)) => Ok(None),
-        Err(_) => Err(ErrorKind::Protocol),
+        Err(nom::Err::Error((_, e))) | Err(nom::Err::Failure((_, e))) => {
+            Err(ErrorKind::Protocol(Some(e.description().to_string())))
+        }
     }
 }
 
@@ -227,7 +231,7 @@ mod tests {
                 (b"TOUCHED\r\n", 9, Response::Status(Status::Touched)),
                 (b"EXISTS\r\n", 8, Response::Status(Status::Exists)),
                 (b"NOT_FOUND\r\n", 11, Response::Status(Status::NotFound)),
-                (b"ERROR\r\n", 7, Response::Status(Status::Error(ErrorKind::Generic))),
+                (b"ERROR\r\n", 7, Response::Status(Status::Error(ErrorKind::NonexistentCommand))),
                 (b"CLIENT_ERROR foo\r\n", 18, Response::Status(Status::Error(ErrorKind::Client(FOO_STR.to_string())))),
                 (b"SERVER_ERROR bar\r\n", 18, Response::Status(Status::Error(ErrorKind::Server(BAR_STR.to_string())))),
                 (b"42\r\n", 4, Response::IncrDecr(42)),

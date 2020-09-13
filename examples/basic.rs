@@ -11,15 +11,12 @@ async fn main() {
         Err(status) => println!("got status during 'foo' get: {:?}", status),
     }
 
-    match client
-        .set("foo", "fo might do popeyes ovalue", 5, None)
-        .await
-    {
+    match client.set("foo", "might do popeyes", Some(5), None).await {
         Ok(()) => println!("set 'foo' successfully"),
         Err(status) => println!("got status during 'foo' set: {:?}", status),
     }
 
-    match client.set("bar", "barvalue", 5, None).await {
+    match client.set("bar", "barvalue", Some(5), None).await {
         Ok(()) => println!("set 'bar' successfully"),
         Err(status) => println!("got status during 'bar' set: {:?}", status),
     }
