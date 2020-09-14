@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- next-header -->
 
 ## [Unreleased] - ReleaseDate
+
+## [0.1.6] - 2020-09-14
 ### Changed
 - Changed `Client::get` to return `Option<Value>` in the non-error case to indicate hit vs miss.
 - Fixed a bug where reads in a particular situation would stall if the client attempted a follow-up
