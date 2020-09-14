@@ -11,8 +11,9 @@ use nom::{
     sequence::{preceded, terminated, tuple},
     IResult,
 };
+use std::str::Utf8Error;
 
-use super::{ErrorKind, KeyMetadata, MetadumpResponse, Response, Status, Value};
+use super::{ErrorKind, KeyMetadata, MetadumpResponse, Response, StatsResponse, Status, Value};
 
 pub fn parse_ascii_status(buf: &[u8]) -> IResult<&[u8], Response> {
     terminated(
@@ -184,6 +185,28 @@ fn parse_lru_crawler_metadata(buf: &[u8]) -> IResult<&[u8], MetadumpResponse> {
     ))
 }
 
+fn parse_stat_entry(buf: &[u8]) -> IResult<&[u8], StatsResponse> {
+    terminated(
+        map_res(
+            tuple((
+                tag("STAT "),
+                take_while1(is_key_char),
+                tag(" "),
+                take_while1(is_key_char),
+            )),
+            |(_, key, _, value)| {
+                let keystr = std::str::from_utf8(key)?;
+                let valuestr = std::str::from_utf8(value)?;
+                Ok::<_, Utf8Error>(StatsResponse::Entry(
+                    keystr.to_string(),
+                    valuestr.to_string(),
+                ))
+            },
+        ),
+        crlf,
+    )(buf)
+}
+
 pub fn parse_ascii_metadump_response(
     buf: &[u8],
 ) -> Result<Option<(usize, MetadumpResponse)>, ErrorKind> {
@@ -206,11 +229,27 @@ pub fn parse_ascii_metadump_response(
     }
 }
 
+pub fn parse_ascii_stats_response(buf: &[u8]) -> Result<Option<(usize, StatsResponse)>, ErrorKind> {
+    let bufn = buf.len();
+    let result = alt((value(StatsResponse::End, tag(b"END\r\n")), parse_stat_entry))(buf);
+
+    match result {
+        Ok((left, response)) => {
+            let n = bufn - left.len();
+            Ok(Some((n, response)))
+        }
+        Err(nom::Err::Incomplete(_)) => Ok(None),
+        Err(nom::Err::Error((_, e))) | Err(nom::Err::Failure((_, e))) => {
+            Err(ErrorKind::Protocol(Some(e.description().to_string())))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        parse_ascii_metadump_response, parse_ascii_response, ErrorKind, KeyMetadata,
-        MetadumpResponse, Response, Status, Value,
+        parse_ascii_metadump_response, parse_ascii_response, parse_ascii_stats_response, ErrorKind,
+        KeyMetadata, MetadumpResponse, Response, StatsResponse, Status, Value,
     };
     use lazy_static::lazy_static;
 
@@ -276,6 +315,14 @@ mod tests {
                 })),
             ]
         };
+
+        static ref VALID_STATS_CASES: Vec<(&'static [u8], usize, StatsResponse)> = {
+            vec![
+                // Normal examples: no dangling data, no curveballs.
+                (b"END\r\n", 5, StatsResponse::End),
+                (b"STAT foobar quux\r\n", 18, StatsResponse::Entry("foobar".to_string(), "quux".to_string())),
+            ]
+        };
     }
 
     #[test]
@@ -331,6 +378,35 @@ mod tests {
             }
 
             let (n, result) = parse_ascii_metadump_response(data).unwrap().unwrap();
+            assert_eq!(&result, expected);
+            assert_eq!(n, *data_read);
+        }
+    }
+
+    #[test]
+    fn test_stats_complete_parsing() {
+        // We assume all data has arrived for these tests.
+        for (data, data_read, expected) in VALID_STATS_CASES.iter() {
+            let (n, result) = parse_ascii_stats_response(data).unwrap().unwrap();
+
+            assert_eq!(&result, expected);
+            assert_eq!(n, *data_read);
+        }
+    }
+
+    #[test]
+    fn test_stats_incomplete_parsing() {
+        // For each case, we slice down the input data and assert that until we feed the entire
+        // buffer, we don't get a valid response.
+        for (data, data_read, expected) in VALID_STATS_CASES.iter() {
+            let mut i = 0;
+            while i < *data_read {
+                let subbuf = &data[..i];
+                assert_eq!(parse_ascii_stats_response(subbuf), Ok(None));
+                i += 1;
+            }
+
+            let (n, result) = parse_ascii_stats_response(data).unwrap().unwrap();
             assert_eq!(&result, expected);
             assert_eq!(n, *data_read);
         }

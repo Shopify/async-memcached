@@ -1,5 +1,7 @@
 //! A Tokio-based memcached client.
 #![deny(warnings, missing_docs)]
+use std::collections::HashMap;
+
 use bytes::BytesMut;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 
@@ -10,8 +12,10 @@ mod error;
 pub use self::error::Error;
 
 mod parser;
-use self::parser::{parse_ascii_metadump_response, parse_ascii_response, Response};
-pub use self::parser::{ErrorKind, KeyMetadata, MetadumpResponse, Status, Value};
+use self::parser::{
+    parse_ascii_metadump_response, parse_ascii_response, parse_ascii_stats_response, Response,
+};
+pub use self::parser::{ErrorKind, KeyMetadata, MetadumpResponse, StatsResponse, Status, Value};
 
 /// High-level memcached client.
 ///
@@ -38,90 +42,82 @@ impl Client {
         })
     }
 
-    pub(crate) async fn get_normal_response(&mut self) -> Result<Response, Error> {
+    pub(crate) async fn drive_receive<R, F>(&mut self, op: F) -> Result<R, Error>
+    where
+        F: Fn(&[u8]) -> Result<Option<(usize, R)>, ErrorKind>,
+    {
         // If we serviced a previous request, advance our buffer forward.
         if let Some(n) = self.last_read_n {
             let _ = self.buf.split_to(n);
         }
 
+        let mut needs_more_data = false;
         loop {
-            match self.conn {
-                Connection::Tcp(ref mut s) => {
-                    self.buf.reserve(1024);
-                    let n = s.read_buf(&mut self.buf).await?;
-                    if n == 0 {
-                        return Err(Error::Io(std::io::ErrorKind::UnexpectedEof.into()));
+            if self.buf.len() == 0 || needs_more_data {
+                match self.conn {
+                    Connection::Tcp(ref mut s) => {
+                        self.buf.reserve(1024);
+                        let n = s.read_buf(&mut self.buf).await?;
+                        if n == 0 {
+                            return Err(Error::Io(std::io::ErrorKind::UnexpectedEof.into()));
+                        }
                     }
                 }
             }
 
             // Try and parse out a response.
-            match parse_ascii_response(&self.buf) {
+            match op(&self.buf) {
                 // We got a response.
                 Ok(Some((n, response))) => {
                     self.last_read_n = Some(n);
                     return Ok(response);
                 }
-                // Need more data.
-                Ok(None) => continue,
+                // We didn't have enough data, so loop around and try again.
+                Ok(None) => {
+                    needs_more_data = true;
+                    continue;
+                }
                 // Invalid data not matching the protocol.
                 Err(kind) => return Err(Status::Error(kind).into()),
             }
         }
     }
 
+    pub(crate) async fn get_read_write_response(&mut self) -> Result<Response, Error> {
+        self.drive_receive(parse_ascii_response).await
+    }
+
     pub(crate) async fn get_metadump_response(&mut self) -> Result<MetadumpResponse, Error> {
-        // If we serviced a previous request, advance our buffer forward.
-        if let Some(n) = self.last_read_n {
-            let _ = self.buf.split_to(n);
-        }
+        self.drive_receive(parse_ascii_metadump_response).await
+    }
 
-        loop {
-            // Try and parse out a response.
-            match parse_ascii_metadump_response(&self.buf) {
-                // We got a response.
-                Ok(Some((n, response))) => {
-                    self.last_read_n = Some(n);
-                    return Ok(response);
-                }
-                // Need more data.
-                Ok(None) => {}
-                // Invalid data not matching the protocol.
-                Err(kind) => return Err(Status::Error(kind).into()),
-            }
-
-            match self.conn {
-                Connection::Tcp(ref mut s) => {
-                    self.buf.reserve(1024);
-                    let n = s.read_buf(&mut self.buf).await?;
-                    if n == 0 {
-                        return Err(Error::Io(std::io::ErrorKind::UnexpectedEof.into()));
-                    }
-                }
-            }
-        }
+    pub(crate) async fn get_stats_response(&mut self) -> Result<StatsResponse, Error> {
+        self.drive_receive(parse_ascii_stats_response).await
     }
 
     /// Gets the given key.
     ///
-    /// If the key is found, [`Value`] is returned, describing the metadata and data of the key.
+    /// If the key is found, `Some(Value)` is returned, describing the metadata and data of the key.
     ///
     /// Otherwise, [`Error`] is returned.
-    pub async fn get<K: AsRef<[u8]>>(&mut self, key: K) -> Result<Value, Error> {
+    pub async fn get<K: AsRef<[u8]>>(&mut self, key: K) -> Result<Option<Value>, Error> {
         self.conn.write_all(b"get ").await?;
         self.conn.write_all(key.as_ref()).await?;
         self.conn.write_all(b"\r\n").await?;
         self.conn.flush().await?;
 
-        match self.get_normal_response().await? {
+        match self.get_read_write_response().await? {
+            Response::Status(Status::NotFound) => Ok(None),
             Response::Status(s) => Err(s.into()),
-            Response::Data(d) => d.ok_or(Status::NotFound.into()).and_then(|mut xs| {
-                if xs.len() != 1 {
-                    Err(Status::Error(ErrorKind::Protocol(None)).into())
-                } else {
-                    Ok(xs.remove(0))
-                }
-            }),
+            Response::Data(d) => d
+                .map(|mut items| {
+                    if items.len() != 1 {
+                        Err(Status::Error(ErrorKind::Protocol(None)).into())
+                    } else {
+                        Ok(items.remove(0))
+                    }
+                })
+                .transpose(),
             _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),
         }
     }
@@ -145,7 +141,7 @@ impl Client {
         self.conn.write_all(b"\r\n").await?;
         self.conn.flush().await?;
 
-        match self.get_normal_response().await? {
+        match self.get_read_write_response().await? {
             Response::Status(s) => Err(s.into()),
             Response::Data(d) => d.ok_or(Status::NotFound.into()),
             _ => Err(Status::Error(ErrorKind::Protocol(None)).into()),
@@ -190,7 +186,7 @@ impl Client {
         self.conn.write_all(b"\r\n").await?;
         self.conn.flush().await?;
 
-        match self.get_normal_response().await? {
+        match self.get_read_write_response().await? {
             Response::Status(Status::Stored) => Ok(()),
             Response::Status(s) => Err(s.into()),
             _ => Err(Status::Error(ErrorKind::Protocol(None)).into()),
@@ -234,6 +230,24 @@ impl Client {
             client: self,
             done: false,
         })
+    }
+
+    /// Collects statistics from the server.
+    ///
+    /// The statistics that may be returned are detailed in the protocol specification for
+    /// memcached, but all values returned by this method are returned as strings and are not
+    /// further interpreted or validated for conformity.
+    pub async fn stats(&mut self) -> Result<HashMap<String, String>, Error> {
+        let mut entries = HashMap::new();
+
+        self.conn.write_all(b"stats\r\n").await?;
+        self.conn.flush().await?;
+
+        while let StatsResponse::Entry(key, value) = self.get_stats_response().await? {
+            entries.insert(key, value);
+        }
+
+        Ok(entries)
     }
 }
 

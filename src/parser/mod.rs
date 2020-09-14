@@ -1,6 +1,6 @@
 use std::fmt;
 mod ascii;
-pub use ascii::{parse_ascii_metadump_response, parse_ascii_response};
+pub use ascii::{parse_ascii_metadump_response, parse_ascii_response, parse_ascii_stats_response};
 
 /// A value from memcached.
 #[derive(Clone, Debug, PartialEq)]
@@ -72,6 +72,15 @@ pub enum MetadumpResponse {
     /// A single key entry within the overall metadump operation.
     Entry(KeyMetadata),
     /// End of the metadump.
+    End,
+}
+
+/// Stats response.
+#[derive(Clone, Debug, PartialEq)]
+pub enum StatsResponse {
+    /// A stats entry, represented by a key and value.
+    Entry(String, String),
+    /// End of stats output.
     End,
 }
 

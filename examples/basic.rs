@@ -26,4 +26,12 @@ async fn main() {
         Ok(values) => println!("got values: {:?}", values),
         Err(status) => println!("got status during get_many: {:?}", status),
     }
+
+    match client.stats().await {
+        Ok(stats) => {
+            println!("got {} stat entries!", stats.len());
+            println!("curr items: {:?}", stats.get("curr_items"));
+        }
+        Err(e) => println!("error while getting stats: {:?}", e),
+    }
 }
