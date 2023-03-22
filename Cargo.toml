@@ -9,21 +9,21 @@ description = "An Tokio-based memcached client for Rust."
 keywords = ["memcached", "async"]
 
 [dependencies]
-bytes = "0.5"
+bytes = "1.4"
 nom = "5.0"
 dsn = "1.0"
 btoi = "0.4"
-pin-project = "0.4"
+pin-project = "1.0"
 futures = "0.3"
-tokio = { version = "0.2", default-features = false, features = ["dns", "io-util"] }
+tokio = { version = "1.26", default-features = false, features = ["io-util"] }
 async-stream = "0.3"
 
 [dev-dependencies]
 lazy_static = "1.4"
-tokio = { version = "0.2", features = ["full"] }
+tokio = { version = "1.26", features = ["full"] }
 
 [features]
-default = ["tcp"]
+default = []
 polonius = []
-tcp = ["tokio/tcp"]
-udp = ["tokio/udp"]
+tcp = []
+udp = []
