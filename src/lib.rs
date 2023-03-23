@@ -193,6 +193,45 @@ impl Client {
         }
     }
 
+    /// Add a key. If the value exists, Err(Protocol(NotStored)) is returned.
+    pub async fn add<K, V>(&mut self, key: K, value: V, ttl: Option<i64>, flags: Option<u32>) -> Result<(), Error>
+    where
+        K: AsRef<[u8]>,
+        V: AsRef<[u8]>,
+    {
+        let kr = key.as_ref();
+        let vr = value.as_ref();
+
+        self.conn.write_all(
+            &[b"add ", kr, b" ",
+              flags.unwrap_or(0).to_string().as_ref(), b" ",
+              ttl.unwrap_or(0).to_string().as_ref(), b" ",
+              vr.len().to_string().as_ref(),
+              b"\r\n",
+              vr,
+              b"\r\n"
+              ].concat()).await?;
+        self.conn.flush().await?;
+
+        match self.get_read_write_response().await? {
+            Response::Status(Status::Stored) => Ok(()),
+            Response::Status(s) => Err(s.into()),
+            _ => Err(Status::Error(ErrorKind::Protocol(None)).into()),
+        }
+    }
+
+    /// Delete a key.
+    pub async fn delete<K>(&mut self, key: K) -> Result<(), Error>
+    where
+        K: AsRef<[u8]>,
+    {
+        let kr = key.as_ref();
+
+        self.conn.write_all(&[b"delete ", kr, b" noreply\r\n"].concat()).await?;
+        self.conn.flush().await?;
+        Ok(())
+    }
+
     /// Gets the version of the server.
     ///
     /// If the version is retrieved successfully, `String` is returned containing the version
@@ -286,5 +325,21 @@ impl<'a> MetadumpIter<'a> {
             Ok(MetadumpResponse::Entry(km)) => Some(Ok(km)),
             Err(e) => Some(Err(e)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_add() {
+        let mut client = Client::new("localhost:47386").await.expect("Failed to connect to server");
+
+        let result = client.add("async-memcache-test-key", "value", None, None).await;
+
+        dbg!(&result);
+
+        assert!(result.is_ok());
     }
 }
