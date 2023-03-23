@@ -194,7 +194,13 @@ impl Client {
     }
 
     /// Add a key. If the value exists, Err(Protocol(NotStored)) is returned.
-    pub async fn add<K, V>(&mut self, key: K, value: V, ttl: Option<i64>, flags: Option<u32>) -> Result<(), Error>
+    pub async fn add<K, V>(
+        &mut self,
+        key: K,
+        value: V,
+        ttl: Option<i64>,
+        flags: Option<u32>,
+    ) -> Result<(), Error>
     where
         K: AsRef<[u8]>,
         V: AsRef<[u8]>,
@@ -202,15 +208,24 @@ impl Client {
         let kr = key.as_ref();
         let vr = value.as_ref();
 
-        self.conn.write_all(
-            &[b"add ", kr, b" ",
-              flags.unwrap_or(0).to_string().as_ref(), b" ",
-              ttl.unwrap_or(0).to_string().as_ref(), b" ",
-              vr.len().to_string().as_ref(),
-              b"\r\n",
-              vr,
-              b"\r\n"
-              ].concat()).await?;
+        self.conn
+            .write_all(
+                &[
+                    b"add ",
+                    kr,
+                    b" ",
+                    flags.unwrap_or(0).to_string().as_ref(),
+                    b" ",
+                    ttl.unwrap_or(0).to_string().as_ref(),
+                    b" ",
+                    vr.len().to_string().as_ref(),
+                    b"\r\n",
+                    vr,
+                    b"\r\n",
+                ]
+                .concat(),
+            )
+            .await?;
         self.conn.flush().await?;
 
         match self.get_read_write_response().await? {
@@ -220,16 +235,37 @@ impl Client {
         }
     }
 
-    /// Delete a key.
+    /// Delete a key but don't wait for a reply.
+    pub async fn delete_nr<K>(&mut self, key: K) -> Result<(), Error>
+    where
+        K: AsRef<[u8]>,
+    {
+        let kr = key.as_ref();
+
+        self.conn
+            .write_all(&[b"delete ", kr, b" noreply\r\n"].concat())
+            .await?;
+        self.conn.flush().await?;
+        Ok(())
+    }
+
+    /// Delete a key and wait for a reply
     pub async fn delete<K>(&mut self, key: K) -> Result<(), Error>
     where
         K: AsRef<[u8]>,
     {
         let kr = key.as_ref();
 
-        self.conn.write_all(&[b"delete ", kr, b" noreply\r\n"].concat()).await?;
+        self.conn
+            .write_all(&[b"delete ", kr, b"\r\n"].concat())
+            .await?;
         self.conn.flush().await?;
-        Ok(())
+
+        match self.get_read_write_response().await? {
+            Response::Status(Status::Deleted) => Ok(()),
+            Response::Status(s) => Err(s.into()),
+            _ => Err(Status::Error(ErrorKind::Protocol(None)).into()),
+        }
     }
 
     /// Gets the version of the server.
@@ -334,12 +370,45 @@ mod tests {
 
     #[tokio::test]
     async fn test_add() {
-        let mut client = Client::new("localhost:47386").await.expect("Failed to connect to server");
+        let mut client = Client::new("localhost:47386")
+            .await
+            .expect("Failed to connect to server");
 
-        let result = client.add("async-memcache-test-key", "value", None, None).await;
-
-        dbg!(&result);
+        let result = client
+            .add("async-memcache-test-key", "value", None, None)
+            .await;
 
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_delete() {
+        let mut client = Client::new("localhost:47386")
+            .await
+            .expect("Failed to connect to server");
+
+        let key = "async-memcache-test-key";
+
+        let value = rand::random::<u64>().to_string();
+        let result = client.set(key, &value, None, None).await;
+
+        assert!(result.is_ok(), "failed to set {}, {:?}", key, result);
+
+        let result = client.get(key).await;
+
+        assert!(result.is_ok(), "failed to get {}, {:?}", key, result);
+        let get_result = result.unwrap();
+
+        match get_result {
+            Some(get_value) => assert_eq!(
+                String::from_utf8(get_value.data).expect("failed to parse a string"),
+                value
+            ),
+            None => panic!("failed to get {}", key),
+        }
+
+        let result = client.delete(key).await;
+
+        assert!(result.is_ok(), "failed to delete {}, {:?}", key, result);
     }
 }
