@@ -236,7 +236,7 @@ impl Client {
     }
 
     /// Delete a key but don't wait for a reply.
-    pub async fn delete_nr<K>(&mut self, key: K) -> Result<(), Error>
+    pub async fn delete_no_reply<K>(&mut self, key: K) -> Result<(), Error>
     where
         K: AsRef<[u8]>,
     {
@@ -368,14 +368,19 @@ impl<'a> MetadumpIter<'a> {
 mod tests {
     use super::*;
 
+    const KEY: &str = "async-memcache-test-key";
+
     #[tokio::test]
     async fn test_add() {
         let mut client = Client::new("localhost:47386")
             .await
             .expect("Failed to connect to server");
 
+        let result = client.delete_no_reply(KEY).await;
+        assert!(result.is_ok(), "failed to delete {}, {:?}", KEY, result);
+
         let result = client
-            .add("async-memcache-test-key", "value", None, None)
+            .add(KEY, "value", None, None)
             .await;
 
         assert!(result.is_ok());
