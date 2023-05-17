@@ -280,10 +280,16 @@ impl Client {
         self.conn.flush().await?;
 
         let mut version = String::new();
-        let _ = self.conn.read_line(&mut version).await?;
+        let bytes = self.conn.read_line(&mut version).await?;
 
         // Peel off the leading "VERSION " header.
-        Ok(version.split_off(8))
+        if bytes >= 8 && version.is_char_boundary(8) {
+            Ok(version.split_off(8))
+        } else {
+            Err(Error::from(Status::Error(ErrorKind::Protocol(Some(
+                format!("Invalid response for `version` command: `{version}`"),
+            )))))
+        }
     }
 
     /// Dumps all keys from the server.
@@ -379,9 +385,7 @@ mod tests {
         let result = client.delete_no_reply(KEY).await;
         assert!(result.is_ok(), "failed to delete {}, {:?}", KEY, result);
 
-        let result = client
-            .add(KEY, "value", None, None)
-            .await;
+        let result = client.add(KEY, "value", None, None).await;
 
         assert!(result.is_ok());
     }
