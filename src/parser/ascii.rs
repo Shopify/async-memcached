@@ -71,7 +71,7 @@ fn is_key_char(chr: u8) -> bool {
 }
 
 fn is_signed_digit(chr: u8) -> bool {
-    chr == 45 || (chr >= 48 && chr <= 57)
+    chr == 45 || (48..=57).contains(&chr)
 }
 
 fn parse_ascii_value(buf: &[u8]) -> IResult<&[u8], Value> {
@@ -103,8 +103,8 @@ fn parse_ascii_value(buf: &[u8]) -> IResult<&[u8], Value> {
 
 fn parse_ascii_data(buf: &[u8]) -> IResult<&[u8], Response> {
     let values = map(
-        fold_many0(parse_ascii_value, None, |xs, x| {
-            let mut xs = xs.unwrap_or_else(|| Vec::new());
+        fold_many0(parse_ascii_value, || { None }, |xs, x| {
+            let mut xs: Vec<Value> = xs.unwrap_or_default();
             xs.push(x);
             Some(xs)
         }),
@@ -129,8 +129,8 @@ pub fn parse_ascii_response(buf: &[u8]) -> Result<Option<(usize, Response)>, Err
             Ok(Some((n, response)))
         }
         Err(nom::Err::Incomplete(_)) => Ok(None),
-        Err(nom::Err::Error((_, e))) | Err(nom::Err::Failure((_, e))) => {
-            Err(ErrorKind::Protocol(Some(e.description().to_string())))
+        Err(nom::Err::Error(e)) | Err(nom::Err::Failure(e)) => {
+            Err(ErrorKind::Protocol(Some(e.code.description().to_string())))
         }
     }
 }
@@ -223,8 +223,8 @@ pub fn parse_ascii_metadump_response(
             Ok(Some((n, response)))
         }
         Err(nom::Err::Incomplete(_)) => Ok(None),
-        Err(nom::Err::Error((_, e))) | Err(nom::Err::Failure((_, e))) => {
-            Err(ErrorKind::Protocol(Some(e.description().to_string())))
+        Err(nom::Err::Error(e)) | Err(nom::Err::Failure(e)) => {
+            Err(ErrorKind::Protocol(Some(e.code.description().to_string())))
         }
     }
 }
@@ -239,8 +239,8 @@ pub fn parse_ascii_stats_response(buf: &[u8]) -> Result<Option<(usize, StatsResp
             Ok(Some((n, response)))
         }
         Err(nom::Err::Incomplete(_)) => Ok(None),
-        Err(nom::Err::Error((_, e))) | Err(nom::Err::Failure((_, e))) => {
-            Err(ErrorKind::Protocol(Some(e.description().to_string())))
+        Err(nom::Err::Error(e)) | Err(nom::Err::Failure(e)) => {
+            Err(ErrorKind::Protocol(Some(e.code.description().to_string())))
         }
     }
 }
