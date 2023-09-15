@@ -15,9 +15,9 @@ pub enum Connection {
 impl AsyncRead for Connection {
     fn poll_read(
         self: Pin<&mut Self>,
-        cx: &mut Context,
-        buf: &mut [u8],
-    ) -> Poll<io::Result<usize>> {
+        cx: &mut Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
         match self.project() {
             ConnectionProjection::Tcp(s) => s.poll_read(cx, buf),
         }
