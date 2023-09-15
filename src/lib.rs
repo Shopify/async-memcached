@@ -53,7 +53,7 @@ impl Client {
 
         let mut needs_more_data = false;
         loop {
-            if self.buf.len() == 0 || needs_more_data {
+            if self.buf.is_empty() || needs_more_data {
                 match self.conn {
                     Connection::Tcp(ref mut s) => {
                         self.buf.reserve(1024);

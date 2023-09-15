@@ -10,7 +10,7 @@ keywords = ["memcached", "async"]
 
 [dependencies]
 bytes = "1.4"
-nom = "5.0"
+nom = "7.1"
 dsn = "1.0"
 btoi = "0.4"
 pin-project = "1.0"
