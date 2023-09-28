@@ -7,6 +7,7 @@ use tokio::net::TcpStream;
 
 use crate::Error;
 
+#[derive(Debug)]
 #[pin_project(project = ConnectionProjection)]
 pub enum Connection {
     Tcp(#[pin] BufReader<BufWriter<TcpStream>>),

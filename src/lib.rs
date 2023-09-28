@@ -21,6 +21,7 @@ pub use self::parser::{ErrorKind, KeyMetadata, MetadumpResponse, StatsResponse, 
 ///
 /// [`Client`] is mapped one-to-one with a given connection to a memcached server, and provides a
 /// high-level API for executing commands on that connection.
+#[derive(Debug)]
 pub struct Client {
     buf: BytesMut,
     last_read_n: Option<usize>,

@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+- Implement `Debug` trait for `Client` and `Connection`.
+
 ## [0.1.6] - 2020-09-14
 ### Changed
 - Changed `Client::get` to return `Option<Value>` in the non-error case to indicate hit vs miss.
