@@ -14,4 +14,4 @@ longer actively being improved.
 - [ ] TLS
 
 ## License
-MIT
+MIT.
