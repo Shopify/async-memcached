@@ -30,8 +30,9 @@ pub struct Client {
 impl Client {
     /// Creates a new [`Client`] based on the given data source string.
     ///
-    /// Currently only supports TCP connections, and as such, the DSN should be in the format of
-    /// `<host of IP>:<port>`.
+    /// Supports UNIX domain sockets and TCP connections.
+    /// For TCP: the DSN should be in the format of `tcp://<ip>:<port>`.
+    /// For UNIX: the DSN should be in the format of `unix://<path>`.
     pub async fn new<S: AsRef<str>>(dsn: S) -> Result<Client, Error> {
         let connection = Connection::new(dsn).await?;
 
@@ -56,6 +57,13 @@ impl Client {
             if self.buf.is_empty() || needs_more_data {
                 match self.conn {
                     Connection::Tcp(ref mut s) => {
+                        self.buf.reserve(1024);
+                        let n = s.read_buf(&mut self.buf).await?;
+                        if n == 0 {
+                            return Err(Error::Io(std::io::ErrorKind::UnexpectedEof.into()));
+                        }
+                    }
+                    Connection::Unix(ref mut s) => {
                         self.buf.reserve(1024);
                         let n = s.read_buf(&mut self.buf).await?;
                         if n == 0 {

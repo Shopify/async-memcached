@@ -4,6 +4,8 @@ use std::{fmt, io};
 /// Error type for [`Client`](crate::Client) operations.
 #[derive(Debug)]
 pub enum Error {
+    /// Connection error.
+    Connect(io::Error),
     /// I/O-related error.
     Io(io::Error),
     /// A protocol-level error i.e. a failed operation or message that
@@ -23,6 +25,7 @@ impl std::error::Error for Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            Self::Connect(e) => write!(f, "connect: {}", e),
             Self::Io(e) => write!(f, "io: {}", e),
             Self::Protocol(e) => write!(f, "protocol: {}", e),
         }
