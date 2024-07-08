@@ -74,8 +74,10 @@ impl Connection {
             ))
         })?;
 
+        println!("Connecting to {:?}", dsn);
+
         match dsn.scheme() {
-            "tcp" => TcpStream::connect(&*dsn.socket_addrs(|| None)?)
+            "tcp" | "" => TcpStream::connect(&*dsn.socket_addrs(|| None)?)
                 .await
                 .map(|c| Connection::Tcp(BufReader::new(BufWriter::new(c))))
                 .map_err(Error::Io),
