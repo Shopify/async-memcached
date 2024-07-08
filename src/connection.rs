@@ -8,6 +8,7 @@ use tokio::net::{TcpStream, UnixStream};
 use crate::Error;
 
 #[pin_project(project = ConnectionProjection)]
+#[derive(Debug)]
 pub enum Connection {
     Tcp(#[pin] BufReader<BufWriter<TcpStream>>),
     Unix(#[pin] BufReader<BufWriter<UnixStream>>),
@@ -70,25 +71,78 @@ impl Connection {
         let dsn = url::Url::parse(dsn.as_ref()).map_err(|e| {
             Error::Connect(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!("Failed to parse URL: {}", e),
+                format!("failed to parse DSN: {}", e),
             ))
         })?;
 
-        println!("Connecting to {:?}", dsn);
-
         match dsn.scheme() {
-            "tcp" | "" => TcpStream::connect(&*dsn.socket_addrs(|| None)?)
-                .await
-                .map(|c| Connection::Tcp(BufReader::new(BufWriter::new(c))))
-                .map_err(Error::Io),
+            "tcp" => {
+                let addr = match dsn.socket_addrs(|| None) {
+                    Ok(dsn) => dsn.into_iter().next().unwrap(),
+                    Err(e) => {
+                        return Err(Error::Connect(io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            format!("failed to resolve socket address: {}", e),
+                        )))
+                    }
+                };
+                TcpStream::connect(addr)
+                    .await
+                    .map(|c| Connection::Tcp(BufReader::new(BufWriter::new(c))))
+                    .map_err(Error::Connect)
+            }
             "unix" => UnixStream::connect(dsn.path())
                 .await
                 .map(|c| Connection::Unix(BufReader::new(BufWriter::new(c))))
-                .map_err(Error::Io),
+                .map_err(Error::Connect),
             _ => Err(Error::Connect(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "invalid scheme",
             ))),
         }
+    }
+}
+
+mod tests {
+    #[tokio::test]
+    async fn test_tcp_connection() {
+        let _ = super::Connection::new("tcp://localhost:11211")
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_unix_connection() {
+        let _ = super::Connection::new("unix:///tmp/memcached.sock")
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_invalid_scheme() {
+        let err = super::Connection::new("foo://localhost:11211")
+            .await
+            .unwrap_err();
+        assert!(matches!(err, super::Error::Connect(_)));
+    }
+
+    #[tokio::test]
+    async fn test_invalid_url() {
+        let err = super::Connection::new("tcp://localhost").await.unwrap_err();
+        assert!(matches!(err, super::Error::Connect(_)));
+    }
+
+    #[tokio::test]
+    async fn test_invalid_unix_url() {
+        let err = super::Connection::new("unix://localhost")
+            .await
+            .unwrap_err();
+        assert!(matches!(err, super::Error::Connect(_)));
+    }
+
+    #[tokio::test]
+    async fn test_invalid_unix_path() {
+        let err = super::Connection::new("unix://").await.unwrap_err();
+        assert!(matches!(err, super::Error::Connect(_)));
     }
 }
