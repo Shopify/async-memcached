@@ -4,7 +4,8 @@ use std::{fmt, io};
 /// Error type for [`Client`](crate::Client) operations.
 #[derive(Debug)]
 pub enum Error {
-    /// Connection error.
+    /// Connect error.
+    /// Useful for distinguishing between transitive I/O errors and connection errors.
     Connect(io::Error),
     /// I/O-related error.
     Io(io::Error),

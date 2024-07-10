@@ -68,44 +68,65 @@ impl AsyncBufRead for Connection {
 
 impl Connection {
     pub async fn new<S: AsRef<str>>(dsn: S) -> Result<Connection, Error> {
-        let dsn = url::Url::parse(dsn.as_ref()).map_err(|e| {
+        let url = url::Url::parse(dsn.as_ref()).map_err(|e| {
             Error::Connect(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 format!("failed to parse DSN: {}", e),
             ))
         })?;
 
-        match dsn.scheme() {
-            "tcp" => {
-                let addr = match dsn.socket_addrs(|| None) {
-                    Ok(dsn) => dsn.into_iter().next().unwrap(),
-                    Err(e) => {
-                        return Err(Error::Connect(io::Error::new(
-                            io::ErrorKind::InvalidInput,
-                            format!("failed to resolve socket address: {}", e),
-                        )))
-                    }
-                };
-                TcpStream::connect(addr)
-                    .await
-                    .map(|c| Connection::Tcp(BufReader::new(BufWriter::new(c))))
-                    .map_err(Error::Connect)
-            }
-            "unix" => UnixStream::connect(dsn.path())
+        match url.scheme() {
+            "unix" => UnixStream::connect(url.path())
                 .await
                 .map(|c| Connection::Unix(BufReader::new(BufWriter::new(c))))
                 .map_err(Error::Connect),
-            _ => Err(Error::Connect(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "invalid scheme",
-            ))),
+            "tcp" => {
+                Self::connect_tcp(&format!(
+                    "{}:{}",
+                    url.host_str().ok_or_else(|| {
+                        Error::Connect(io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            "no host found in DSN",
+                        ))
+                    })?,
+                    url.port().unwrap_or(11211)
+                ))
+                .await
+            }
+            _ => Self::connect_tcp(dsn.as_ref()).await,
         }
+    }
+
+    async fn connect_tcp(dsn: &str) -> Result<Connection, Error> {
+        let addrs = tokio::net::lookup_host(dsn).await.map_err(|e| {
+            Error::Connect(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("failed to resolve host: {}", e),
+            ))
+        })?;
+
+        // take the first result; if there are multiple, we just use the first one
+        let addr = addrs.into_iter().next().ok_or_else(|| {
+            Error::Connect(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "no address found in DSN",
+            ))
+        })?;
+        TcpStream::connect(addr)
+            .await
+            .map(|c| Connection::Tcp(BufReader::new(BufWriter::new(c))))
+            .map_err(Error::Connect)
     }
 }
 
 mod tests {
     #[tokio::test]
-    async fn test_tcp_connection() {
+    async fn test_tcp_connection_without_scheme() {
+        let _ = super::Connection::new("localhost:11211").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_tcp_connection_with_scheme() {
         let _ = super::Connection::new("tcp://localhost:11211")
             .await
             .unwrap();

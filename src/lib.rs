@@ -31,7 +31,7 @@ impl Client {
     /// Creates a new [`Client`] based on the given data source string.
     ///
     /// Supports UNIX domain sockets and TCP connections.
-    /// For TCP: the DSN should be in the format of `tcp://<ip>:<port>`.
+    /// For TCP: the DSN should be in the format of `tcp://<IP>:<port>` or `<IP>:<port>`.
     /// For UNIX: the DSN should be in the format of `unix://<path>`.
     pub async fn new<S: AsRef<str>>(dsn: S) -> Result<Client, Error> {
         let connection = Connection::new(dsn).await?;
