@@ -66,9 +66,18 @@ impl AsyncBufRead for Connection {
     }
 }
 
-impl Connection {
-    pub async fn new<S: AsRef<str>>(dsn: S) -> Result<Connection, Error> {
-        let url = url::Url::parse(dsn.as_ref()).map_err(|e| {
+#[derive(Debug, PartialEq)]
+enum Addr {
+    Tcp(String),
+    Unix(String),
+    Unknown(String),
+}
+
+impl Addr {
+    const DEFAULT_PORT: u16 = 11211;
+
+    fn parse(dsn: &str) -> Result<Self, Error> {
+        let url = url::Url::parse(dsn).map_err(|e| {
             Error::Connect(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 format!("failed to parse DSN: {}", e),
@@ -76,94 +85,70 @@ impl Connection {
         })?;
 
         match url.scheme() {
-            "unix" => UnixStream::connect(url.path())
-                .await
-                .map(|c| Connection::Unix(BufReader::new(BufWriter::new(c))))
-                .map_err(Error::Connect),
-            "tcp" => {
-                Self::connect_tcp(&format!(
-                    "{}:{}",
-                    url.host_str().ok_or_else(|| {
-                        Error::Connect(io::Error::new(
-                            io::ErrorKind::InvalidInput,
-                            "no host found in DSN",
-                        ))
-                    })?,
-                    url.port().unwrap_or(11211)
-                ))
-                .await
-            }
-            _ => Self::connect_tcp(dsn.as_ref()).await,
+            "unix" => Ok(Addr::Unix(url.path().to_string())),
+            "tcp" => Ok(Addr::Tcp(format!(
+                "{}:{}",
+                url.host_str().ok_or_else(|| {
+                    Error::Connect(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "no host found in DSN",
+                    ))
+                })?,
+                url.port().unwrap_or(Self::DEFAULT_PORT)
+            ))),
+            _ => Ok(Addr::Unknown(dsn.to_string())),
         }
-    }
-
-    async fn connect_tcp(dsn: &str) -> Result<Connection, Error> {
-        let addrs = tokio::net::lookup_host(dsn).await.map_err(|e| {
-            Error::Connect(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("failed to resolve host: {}", e),
-            ))
-        })?;
-
-        // take the first result; if there are multiple, we just use the first one
-        let addr = addrs.into_iter().next().ok_or_else(|| {
-            Error::Connect(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "no address found in DSN",
-            ))
-        })?;
-        TcpStream::connect(addr)
-            .await
-            .map(|c| Connection::Tcp(BufReader::new(BufWriter::new(c))))
-            .map_err(Error::Connect)
     }
 }
 
+impl Connection {
+    pub async fn new<S: AsRef<str>>(dsn: S) -> Result<Self, Error> {
+        match Addr::parse(dsn.as_ref())? {
+            Addr::Unix(path) => UnixStream::connect(path)
+                .await
+                .map(|c| Connection::Unix(BufReader::new(BufWriter::new(c))))
+                .map_err(Error::Connect),
+            Addr::Tcp(url) | Addr::Unknown(url) => TcpStream::connect(url)
+                .await
+                .map(|c| Connection::Tcp(BufReader::new(BufWriter::new(c))))
+                .map_err(Error::Connect),
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
+    use super::{Addr, Error};
+
     #[tokio::test]
-    async fn test_tcp_connection_without_scheme() {
-        let _ = super::Connection::new("localhost:11211").await.unwrap();
+    async fn test_unknown_scheme() {
+        assert_eq!(
+            Addr::parse("localhost:11211").unwrap(),
+            Addr::Unknown("localhost:11211".to_string())
+        )
     }
 
     #[tokio::test]
-    async fn test_tcp_connection_with_scheme() {
-        let _ = super::Connection::new("tcp://localhost:11211")
-            .await
-            .unwrap();
+    async fn test_tcp_scheme() {
+        assert_eq!(
+            Addr::parse("tcp://localhost:11211").unwrap(),
+            Addr::Tcp("localhost:11211".to_string())
+        )
     }
 
     #[tokio::test]
-    async fn test_unix_connection() {
-        let _ = super::Connection::new("unix:///tmp/memcached.sock")
-            .await
-            .unwrap();
-    }
-
-    #[tokio::test]
-    async fn test_invalid_scheme() {
-        let err = super::Connection::new("foo://localhost:11211")
-            .await
-            .unwrap_err();
-        assert!(matches!(err, super::Error::Connect(_)));
+    async fn test_unix_scheme() {
+        assert_eq!(
+            Addr::parse("unix:///tmp/memcached.sock").unwrap(),
+            Addr::Unix("/tmp/memcached.sock".to_string())
+        )
     }
 
     #[tokio::test]
     async fn test_invalid_url() {
-        let err = super::Connection::new("tcp://localhost").await.unwrap_err();
-        assert!(matches!(err, super::Error::Connect(_)));
-    }
-
-    #[tokio::test]
-    async fn test_invalid_unix_url() {
-        let err = super::Connection::new("unix://localhost")
-            .await
-            .unwrap_err();
-        assert!(matches!(err, super::Error::Connect(_)));
-    }
-
-    #[tokio::test]
-    async fn test_invalid_unix_path() {
-        let err = super::Connection::new("unix://").await.unwrap_err();
-        assert!(matches!(err, super::Error::Connect(_)));
+        assert!(matches!(
+            Addr::parse("tcp://").unwrap_err(),
+            Error::Connect(_)
+        ));
     }
 }
