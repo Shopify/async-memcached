@@ -376,6 +376,7 @@ mod tests {
 
     const KEY: &str = "async-memcache-test-key";
 
+    #[ignore = "Relies on a running memcached server"]
     #[tokio::test]
     async fn test_add() {
         let mut client = Client::new("localhost:47386")
@@ -390,6 +391,7 @@ mod tests {
         assert!(result.is_ok());
     }
 
+    #[ignore = "Relies on a running memcached server"]
     #[tokio::test]
     async fn test_delete() {
         let mut client = Client::new("localhost:47386")

@@ -28,3 +28,7 @@ default = []
 polonius = []
 tcp = []
 udp = []
+
+[[example]]
+name = "basic"
+path = "examples/basic.rs"
