@@ -123,24 +123,24 @@ mod tests {
     #[tokio::test]
     async fn test_unknown_scheme() {
         assert_eq!(
-            Addr::parse("localhost:11211").unwrap(),
-            Addr::Unknown("localhost:11211".to_string())
+            Addr::parse("localhost:11211"),
+            Ok(Addr::Unknown("localhost:11211".to_string()))
         )
     }
 
     #[tokio::test]
     async fn test_tcp_scheme() {
         assert_eq!(
-            Addr::parse("tcp://localhost:11211").unwrap(),
-            Addr::Tcp("localhost:11211".to_string())
+            Addr::parse("tcp://localhost:11211"),
+            Ok(Addr::Tcp("localhost:11211".to_string()))
         )
     }
 
     #[tokio::test]
     async fn test_unix_scheme() {
         assert_eq!(
-            Addr::parse("unix:///tmp/memcached.sock").unwrap(),
-            Addr::Unix("/tmp/memcached.sock".to_string())
+            Addr::parse("unix:///tmp/memcached.sock"),
+            Ok(Addr::Unix("/tmp/memcached.sock".to_string()))
         )
     }
 

@@ -14,6 +14,17 @@ pub enum Error {
     Protocol(Status),
 }
 
+impl PartialEq for Error {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Connect(e1), Self::Connect(e2)) => e1.kind() == e2.kind(),
+            (Self::Io(e1), Self::Io(e2)) => e1.kind() == e2.kind(),
+            (Self::Protocol(s1), Self::Protocol(s2)) => s1 == s2,
+            _ => false,
+        }
+    }
+}
+
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
