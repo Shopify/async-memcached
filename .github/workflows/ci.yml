@@ -24,7 +24,7 @@ jobs:
         run: cargo clippy --tests --all-features
       - name: Run clippy (benches)
         run: cargo clippy --benches --all-features
-      - name: Run clipping (examples)
+      - name: Run clippy (examples)
         run: cargo clippy --examples --all-features
 
   test:
