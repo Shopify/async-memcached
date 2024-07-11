@@ -32,4 +32,4 @@ udp = []
 
 [[example]]
 name = "basic"
-path = "examples/basic.rs"
+path = "examples/tcp.rs"
