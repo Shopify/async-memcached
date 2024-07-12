@@ -1,6 +1,6 @@
 [package]
 name = "async-memcached"
-version = "0.1.7"
+version = "0.2.0"
 authors = ["Toby Lawrence <toby@nuclearfurnace.com>"]
 edition = "2018"
 readme = "README.md"
