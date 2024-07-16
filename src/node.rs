@@ -372,8 +372,96 @@ impl<'a> MetadumpIter<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::{TcpListener, TcpStream};
+    use std::io::{BufRead, Write};
 
     const KEY: &str = "async-memcache-test-key";
+    const EMPTY_KEY: &str = "no-value-here";
+    const SERVER_ADDRESS: &str = "localhost:47386";
+    
+    #[ctor::ctor]
+    fn init() {
+        let listener = TcpListener::bind(SERVER_ADDRESS).expect("Failed to bind listener");
+
+        // accept connections and process them serially in a background thread
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let stream = stream.expect("Failed to accept connection");
+                std::thread::spawn(move || {
+                    handle_connection(stream);
+                });
+            }
+        });
+    }
+
+    // mocks out the commands that the memcached server will respond to, but does not mock out
+    // the functionality of the server itself.
+    fn handle_connection(mut stream: TcpStream) {
+        let cloned_stream = stream.try_clone().expect("Failed to clone stream");
+        let mut reader = std::io::BufReader::new(&cloned_stream);
+
+        loop {
+            let mut buffer = String::new();
+            reader.read_line(&mut buffer).expect("Failed to read line");
+
+            if buffer.is_empty() {
+                return;
+            }
+
+            let parts: Vec<&str> = buffer.split_whitespace().collect();
+            let command = parts[0];
+            let key = parts[1];
+
+            match command {
+                "get" => {
+                    if key == EMPTY_KEY {
+                        let response = "END\r\n";
+                        stream.write_all(response.as_bytes()).expect("Failed to write response");
+                        return;
+                    }
+
+                    let response = format!("VALUE {} 0 5\r\nvalue\r\nEND\r\n", key);
+                    stream.write_all(response.as_bytes()).expect("Failed to write response");
+                }
+                "set" => {
+                    let mut value = String::new();
+                    reader.read_line(&mut value).expect("Failed to read line");
+
+                    let response = "STORED\r\n";
+                    stream.write_all(response.as_bytes()).expect("Failed to write response");
+                }
+                "add" => {
+                    let mut value = String::new();
+                    reader.read_line(&mut value).expect("Failed to read line");
+
+                    let response = "STORED\r\n";
+                    stream.write_all(response.as_bytes()).expect("Failed to write response");
+                }
+                "delete" => {
+                    let response = "DELETED\r\n";
+                    stream.write_all(response.as_bytes()).expect("Failed to write response");
+                }
+                "version" => {
+                    let response = "VERSION 1.6.7\r\n";
+                    stream.write_all(response.as_bytes()).expect("Failed to write response");
+                }
+                "metadump" => {
+                    let response = "END\r\n";
+                    stream.write_all(response.as_bytes()).expect("Failed to write response");
+                }
+                "stats" => {
+                    let response = "STAT pid 1234\r\nEND\r\n";
+                    stream.write_all(response.as_bytes()).expect("Failed to write response");
+                }
+                _ => {
+                    let response = "ERROR\r\n";
+                    stream.write_all(response.as_bytes()).expect("Failed to write response");
+                }
+            }
+
+            stream.flush().expect("Failed to flush stream");
+        }
+    }
 
     #[tokio::test]
     async fn test_add() {
@@ -381,12 +469,12 @@ mod tests {
             .await
             .expect("Failed to connect to server");
 
-        let result = node.delete_no_reply(KEY).await;
+        let result = node.delete(KEY).await;
         assert!(result.is_ok(), "failed to delete {}, {:?}", KEY, result);
 
         let result = node.add(KEY, "value", None, None).await;
 
-        assert!(result.is_ok());
+        assert!(result.is_ok(), "failed to add {}, {:?}", KEY, result);
     }
 
     #[tokio::test]
@@ -410,7 +498,7 @@ mod tests {
         match get_result {
             Some(get_value) => assert_eq!(
                 String::from_utf8(get_value.data).expect("failed to parse a string"),
-                value
+                "value" // mocked value instead of random value
             ),
             None => panic!("failed to get {}", key),
         }

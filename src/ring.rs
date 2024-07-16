@@ -67,14 +67,10 @@ impl Ring {
         })
     }
 
-    pub fn server_for<K: AsRef<[u8]>>(&mut self, key: K) -> &mut Node {
-        if self.servers.len() == 1 {
-            return &mut self.servers[0];
-        }
-
+    pub fn server_index_for<K: AsRef<[u8]>>(&self, key: K) -> usize {
         let hash = hash_for(key);
         let entry = self.continuum.binary_search_by(|n| n.value.cmp(&hash));
-        let node = match entry {
+        match entry {
             Ok(index) => self.continuum[index].node_index,
             Err(index) => {
                 if index == self.continuum.len() {
@@ -83,9 +79,17 @@ impl Ring {
                     self.continuum[index].node_index
                 }
             }
-        };
+        }
+    }
 
-        &mut self.servers[node]
+    pub fn server_for<K: AsRef<[u8]>>(&mut self, key: K) -> &mut Node {
+        if self.servers.len() == 1 {
+            return &mut self.servers[0];
+        }
+
+        let node_index = self.server_index_for(key);
+
+        &mut self.servers[node_index]
     }
 }
 
