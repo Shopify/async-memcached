@@ -93,11 +93,11 @@ pub struct Client {
 impl Client {
     /// Creates a new [`Client`] based on the given list of data source strings.
     ///
-    /// Currently only supports TCP connections, and as such, the DSN should be in the format of
-    /// `<host of IP>:<port>`.
+    /// Supports UNIX domain sockets and TCP connections.
+    /// For TCP: the DSN should be in the format of `tcp://<IP>:<port>` or `<IP>:<port>`.
+    /// For UNIX: the DSN should be in the format of `unix://<path>`.
     pub async fn new<S: AsRef<str>>(node_dsns: Vec<S>) -> Result<Client, Error> {
         let ring = Ring::new(node_dsns).await?;
-
         Ok(Client { ring })
     }
 
@@ -236,7 +236,7 @@ mod tests {
 
     const KEY: &str = "async-memcache-test-key";
     const EMPTY_KEY: &str = "no-value-here";
-    const SERVER_ADDRESSES: [&str; 2] = ["localhost:1234", "localhost:1235"];
+    const SERVER_ADDRESSES: [&str; 2] = ["tcp://localhost:1234", "tcp://localhost:1235"];
 
     #[ctor::ctor]
     fn init() {
@@ -258,63 +258,66 @@ mod tests {
     // Used to mock out the memcached server responses to test the client connecting to multiple
     // nodes without needing to run a number of real memcached servers in the background.
     fn handle_connection(mut stream: TcpStream) {
+        let cloned_stream = stream.try_clone().expect("Failed to clone stream");
         let mut reader = std::io::BufReader::new(&mut stream);
 
-        let mut buffer = String::new();
-        reader.read_line(&mut buffer).expect("Failed to read line");
+        loop {
+            let mut buffer = String::new();
+            reader.read_line(&mut buffer).expect("Failed to read line");
 
-        if buffer.is_empty() {
-            return;
-        }
+            if buffer.is_empty() {
+                return;
+            }
 
-        let parts: Vec<&str> = buffer.split_whitespace().collect();
-        let command = parts[0];
-        let key = parts[1];
+            let parts: Vec<&str> = buffer.split_whitespace().collect();
+            let command = parts[0];
+            let key = parts[1];
 
-        match command {
-            "get" => {
-                if key == EMPTY_KEY {
+            match command {
+                "get" => {
+                    if key == EMPTY_KEY {
+                        let response = "END\r\n";
+                        stream.write_all(response.as_bytes()).expect("Failed to write response");
+                        return;
+                    }
+
+                    let response = format!("VALUE {} 0 5\r\nvalue\r\nEND\r\n", key);
+                    stream.write_all(response.as_bytes()).expect("Failed to write response");
+                }
+                "set" => {
+                    let mut value = String::new();
+                    reader.read_line(&mut value).expect("Failed to read line");
+
+                    let response = "STORED\r\n";
+                    stream.write_all(response.as_bytes()).expect("Failed to write response");
+                }
+                "add" => {
+                    let mut value = String::new();
+                    reader.read_line(&mut value).expect("Failed to read line");
+
+                    let response = "STORED\r\n";
+                    stream.write_all(response.as_bytes()).expect("Failed to write response");
+                }
+                "delete" => {
+                    let response = "DELETED\r\n";
+                    stream.write_all(response.as_bytes()).expect("Failed to write response");
+                }
+                "version" => {
+                    let response = "VERSION 1.6.7\r\n";
+                    stream.write_all(response.as_bytes()).expect("Failed to write response");
+                }
+                "metadump" => {
                     let response = "END\r\n";
                     stream.write_all(response.as_bytes()).expect("Failed to write response");
-                    return;
                 }
-
-                let response = format!("VALUE {} 0 5\r\nvalue\r\nEND\r\n", key);
-                stream.write_all(response.as_bytes()).expect("Failed to write response");
-            }
-            "set" => {
-                let mut value = String::new();
-                reader.read_line(&mut value).expect("Failed to read line");
-                
-                let response = "STORED\r\n";
-                stream.write_all(response.as_bytes()).expect("Failed to write response");
-            }
-            "add" => {
-                let mut value = String::new();
-                reader.read_line(&mut value).expect("Failed to read line");
-                
-                let response = "STORED\r\n";
-                stream.write_all(response.as_bytes()).expect("Failed to write response");
-            }
-            "delete" => {
-                let response = "DELETED\r\n";
-                stream.write_all(response.as_bytes()).expect("Failed to write response");
-            }
-            "version" => {
-                let response = "VERSION 1.6.7\r\n";
-                stream.write_all(response.as_bytes()).expect("Failed to write response");
-            }
-            "metadump" => {
-                let response = "END\r\n";
-                stream.write_all(response.as_bytes()).expect("Failed to write response");
-            }
-            "stats" => {
-                let response = "STAT pid 1234\r\nEND\r\n";
-                stream.write_all(response.as_bytes()).expect("Failed to write response");
-            }
-            _ => {
-                let response = "ERROR\r\n";
-                stream.write_all(response.as_bytes()).expect("Failed to write response");
+                "stats" => {
+                    let response = "STAT pid 1234\r\nEND\r\n";
+                    stream.write_all(response.as_bytes()).expect("Failed to write response");
+                }
+                _ => {
+                    let response = "ERROR\r\n";
+                    stream.write_all(response.as_bytes()).expect("Failed to write response");
+                }
             }
         }
     }

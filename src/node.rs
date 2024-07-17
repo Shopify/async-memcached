@@ -28,8 +28,9 @@ pub struct Node {
 impl Node {
     /// Creates a new [`Node`] based on the given data source string.
     ///
-    /// Currently only supports TCP connections, and as such, the DSN should be in the format of
-    /// `<host of IP>:<port>`.
+    /// Supports UNIX domain sockets and TCP connections.
+    /// For TCP: the DSN should be in the format of `tcp://<IP>:<port>` or `<IP>:<port>`.
+    /// For UNIX: the DSN should be in the format of `unix://<path>`.
     pub async fn new<S: AsRef<str>>(dsn: S) -> Result<Node, Error> {
         let connection = Connection::new(dsn.as_ref()).await?;
 
@@ -55,6 +56,13 @@ impl Node {
             if self.buf.is_empty() || needs_more_data {
                 match self.conn {
                     Connection::Tcp(ref mut s) => {
+                        self.buf.reserve(1024);
+                        let n = s.read_buf(&mut self.buf).await?;
+                        if n == 0 {
+                            return Err(Error::Io(std::io::ErrorKind::UnexpectedEof.into()));
+                        }
+                    }
+                    Connection::Unix(ref mut s) => {
                         self.buf.reserve(1024);
                         let n = s.read_buf(&mut self.buf).await?;
                         if n == 0 {
@@ -377,7 +385,7 @@ mod tests {
 
     const KEY: &str = "async-memcache-test-key";
     const EMPTY_KEY: &str = "no-value-here";
-    const SERVER_ADDRESS: &str = "localhost:47386";
+    const SERVER_ADDRESS: &str = "tcp://localhost:47386";
     
     #[ctor::ctor]
     fn init() {

@@ -103,11 +103,15 @@ fn parse_ascii_value(buf: &[u8]) -> IResult<&[u8], Value> {
 
 fn parse_ascii_data(buf: &[u8]) -> IResult<&[u8], Response> {
     let values = map(
-        fold_many0(parse_ascii_value, || { None }, |xs, x| {
-            let mut xs: Vec<Value> = xs.unwrap_or_default();
-            xs.push(x);
-            Some(xs)
-        }),
+        fold_many0(
+            parse_ascii_value,
+            || None,
+            |xs, x| {
+                let mut xs: Vec<Value> = xs.unwrap_or_default();
+                xs.push(x);
+                Some(xs)
+            },
+        ),
         Response::Data,
     );
 
