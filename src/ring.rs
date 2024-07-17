@@ -53,7 +53,10 @@ impl Extend<Result<Node, Error>> for NodesResult {
 
 impl Ring {
     pub async fn new<S: AsRef<str>>(server_addrs: Vec<S>) -> Result<Ring, Error> {
-        let servers = stream::iter(&server_addrs).then(|s| Node::new(s)).collect::<NodesResult>().await;
+        let servers = stream::iter(&server_addrs)
+            .then(Node::new)
+            .collect::<NodesResult>()
+            .await;
         let servers = match servers.0 {
             Ok(servers) => servers,
             Err(e) => return Err(e),
@@ -61,10 +64,7 @@ impl Ring {
 
         let continuum = build_continuum(&servers).await?;
 
-        Ok(Ring {
-            servers,
-            continuum,
-        })
+        Ok(Ring { servers, continuum })
     }
 
     pub fn server_index_for<K: AsRef<[u8]>>(&self, key: K) -> usize {
@@ -102,17 +102,20 @@ fn hash_for<K: AsRef<[u8]>>(key: K) -> u32 {
     crc32fast::hash(key.as_ref())
 }
 
-async fn build_continuum(servers: &Vec<Node>) -> Result<Vec<Entry>, Error> {
+async fn build_continuum(servers: &[Node]) -> Result<Vec<Entry>, Error> {
     let mut continuum = Vec::new();
 
     for (i, server) in servers.iter().enumerate() {
         // create a continuum of points for each server to allow for a more even distribution
         // across the ring and to reduce the impact of a single server failing or nodes scaling
-        for cont_idx in 0..entry_count_for(&server) {
+        for cont_idx in 0..entry_count_for(server) {
             // blake3 chosen here because it is faster than sha1 and sha256, and has a low collision rate
             let hash = blake3::hash(format!("{}:{}", server.name, cont_idx).as_ref()).to_string();
             let value = u32::from_str_radix(&hash[0..7], 16).unwrap();
-            continuum.push(Entry { value, node_index: i });
+            continuum.push(Entry {
+                value,
+                node_index: i,
+            });
         }
     }
 

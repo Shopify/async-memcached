@@ -1,16 +1,16 @@
 //! A Tokio-based memcached node.
 #![deny(warnings, missing_docs)]
-use std::collections::HashMap;
 use futures::stream::{self, StreamExt};
-use std::iter::Extend;
 use itertools::Itertools;
+use std::collections::HashMap;
+use std::iter::Extend;
 
 mod connection;
 mod error;
 pub use self::error::Error;
 
 mod node;
-pub use self::node::{Node, MetadumpIter};
+pub use self::node::{MetadumpIter, Node};
 
 mod ring;
 use self::ring::Ring;
@@ -122,16 +122,22 @@ impl Client {
         K: AsRef<[u8]> + Clone,
     {
         // Groups keys by the server they belong to and then fetch from each server asyncronously
-        let server_map = keys.into_iter().into_group_map_by(|key| self.ring.server_index_for(&key));
-        let result = stream::iter(self.ring.servers.iter_mut()).enumerate().then(move |(node_index, node)| {
-            let cloned_server_map = server_map.clone();
+        let server_map = keys
+            .into_iter()
+            .into_group_map_by(|key| self.ring.server_index_for(key));
+        let result = stream::iter(self.ring.servers.iter_mut())
+            .enumerate()
+            .then(move |(node_index, node)| {
+                let cloned_server_map = server_map.clone();
 
-            async move {
-                let empty: Vec<K> = Vec::new();
-                let keys = cloned_server_map.get(&node_index).unwrap_or(&empty);
-                node.get_many(keys).await
-            }
-        }).collect::<GetManyResult>().await;
+                async move {
+                    let empty: Vec<K> = Vec::new();
+                    let keys = cloned_server_map.get(&node_index).unwrap_or(&empty);
+                    node.get_many(keys).await
+                }
+            })
+            .collect::<GetManyResult>()
+            .await;
 
         // Return the result from the GetManyResult new type struct
         result.0
@@ -209,7 +215,10 @@ impl Client {
     ///
     /// Available as of memcached 1.4.31.
     pub async fn dump_keys(&mut self) -> Result<Vec<MetadumpIter<'_>>, Error> {
-        let result = stream::iter(&mut self.ring.servers).then(|node| node.dump_keys()).collect::<KeyDumpResult>().await;
+        let result = stream::iter(&mut self.ring.servers)
+            .then(|node| node.dump_keys())
+            .collect::<KeyDumpResult>()
+            .await;
 
         // Return the result from the KeyDumpResult new type struct
         result.0
@@ -221,7 +230,10 @@ impl Client {
     /// memcached, but all values returned by this method are returned as strings and are not
     /// further interpreted or validated for conformity.
     pub async fn stats(&mut self) -> Result<Vec<HashMap<String, String>>, Error> {
-        let result = stream::iter(&mut self.ring.servers).then(|node| node.stats()).collect::<StatsResult>().await;
+        let result = stream::iter(&mut self.ring.servers)
+            .then(|node| node.stats())
+            .collect::<StatsResult>()
+            .await;
 
         // Return the result from the StatsResult new type struct
         result.0
@@ -231,8 +243,8 @@ impl Client {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::{TcpListener, TcpStream};
     use std::io::{BufRead, Write};
+    use std::net::{TcpListener, TcpStream};
 
     const KEY: &str = "async-memcache-test-key";
     const EMPTY_KEY: &str = "no-value-here";
@@ -259,7 +271,7 @@ mod tests {
     // nodes without needing to run a number of real memcached servers in the background.
     fn handle_connection(mut stream: TcpStream) {
         let cloned_stream = stream.try_clone().expect("Failed to clone stream");
-        let mut reader = std::io::BufReader::new(&mut stream);
+        let mut reader = std::io::BufReader::new(&cloned_stream);
 
         loop {
             let mut buffer = String::new();
@@ -277,55 +289,74 @@ mod tests {
                 "get" => {
                     if key == EMPTY_KEY {
                         let response = "END\r\n";
-                        stream.write_all(response.as_bytes()).expect("Failed to write response");
+                        stream
+                            .write_all(response.as_bytes())
+                            .expect("Failed to write response");
                         return;
                     }
 
                     let response = format!("VALUE {} 0 5\r\nvalue\r\nEND\r\n", key);
-                    stream.write_all(response.as_bytes()).expect("Failed to write response");
+                    stream
+                        .write_all(response.as_bytes())
+                        .expect("Failed to write response");
                 }
                 "set" => {
                     let mut value = String::new();
                     reader.read_line(&mut value).expect("Failed to read line");
 
                     let response = "STORED\r\n";
-                    stream.write_all(response.as_bytes()).expect("Failed to write response");
+                    stream
+                        .write_all(response.as_bytes())
+                        .expect("Failed to write response");
                 }
                 "add" => {
                     let mut value = String::new();
                     reader.read_line(&mut value).expect("Failed to read line");
 
                     let response = "STORED\r\n";
-                    stream.write_all(response.as_bytes()).expect("Failed to write response");
+                    stream
+                        .write_all(response.as_bytes())
+                        .expect("Failed to write response");
                 }
                 "delete" => {
                     let response = "DELETED\r\n";
-                    stream.write_all(response.as_bytes()).expect("Failed to write response");
+                    stream
+                        .write_all(response.as_bytes())
+                        .expect("Failed to write response");
                 }
                 "version" => {
                     let response = "VERSION 1.6.7\r\n";
-                    stream.write_all(response.as_bytes()).expect("Failed to write response");
+                    stream
+                        .write_all(response.as_bytes())
+                        .expect("Failed to write response");
                 }
                 "metadump" => {
                     let response = "END\r\n";
-                    stream.write_all(response.as_bytes()).expect("Failed to write response");
+                    stream
+                        .write_all(response.as_bytes())
+                        .expect("Failed to write response");
                 }
                 "stats" => {
                     let response = "STAT pid 1234\r\nEND\r\n";
-                    stream.write_all(response.as_bytes()).expect("Failed to write response");
+                    stream
+                        .write_all(response.as_bytes())
+                        .expect("Failed to write response");
                 }
                 _ => {
                     let response = "ERROR\r\n";
-                    stream.write_all(response.as_bytes()).expect("Failed to write response");
+                    stream
+                        .write_all(response.as_bytes())
+                        .expect("Failed to write response");
                 }
             }
         }
     }
 
-
     async fn setup_client() -> Client {
         let node_dsns: Vec<String> = SERVER_ADDRESSES.iter().map(|dsn| dsn.to_string()).collect();
-        Client::new(node_dsns).await.expect("Failed to create client")
+        Client::new(node_dsns)
+            .await
+            .expect("Failed to create client")
     }
 
     #[tokio::test]

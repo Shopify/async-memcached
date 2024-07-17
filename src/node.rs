@@ -380,13 +380,13 @@ impl<'a> MetadumpIter<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::{TcpListener, TcpStream};
     use std::io::{BufRead, Write};
+    use std::net::{TcpListener, TcpStream};
 
     const KEY: &str = "async-memcache-test-key";
     const EMPTY_KEY: &str = "no-value-here";
     const SERVER_ADDRESS: &str = "tcp://localhost:47386";
-    
+
     #[ctor::ctor]
     fn init() {
         let listener = TcpListener::bind(SERVER_ADDRESS).expect("Failed to bind listener");
@@ -424,46 +424,64 @@ mod tests {
                 "get" => {
                     if key == EMPTY_KEY {
                         let response = "END\r\n";
-                        stream.write_all(response.as_bytes()).expect("Failed to write response");
+                        stream
+                            .write_all(response.as_bytes())
+                            .expect("Failed to write response");
                         return;
                     }
 
                     let response = format!("VALUE {} 0 5\r\nvalue\r\nEND\r\n", key);
-                    stream.write_all(response.as_bytes()).expect("Failed to write response");
+                    stream
+                        .write_all(response.as_bytes())
+                        .expect("Failed to write response");
                 }
                 "set" => {
                     let mut value = String::new();
                     reader.read_line(&mut value).expect("Failed to read line");
 
                     let response = "STORED\r\n";
-                    stream.write_all(response.as_bytes()).expect("Failed to write response");
+                    stream
+                        .write_all(response.as_bytes())
+                        .expect("Failed to write response");
                 }
                 "add" => {
                     let mut value = String::new();
                     reader.read_line(&mut value).expect("Failed to read line");
 
                     let response = "STORED\r\n";
-                    stream.write_all(response.as_bytes()).expect("Failed to write response");
+                    stream
+                        .write_all(response.as_bytes())
+                        .expect("Failed to write response");
                 }
                 "delete" => {
                     let response = "DELETED\r\n";
-                    stream.write_all(response.as_bytes()).expect("Failed to write response");
+                    stream
+                        .write_all(response.as_bytes())
+                        .expect("Failed to write response");
                 }
                 "version" => {
                     let response = "VERSION 1.6.7\r\n";
-                    stream.write_all(response.as_bytes()).expect("Failed to write response");
+                    stream
+                        .write_all(response.as_bytes())
+                        .expect("Failed to write response");
                 }
                 "metadump" => {
                     let response = "END\r\n";
-                    stream.write_all(response.as_bytes()).expect("Failed to write response");
+                    stream
+                        .write_all(response.as_bytes())
+                        .expect("Failed to write response");
                 }
                 "stats" => {
                     let response = "STAT pid 1234\r\nEND\r\n";
-                    stream.write_all(response.as_bytes()).expect("Failed to write response");
+                    stream
+                        .write_all(response.as_bytes())
+                        .expect("Failed to write response");
                 }
                 _ => {
                     let response = "ERROR\r\n";
-                    stream.write_all(response.as_bytes()).expect("Failed to write response");
+                    stream
+                        .write_all(response.as_bytes())
+                        .expect("Failed to write response");
                 }
             }
 

@@ -2,7 +2,7 @@ use async_memcached::Client;
 
 #[tokio::main]
 async fn main() {
-    let mut client = Client::new("unix:///tmp/memcached.sock")
+    let mut client = Client::new(vec!["unix:///tmp/memcached.sock"])
         .await
         .expect("failed to create client");
 
