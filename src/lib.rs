@@ -248,7 +248,7 @@ mod tests {
 
     const KEY: &str = "async-memcache-test-key";
     const EMPTY_KEY: &str = "no-value-here";
-    const SERVER_ADDRESSES: [&str; 2] = ["tcp://localhost:1234", "tcp://localhost:1235"];
+    const SERVER_ADDRESSES: [&str; 2] = ["localhost:1234", "localhost:1235"];
 
     #[ctor::ctor]
     fn init() {
