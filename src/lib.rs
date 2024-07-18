@@ -30,6 +30,11 @@ impl Default for GetManyResult {
 
 impl Extend<Result<Vec<Value>, Error>> for GetManyResult {
     fn extend<T: IntoIterator<Item = Result<Vec<Value>, Error>>>(&mut self, iter: T) {
+        if self.0.is_err() {
+            // If an error has already occurred, don't bother continuing
+            return;
+        }
+
         for item in iter {
             match item {
                 Ok(value) => self.0.as_mut().unwrap().append(&mut value.clone()),
@@ -50,6 +55,11 @@ impl<'a> Default for KeyDumpResult<'a> {
 
 impl<'a> Extend<Result<MetadumpIter<'a>, Error>> for KeyDumpResult<'a> {
     fn extend<T: IntoIterator<Item = Result<MetadumpIter<'a>, Error>>>(&mut self, iter: T) {
+        if self.0.is_err() {
+            // If an error has already occurred, don't bother continuing
+            return;
+        }
+
         for item in iter {
             match item {
                 Ok(node) => self.0.as_mut().unwrap().push(node),
@@ -70,6 +80,11 @@ impl Default for StatsResult {
 
 impl Extend<Result<HashMap<String, String>, Error>> for StatsResult {
     fn extend<T: IntoIterator<Item = Result<HashMap<String, String>, Error>>>(&mut self, iter: T) {
+        if self.0.is_err() {
+            // If an error has already occurred, don't bother continuing
+            return;
+        }
+
         for item in iter {
             match item {
                 Ok(stats) => self.0.as_mut().unwrap().push(stats),
