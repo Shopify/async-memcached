@@ -388,10 +388,7 @@ mod tests {
 
         let result = client.get(EMPTY_KEY).await;
 
-        println!("{:?}", result);
-
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_none());
+        assert_eq!(result, Ok(None), "Expected None, got {:?}", result);
     }
 
     #[tokio::test]
@@ -400,7 +397,13 @@ mod tests {
 
         let result = client.get(KEY).await;
 
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap().unwrap().data, b"value");
+        let expected = Value {
+            key: KEY.as_bytes().to_vec(),
+            flags: 0,
+            cas: None,
+            data: b"value".to_vec(),
+        };
+
+        assert_eq!(result, Ok(Some(expected.clone())), "Expected Ok(Some({:?})), got {:?}", expected, result);
     }
 }
