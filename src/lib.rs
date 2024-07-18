@@ -368,8 +368,7 @@ mod tests {
     }
 
     async fn setup_client() -> Client {
-        let node_dsns: Vec<String> = SERVER_ADDRESSES.iter().map(|dsn| dsn.to_string()).collect();
-        Client::new(node_dsns)
+        Client::new(SERVER_ADDRESSES.to_vec())
             .await
             .expect("Failed to create client")
     }
