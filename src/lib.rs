@@ -404,6 +404,12 @@ mod tests {
             data: b"value".to_vec(),
         };
 
-        assert_eq!(result, Ok(Some(expected.clone())), "Expected Ok(Some({:?})), got {:?}", expected, result);
+        assert_eq!(
+            result,
+            Ok(Some(expected.clone())),
+            "Expected Ok(Some({:?})), got {:?}",
+            expected,
+            result
+        );
     }
 }

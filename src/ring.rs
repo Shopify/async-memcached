@@ -39,6 +39,10 @@ impl Default for NodesResult {
 
 impl Extend<Result<Node, Error>> for NodesResult {
     fn extend<T: IntoIterator<Item = Result<Node, Error>>>(&mut self, iter: T) {
+        if self.0.is_err() {
+            return;
+        }
+
         for item in iter {
             match item {
                 Ok(node) => self.0.as_mut().unwrap().push(node),
@@ -62,7 +66,7 @@ impl Ring {
             Err(e) => return Err(e),
         };
 
-        let continuum = build_continuum(&servers).await?;
+        let continuum = build_continuum(&servers).await;
 
         Ok(Ring { servers, continuum })
     }
@@ -102,7 +106,7 @@ fn hash_for<K: AsRef<[u8]>>(key: K) -> u32 {
     crc32fast::hash(key.as_ref())
 }
 
-async fn build_continuum(servers: &[Node]) -> Result<Vec<Entry>, Error> {
+async fn build_continuum(servers: &[Node]) -> Vec<Entry> {
     let mut continuum = Vec::new();
 
     for (i, server) in servers.iter().enumerate() {
@@ -119,5 +123,5 @@ async fn build_continuum(servers: &[Node]) -> Result<Vec<Entry>, Error> {
         }
     }
 
-    Ok(continuum)
+    continuum
 }
