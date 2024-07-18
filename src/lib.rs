@@ -9,7 +9,7 @@ mod connection;
 mod error;
 pub use self::error::Error;
 
-mod node;
+pub mod node;
 pub use self::node::{MetadumpIter, Node};
 
 mod ring;
@@ -198,17 +198,6 @@ impl Client {
         K: AsRef<[u8]>,
     {
         self.ring.server_for(&key).delete(key).await
-    }
-
-    /// Gets the version of the server.
-    ///
-    /// If the version is retrieved successfully, `String` is returned containing the version
-    /// component e.g. `1.6.7`, otherwise [`Error`] is returned.
-    ///
-    /// For some setups, such as those using Twemproxy, this will return an error as those
-    /// intermediate proxies do not support the version command.
-    pub async fn version(&mut self) -> Result<String, Error> {
-        self.ring.servers[0].version().await
     }
 
     /// Dumps all keys from the server.
