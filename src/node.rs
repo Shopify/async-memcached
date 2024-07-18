@@ -137,9 +137,16 @@ impl Node {
     /// Otherwise, [`Error`] is returned.
     pub async fn get_many<I, K>(&mut self, keys: I) -> Result<Vec<Value>, Error>
     where
-        I: IntoIterator<Item = K>,
+        I: IntoIterator<Item = K> + AsRef<[K]>,
         K: AsRef<[u8]>,
     {
+        // Return early if there are no keys to fetch. This could happen as a
+        // result of consistent hashing where a node is responsible for a range
+        // of keys that does not overlap with the requested keys.
+        if keys.as_ref().is_empty() {
+            return Ok(Vec::new());
+        }
+
         self.conn.write_all(b"get ").await?;
         for key in keys.into_iter() {
             self.conn.write_all(key.as_ref()).await?;
@@ -501,6 +508,17 @@ mod tests {
         let result = node.add(KEY, "value", None, None).await;
 
         assert!(result.is_ok(), "failed to add {}, {:?}", KEY, result);
+    }
+
+    #[tokio::test]
+    async fn test_get_many_no_keys() {
+        let mut node = Node::new("localhost:47386")
+            .await
+            .expect("Failed to connect to server");
+
+        let result = node.get_many(Vec::<&str>::new()).await;
+
+        assert_eq!(result, Ok(Vec::new()), "failed to get many, {:?}", result);
     }
 
     #[tokio::test]

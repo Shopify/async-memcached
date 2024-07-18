@@ -136,21 +136,14 @@ impl Client {
         I: IntoIterator<Item = K>,
         K: AsRef<[u8]> + Clone,
     {
-        // Groups keys by the server they belong to and then fetch from each server asyncronously
-        let server_map = keys
-            .into_iter()
-            .into_group_map_by(|key| self.ring.server_index_for(key));
-        let result = stream::iter(self.ring.servers.iter_mut())
-            .enumerate()
-            .then(move |(node_index, node)| {
-                let cloned_server_map = server_map.clone();
+        let mut keys_for_server = vec![Vec::new(); self.ring.servers.len()];
+        keys.into_iter().for_each(|key| {
+            let server_index = self.ring.server_index_for(&key);
+            keys_for_server[server_index].push(key);
+        });
 
-                async move {
-                    let empty: Vec<K> = Vec::new();
-                    let keys = cloned_server_map.get(&node_index).unwrap_or(&empty);
-                    node.get_many(keys).await
-                }
-            })
+        let result = stream::iter(self.ring.servers.iter_mut().zip_eq(keys_for_server))
+            .then(|(node, keys)| node.get_many(keys))
             .collect::<GetManyResult>()
             .await;
 
