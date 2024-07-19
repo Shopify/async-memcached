@@ -3,7 +3,6 @@
 use futures::stream::{self, StreamExt};
 use itertools::Itertools;
 use std::collections::HashMap;
-use std::iter::Extend;
 
 mod connection;
 mod error;
@@ -18,84 +17,9 @@ use self::ring::Ring;
 mod parser;
 pub use self::parser::{ErrorKind, KeyMetadata, MetadumpResponse, StatsResponse, Status, Value};
 
-struct GetManyResult(Result<Vec<Value>, Error>);
-struct KeyDumpResult<'a>(Result<Vec<MetadumpIter<'a>>, Error>);
-struct StatsResult(Result<Vec<HashMap<String, String>>, Error>);
+mod collectible_result;
+use collectible_result::CollectibleResult;
 
-impl Default for GetManyResult {
-    fn default() -> Self {
-        GetManyResult(Ok(Vec::new()))
-    }
-}
-
-impl Extend<Result<Vec<Value>, Error>> for GetManyResult {
-    fn extend<T: IntoIterator<Item = Result<Vec<Value>, Error>>>(&mut self, iter: T) {
-        if self.0.is_err() {
-            // If an error has already occurred, don't bother continuing
-            return;
-        }
-
-        for item in iter {
-            match item {
-                Ok(value) => self.0.as_mut().unwrap().append(&mut value.clone()),
-                Err(e) => {
-                    self.0 = Err(e);
-                    return;
-                }
-            }
-        }
-    }
-}
-
-impl<'a> Default for KeyDumpResult<'a> {
-    fn default() -> Self {
-        KeyDumpResult(Ok(Vec::new()))
-    }
-}
-
-impl<'a> Extend<Result<MetadumpIter<'a>, Error>> for KeyDumpResult<'a> {
-    fn extend<T: IntoIterator<Item = Result<MetadumpIter<'a>, Error>>>(&mut self, iter: T) {
-        if self.0.is_err() {
-            // If an error has already occurred, don't bother continuing
-            return;
-        }
-
-        for item in iter {
-            match item {
-                Ok(node) => self.0.as_mut().unwrap().push(node),
-                Err(e) => {
-                    self.0 = Err(e);
-                    return;
-                }
-            }
-        }
-    }
-}
-
-impl Default for StatsResult {
-    fn default() -> Self {
-        StatsResult(Ok(Vec::new()))
-    }
-}
-
-impl Extend<Result<HashMap<String, String>, Error>> for StatsResult {
-    fn extend<T: IntoIterator<Item = Result<HashMap<String, String>, Error>>>(&mut self, iter: T) {
-        if self.0.is_err() {
-            // If an error has already occurred, don't bother continuing
-            return;
-        }
-
-        for item in iter {
-            match item {
-                Ok(stats) => self.0.as_mut().unwrap().push(stats),
-                Err(e) => {
-                    self.0 = Err(e);
-                    return;
-                }
-            }
-        }
-    }
-}
 
 /// High-level memcached client.
 ///
@@ -144,11 +68,11 @@ impl Client {
 
         let result = stream::iter(self.ring.servers.iter_mut().zip_eq(keys_for_server))
             .then(|(node, keys)| node.get_many(keys))
-            .collect::<GetManyResult>()
+            .collect::<CollectibleResult<_>>()
             .await;
 
-        // Return the result from the GetManyResult new type struct
-        result.0
+        // Return the result from the CollectibleResult new type struct
+        result.inner
     }
 
     /// Sets the given key.
@@ -214,11 +138,11 @@ impl Client {
     pub async fn dump_keys(&mut self) -> Result<Vec<MetadumpIter<'_>>, Error> {
         let result = stream::iter(&mut self.ring.servers)
             .then(|node| node.dump_keys())
-            .collect::<KeyDumpResult>()
+            .collect::<CollectibleResult<_>>()
             .await;
 
-        // Return the result from the KeyDumpResult new type struct
-        result.0
+        // Return the result from the CollectibleResult new type struct
+        result.inner
     }
 
     /// Collects statistics from the server.
@@ -229,11 +153,11 @@ impl Client {
     pub async fn stats(&mut self) -> Result<Vec<HashMap<String, String>>, Error> {
         let result = stream::iter(&mut self.ring.servers)
             .then(|node| node.stats())
-            .collect::<StatsResult>()
+            .collect::<CollectibleResult<_>>()
             .await;
 
-        // Return the result from the StatsResult new type struct
-        result.0
+        // Return the result from the CollectibleResult new type struct
+        result.inner
     }
 }
 

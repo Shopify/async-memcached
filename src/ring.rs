@@ -11,11 +11,11 @@
 //! hash, and find the nearest "point" that is less than or equal to the
 //! the key's hash.
 
+use crate::collectible_result::CollectibleResult;
 use crate::error::Error;
 use crate::node::Node;
 
 use futures::stream::{self, StreamExt};
-use std::iter::Extend;
 
 const POINTS_PER_SERVER: usize = 160;
 
@@ -29,39 +29,13 @@ pub struct Ring {
     continuum: Vec<Entry>,
 }
 
-struct NodesResult(Result<Vec<Node>, Error>);
-
-impl Default for NodesResult {
-    fn default() -> Self {
-        NodesResult(Ok(Vec::new()))
-    }
-}
-
-impl Extend<Result<Node, Error>> for NodesResult {
-    fn extend<T: IntoIterator<Item = Result<Node, Error>>>(&mut self, iter: T) {
-        if self.0.is_err() {
-            return;
-        }
-
-        for item in iter {
-            match item {
-                Ok(node) => self.0.as_mut().unwrap().push(node),
-                Err(e) => {
-                    self.0 = Err(e);
-                    return;
-                }
-            }
-        }
-    }
-}
-
 impl Ring {
     pub async fn new<S: AsRef<str>>(server_addrs: Vec<S>) -> Result<Ring, Error> {
         let servers = stream::iter(&server_addrs)
             .then(Node::new)
-            .collect::<NodesResult>()
+            .collect::<CollectibleResult<_>>()
             .await;
-        let servers = match servers.0 {
+        let servers = match servers.inner {
             Ok(servers) => servers,
             Err(e) => return Err(e),
         };
