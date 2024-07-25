@@ -2,7 +2,7 @@ use async_memcached::Client;
 
 #[tokio::main]
 async fn main() {
-    let mut client = Client::new("localhost:11211")
+    let mut client = Client::new(vec!["localhost:11211"])
         .await
         .expect("failed to create client");
 
@@ -30,7 +30,7 @@ async fn main() {
     match client.stats().await {
         Ok(stats) => {
             println!("got {} stat entries!", stats.len());
-            println!("curr items: {:?}", stats.get("curr_items"));
+            println!("curr items: {:?}", stats[0].get("curr_items"));
         }
         Err(e) => println!("error while getting stats: {:?}", e),
     }

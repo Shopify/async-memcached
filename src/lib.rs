@@ -1,106 +1,43 @@
-//! A Tokio-based memcached client.
+//! A Tokio-based memcached node.
 #![deny(warnings, missing_docs)]
+use futures::stream::{self, StreamExt};
+use itertools::Itertools;
 use std::collections::HashMap;
 
-use bytes::BytesMut;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
-
 mod connection;
-use self::connection::Connection;
-
 mod error;
 pub use self::error::Error;
 
+pub mod node;
+pub use self::node::{MetadumpIter, Node};
+
+mod ring;
+use self::ring::Ring;
+
 mod parser;
-use self::parser::{
-    parse_ascii_metadump_response, parse_ascii_response, parse_ascii_stats_response, Response,
-};
 pub use self::parser::{ErrorKind, KeyMetadata, MetadumpResponse, StatsResponse, Status, Value};
+
+mod collectible_result;
+use collectible_result::CollectibleResult;
+
 
 /// High-level memcached client.
 ///
-/// [`Client`] is mapped one-to-one with a given connection to a memcached server, and provides a
-/// high-level API for executing commands on that connection.
+/// [`Client`] is mapped to a set of memcached server nodes, and provides a
+/// high-level API for executing commands on that cluster.
 pub struct Client {
-    buf: BytesMut,
-    last_read_n: Option<usize>,
-    conn: Connection,
+    ring: Ring,
 }
 
 impl Client {
-    /// Creates a new [`Client`] based on the given data source string.
+    /// Creates a new [`Client`] based on the given list of data source strings.
     ///
     /// Supports UNIX domain sockets and TCP connections.
     /// For TCP: the DSN should be in the format of `tcp://<IP>:<port>` or `<IP>:<port>`.
     /// For UNIX: the DSN should be in the format of `unix://<path>`.
-    pub async fn new<S: AsRef<str>>(dsn: S) -> Result<Client, Error> {
-        let connection = Connection::new(dsn).await?;
-
-        Ok(Client {
-            buf: BytesMut::new(),
-            last_read_n: None,
-            conn: connection,
-        })
-    }
-
-    pub(crate) async fn drive_receive<R, F>(&mut self, op: F) -> Result<R, Error>
-    where
-        F: Fn(&[u8]) -> Result<Option<(usize, R)>, ErrorKind>,
-    {
-        // If we serviced a previous request, advance our buffer forward.
-        if let Some(n) = self.last_read_n {
-            let _ = self.buf.split_to(n);
-        }
-
-        let mut needs_more_data = false;
-        loop {
-            if self.buf.is_empty() || needs_more_data {
-                match self.conn {
-                    Connection::Tcp(ref mut s) => {
-                        self.buf.reserve(1024);
-                        let n = s.read_buf(&mut self.buf).await?;
-                        if n == 0 {
-                            return Err(Error::Io(std::io::ErrorKind::UnexpectedEof.into()));
-                        }
-                    }
-                    Connection::Unix(ref mut s) => {
-                        self.buf.reserve(1024);
-                        let n = s.read_buf(&mut self.buf).await?;
-                        if n == 0 {
-                            return Err(Error::Io(std::io::ErrorKind::UnexpectedEof.into()));
-                        }
-                    }
-                }
-            }
-
-            // Try and parse out a response.
-            match op(&self.buf) {
-                // We got a response.
-                Ok(Some((n, response))) => {
-                    self.last_read_n = Some(n);
-                    return Ok(response);
-                }
-                // We didn't have enough data, so loop around and try again.
-                Ok(None) => {
-                    needs_more_data = true;
-                    continue;
-                }
-                // Invalid data not matching the protocol.
-                Err(kind) => return Err(Status::Error(kind).into()),
-            }
-        }
-    }
-
-    pub(crate) async fn get_read_write_response(&mut self) -> Result<Response, Error> {
-        self.drive_receive(parse_ascii_response).await
-    }
-
-    pub(crate) async fn get_metadump_response(&mut self) -> Result<MetadumpResponse, Error> {
-        self.drive_receive(parse_ascii_metadump_response).await
-    }
-
-    pub(crate) async fn get_stats_response(&mut self) -> Result<StatsResponse, Error> {
-        self.drive_receive(parse_ascii_stats_response).await
+    pub async fn new<S: AsRef<str>>(node_dsns: Vec<S>) -> Result<Client, Error> {
+        let ring = Ring::new(node_dsns).await?;
+        Ok(Client { ring })
     }
 
     /// Gets the given key.
@@ -109,25 +46,7 @@ impl Client {
     ///
     /// Otherwise, [`Error`] is returned.
     pub async fn get<K: AsRef<[u8]>>(&mut self, key: K) -> Result<Option<Value>, Error> {
-        self.conn.write_all(b"get ").await?;
-        self.conn.write_all(key.as_ref()).await?;
-        self.conn.write_all(b"\r\n").await?;
-        self.conn.flush().await?;
-
-        match self.get_read_write_response().await? {
-            Response::Status(Status::NotFound) => Ok(None),
-            Response::Status(s) => Err(s.into()),
-            Response::Data(d) => d
-                .map(|mut items| {
-                    if items.len() != 1 {
-                        Err(Status::Error(ErrorKind::Protocol(None)).into())
-                    } else {
-                        Ok(items.remove(0))
-                    }
-                })
-                .transpose(),
-            _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),
-        }
+        self.ring.server_for(&key).get(key).await
     }
 
     /// Gets the given keys.
@@ -139,21 +58,21 @@ impl Client {
     pub async fn get_many<I, K>(&mut self, keys: I) -> Result<Vec<Value>, Error>
     where
         I: IntoIterator<Item = K>,
-        K: AsRef<[u8]>,
+        K: AsRef<[u8]> + Clone,
     {
-        self.conn.write_all(b"get ").await?;
-        for key in keys.into_iter() {
-            self.conn.write_all(key.as_ref()).await?;
-            self.conn.write_all(b" ").await?;
-        }
-        self.conn.write_all(b"\r\n").await?;
-        self.conn.flush().await?;
+        let mut keys_for_server = vec![Vec::new(); self.ring.servers.len()];
+        keys.into_iter().for_each(|key| {
+            let server_index = self.ring.server_index_for(&key);
+            keys_for_server[server_index].push(key);
+        });
 
-        match self.get_read_write_response().await? {
-            Response::Status(s) => Err(s.into()),
-            Response::Data(d) => d.ok_or(Status::NotFound.into()),
-            _ => Err(Status::Error(ErrorKind::Protocol(None)).into()),
-        }
+        let result = stream::iter(self.ring.servers.iter_mut().zip_eq(keys_for_server))
+            .then(|(node, keys)| node.get_many(keys))
+            .collect::<CollectibleResult<_>>()
+            .await;
+
+        // Return the result from the CollectibleResult new type struct
+        result.inner
     }
 
     /// Sets the given key.
@@ -171,34 +90,7 @@ impl Client {
         K: AsRef<[u8]>,
         V: AsRef<[u8]>,
     {
-        let kr = key.as_ref();
-        let vr = value.as_ref();
-
-        self.conn.write_all(b"set ").await?;
-        self.conn.write_all(kr).await?;
-
-        let flags = flags.unwrap_or(0).to_string();
-        self.conn.write_all(b" ").await?;
-        self.conn.write_all(flags.as_ref()).await?;
-
-        let ttl = ttl.unwrap_or(0).to_string();
-        self.conn.write_all(b" ").await?;
-        self.conn.write_all(ttl.as_ref()).await?;
-
-        self.conn.write_all(b" ").await?;
-        let vlen = vr.len().to_string();
-        self.conn.write_all(vlen.as_ref()).await?;
-        self.conn.write_all(b"\r\n").await?;
-
-        self.conn.write_all(vr).await?;
-        self.conn.write_all(b"\r\n").await?;
-        self.conn.flush().await?;
-
-        match self.get_read_write_response().await? {
-            Response::Status(Status::Stored) => Ok(()),
-            Response::Status(s) => Err(s.into()),
-            _ => Err(Status::Error(ErrorKind::Protocol(None)).into()),
-        }
+        self.ring.server_for(&key).set(key, value, ttl, flags).await
     }
 
     /// Add a key. If the value exists, Err(Protocol(NotStored)) is returned.
@@ -213,34 +105,7 @@ impl Client {
         K: AsRef<[u8]>,
         V: AsRef<[u8]>,
     {
-        let kr = key.as_ref();
-        let vr = value.as_ref();
-
-        self.conn
-            .write_all(
-                &[
-                    b"add ",
-                    kr,
-                    b" ",
-                    flags.unwrap_or(0).to_string().as_ref(),
-                    b" ",
-                    ttl.unwrap_or(0).to_string().as_ref(),
-                    b" ",
-                    vr.len().to_string().as_ref(),
-                    b"\r\n",
-                    vr,
-                    b"\r\n",
-                ]
-                .concat(),
-            )
-            .await?;
-        self.conn.flush().await?;
-
-        match self.get_read_write_response().await? {
-            Response::Status(Status::Stored) => Ok(()),
-            Response::Status(s) => Err(s.into()),
-            _ => Err(Status::Error(ErrorKind::Protocol(None)).into()),
-        }
+        self.ring.server_for(&key).add(key, value, ttl, flags).await
     }
 
     /// Delete a key but don't wait for a reply.
@@ -248,13 +113,7 @@ impl Client {
     where
         K: AsRef<[u8]>,
     {
-        let kr = key.as_ref();
-
-        self.conn
-            .write_all(&[b"delete ", kr, b" noreply\r\n"].concat())
-            .await?;
-        self.conn.flush().await?;
-        Ok(())
+        self.ring.server_for(&key).delete_no_reply(key).await
     }
 
     /// Delete a key and wait for a reply
@@ -262,42 +121,7 @@ impl Client {
     where
         K: AsRef<[u8]>,
     {
-        let kr = key.as_ref();
-
-        self.conn
-            .write_all(&[b"delete ", kr, b"\r\n"].concat())
-            .await?;
-        self.conn.flush().await?;
-
-        match self.get_read_write_response().await? {
-            Response::Status(Status::Deleted) => Ok(()),
-            Response::Status(s) => Err(s.into()),
-            _ => Err(Status::Error(ErrorKind::Protocol(None)).into()),
-        }
-    }
-
-    /// Gets the version of the server.
-    ///
-    /// If the version is retrieved successfully, `String` is returned containing the version
-    /// component e.g. `1.6.7`, otherwise [`Error`] is returned.
-    ///
-    /// For some setups, such as those using Twemproxy, this will return an error as those
-    /// intermediate proxies do not support the version command.
-    pub async fn version(&mut self) -> Result<String, Error> {
-        self.conn.write_all(b"version\r\n").await?;
-        self.conn.flush().await?;
-
-        let mut version = String::new();
-        let bytes = self.conn.read_line(&mut version).await?;
-
-        // Peel off the leading "VERSION " header.
-        if bytes >= 8 && version.is_char_boundary(8) {
-            Ok(version.split_off(8))
-        } else {
-            Err(Error::from(Status::Error(ErrorKind::Protocol(Some(
-                format!("Invalid response for `version` command: `{version}`"),
-            )))))
-        }
+        self.ring.server_for(&key).delete(key).await
     }
 
     /// Dumps all keys from the server.
@@ -311,14 +135,14 @@ impl Client {
     /// server at all.
     ///
     /// Available as of memcached 1.4.31.
-    pub async fn dump_keys(&mut self) -> Result<MetadumpIter<'_>, Error> {
-        self.conn.write_all(b"lru_crawler metadump all\r\n").await?;
-        self.conn.flush().await?;
+    pub async fn dump_keys(&mut self) -> Result<Vec<MetadumpIter<'_>>, Error> {
+        let result = stream::iter(&mut self.ring.servers)
+            .then(|node| node.dump_keys())
+            .collect::<CollectibleResult<_>>()
+            .await;
 
-        Ok(MetadumpIter {
-            client: self,
-            done: false,
-        })
+        // Return the result from the CollectibleResult new type struct
+        result.inner
     }
 
     /// Collects statistics from the server.
@@ -326,108 +150,172 @@ impl Client {
     /// The statistics that may be returned are detailed in the protocol specification for
     /// memcached, but all values returned by this method are returned as strings and are not
     /// further interpreted or validated for conformity.
-    pub async fn stats(&mut self) -> Result<HashMap<String, String>, Error> {
-        let mut entries = HashMap::new();
+    pub async fn stats(&mut self) -> Result<Vec<HashMap<String, String>>, Error> {
+        let result = stream::iter(&mut self.ring.servers)
+            .then(|node| node.stats())
+            .collect::<CollectibleResult<_>>()
+            .await;
 
-        self.conn.write_all(b"stats\r\n").await?;
-        self.conn.flush().await?;
-
-        while let StatsResponse::Entry(key, value) = self.get_stats_response().await? {
-            entries.insert(key, value);
-        }
-
-        Ok(entries)
-    }
-}
-
-/// Asynchronous iterator for metadump operations.
-pub struct MetadumpIter<'a> {
-    client: &'a mut Client,
-    done: bool,
-}
-
-impl<'a> MetadumpIter<'a> {
-    /// Gets the next result for the current operation.
-    ///
-    /// If there is another key in the dump, `Some(Ok(KeyMetadata))` will be returned.  If there was
-    /// an error while attempting to start the metadump operation, or if there was a general
-    /// network/protocol-level error, `Some(Err(Error))` will be returned.
-    ///
-    /// Otherwise, `None` will be returned and signals the end of the iterator.  Subsequent calls
-    /// will return `None`.
-    pub async fn next(&mut self) -> Option<Result<KeyMetadata, Error>> {
-        if self.done {
-            return None;
-        }
-
-        match self.client.get_metadump_response().await {
-            Ok(MetadumpResponse::End) => {
-                self.done = true;
-                None
-            }
-            Ok(MetadumpResponse::BadClass(s)) => {
-                self.done = true;
-                Some(Err(Error::Protocol(MetadumpResponse::BadClass(s).into())))
-            }
-            Ok(MetadumpResponse::Busy(s)) => {
-                Some(Err(Error::Protocol(MetadumpResponse::Busy(s).into())))
-            }
-            Ok(MetadumpResponse::Entry(km)) => Some(Ok(km)),
-            Err(e) => Some(Err(e)),
-        }
+        // Return the result from the CollectibleResult new type struct
+        result.inner
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{BufRead, Write};
+    use std::net::{TcpListener, TcpStream};
 
     const KEY: &str = "async-memcache-test-key";
+    const EMPTY_KEY: &str = "no-value-here";
+    const SERVER_ADDRESSES: [&str; 2] = ["localhost:1234", "localhost:1235"];
 
-    #[ignore = "Relies on a running memcached server"]
-    #[tokio::test]
-    async fn test_add() {
-        let mut client = Client::new("tcp://localhost:11211")
+    #[ctor::ctor]
+    fn init() {
+        SERVER_ADDRESSES.iter().for_each(|dsn| {
+            let listener = TcpListener::bind(dsn).expect("Failed to bind listener");
+
+            // accept connections and process them serially in a background thread
+            std::thread::spawn(move || {
+                for stream in listener.incoming() {
+                    let stream = stream.expect("Failed to accept connection");
+                    std::thread::spawn(move || {
+                        handle_connection(stream);
+                    });
+                }
+            });
+        });
+    }
+
+    // Used to mock out the memcached server responses to test the client connecting to multiple
+    // nodes without needing to run a number of real memcached servers in the background.
+    fn handle_connection(mut stream: TcpStream) {
+        let cloned_stream = stream.try_clone().expect("Failed to clone stream");
+        let mut reader = std::io::BufReader::new(&cloned_stream);
+
+        loop {
+            let mut buffer = String::new();
+            reader.read_line(&mut buffer).expect("Failed to read line");
+
+            if buffer.is_empty() {
+                return;
+            }
+
+            let parts: Vec<&str> = buffer.split_whitespace().collect();
+            let command = parts[0];
+            let key = parts[1];
+
+            match command {
+                "get" => {
+                    if key == EMPTY_KEY {
+                        let response = "END\r\n";
+                        stream
+                            .write_all(response.as_bytes())
+                            .expect("Failed to write response");
+                        return;
+                    }
+
+                    let response = format!("VALUE {} 0 5\r\nvalue\r\nEND\r\n", key);
+                    stream
+                        .write_all(response.as_bytes())
+                        .expect("Failed to write response");
+                }
+                "set" => {
+                    let mut value = String::new();
+                    reader.read_line(&mut value).expect("Failed to read line");
+
+                    let response = "STORED\r\n";
+                    stream
+                        .write_all(response.as_bytes())
+                        .expect("Failed to write response");
+                }
+                "add" => {
+                    let mut value = String::new();
+                    reader.read_line(&mut value).expect("Failed to read line");
+
+                    let response = "STORED\r\n";
+                    stream
+                        .write_all(response.as_bytes())
+                        .expect("Failed to write response");
+                }
+                "delete" => {
+                    let response = "DELETED\r\n";
+                    stream
+                        .write_all(response.as_bytes())
+                        .expect("Failed to write response");
+                }
+                "version" => {
+                    let response = "VERSION 1.6.7\r\n";
+                    stream
+                        .write_all(response.as_bytes())
+                        .expect("Failed to write response");
+                }
+                "metadump" => {
+                    let response = "END\r\n";
+                    stream
+                        .write_all(response.as_bytes())
+                        .expect("Failed to write response");
+                }
+                "stats" => {
+                    let response = "STAT pid 1234\r\nEND\r\n";
+                    stream
+                        .write_all(response.as_bytes())
+                        .expect("Failed to write response");
+                }
+                _ => {
+                    let response = "ERROR\r\n";
+                    stream
+                        .write_all(response.as_bytes())
+                        .expect("Failed to write response");
+                }
+            }
+        }
+    }
+
+    async fn setup_client() -> Client {
+        Client::new(SERVER_ADDRESSES.to_vec())
             .await
-            .expect("Failed to connect to server");
+            .expect("Failed to create client")
+    }
 
-        let result = client.delete_no_reply(KEY).await;
-        assert!(result.is_ok(), "failed to delete {}, {:?}", KEY, result);
+    #[tokio::test]
+    async fn test_set() {
+        let mut client = setup_client().await;
 
-        let result = client.add(KEY, "value", None, None).await;
+        let result = client.set(KEY, "value", None, None).await;
 
         assert!(result.is_ok());
     }
 
-    #[ignore = "Relies on a running memcached server"]
     #[tokio::test]
-    async fn test_delete() {
-        let mut client = Client::new("tcp://localhost:11211")
-            .await
-            .expect("Failed to connect to server");
+    async fn test_get_non_existent_key() {
+        let mut client = setup_client().await;
 
-        let key = "async-memcache-test-key";
+        let result = client.get(EMPTY_KEY).await;
 
-        let value = rand::random::<u64>().to_string();
-        let result = client.set(key, &value, None, None).await;
+        assert_eq!(result, Ok(None), "Expected None, got {:?}", result);
+    }
 
-        assert!(result.is_ok(), "failed to set {}, {:?}", key, result);
+    #[tokio::test]
+    async fn test_get_existing_key() {
+        let mut client = setup_client().await;
 
-        let result = client.get(key).await;
+        let result = client.get(KEY).await;
 
-        assert!(result.is_ok(), "failed to get {}, {:?}", key, result);
-        let get_result = result.unwrap();
+        let expected = Value {
+            key: KEY.as_bytes().to_vec(),
+            flags: 0,
+            cas: None,
+            data: b"value".to_vec(),
+        };
 
-        match get_result {
-            Some(get_value) => assert_eq!(
-                String::from_utf8(get_value.data).expect("failed to parse a string"),
-                value
-            ),
-            None => panic!("failed to get {}", key),
-        }
-
-        let result = client.delete(key).await;
-
-        assert!(result.is_ok(), "failed to delete {}, {:?}", key, result);
+        assert_eq!(
+            result,
+            Ok(Some(expected.clone())),
+            "Expected Ok(Some({:?})), got {:?}",
+            expected,
+            result
+        );
     }
 }
