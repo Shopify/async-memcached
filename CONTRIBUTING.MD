@@ -1,6 +1,6 @@
 # Contributing to Shopify/async-memcached
 
-We appreciate your interest in contributing to the Shopify/async-memcached! Your contributions help make our project better.
+We appreciate your interest in contributing to the Shopify/async-memcached! Your contributions help make our project better. This crate is meant to be a very barebones async memcached client.
 
 ## How to Contribute
 
