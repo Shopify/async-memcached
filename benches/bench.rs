@@ -77,7 +77,7 @@ fn bench_set_large(c: &mut Criterion) {
             let large_payload = "a".repeat(LARGE_PAYLOAD_SIZE);
             let start = std::time::Instant::now();
             for _ in 0..iters {
-                let _ = client.set("large_foo", &large_payload, Some(5), None).await;
+                let _ = client.set("large_foo", &large_payload, None, None).await;
             }
             start.elapsed()
         });
@@ -91,7 +91,7 @@ fn bench_get_large(c: &mut Criterion) {
     rt.block_on(async {
         let mut client = setup_client().await;
         client
-            .set("large_foo", &large_payload, Some(3600), None)
+            .set("large_foo", &large_payload, None, None)
             .await
             .unwrap();
     });
@@ -116,10 +116,7 @@ fn bench_get_many_large(c: &mut Criterion) {
     rt.block_on(async {
         let mut client = setup_client().await;
         for key in keys {
-            client
-                .set(key, &large_payload, Some(3600), None)
-                .await
-                .unwrap();
+            client.set(key, &large_payload, None, None).await.unwrap();
         }
     });
 
