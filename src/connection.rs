@@ -1,9 +1,10 @@
 use pin_project::pin_project;
 use std::io;
+use std::net::SocketAddr;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncBufRead, AsyncRead, AsyncWrite, BufReader, BufWriter};
-use tokio::net::{TcpStream, UnixStream};
+use tokio::net::{TcpSocket, TcpStream, UnixStream};
 
 use crate::Error;
 
@@ -108,10 +109,18 @@ impl Connection {
                 .await
                 .map(|c| Connection::Unix(BufReader::new(BufWriter::new(c))))
                 .map_err(Error::Connect),
-            Addr::Tcp(url) | Addr::Unknown(url) => TcpStream::connect(url)
-                .await
-                .map(|c| Connection::Tcp(BufReader::new(BufWriter::new(c))))
-                .map_err(Error::Connect),
+            Addr::Tcp(url) | Addr::Unknown(url) => {
+                let addr: SocketAddr = url.parse().map_err(|e| {
+                    Error::Connect(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        format!("Invalid address: {}", e),
+                    ))
+                })?;
+                let socket = TcpSocket::new_v4().map_err(Error::Connect)?;
+                socket.nodelay().map_err(Error::Connect)?;
+                let stream = socket.connect(addr).await.map_err(Error::Connect)?;
+                Ok(Connection::Tcp(BufReader::new(BufWriter::new(stream))))
+            }
         }
     }
 }
