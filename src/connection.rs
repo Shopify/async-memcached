@@ -117,7 +117,7 @@ impl Connection {
                     ))
                 })?;
                 let socket = TcpSocket::new_v4().map_err(Error::Connect)?;
-                socket.nodelay().map_err(Error::Connect)?;
+                socket.set_nodelay(true).map_err(Error::Connect)?;
                 let stream = socket.connect(addr).await.map_err(Error::Connect)?;
                 Ok(Connection::Tcp(BufReader::new(BufWriter::new(stream))))
             }
