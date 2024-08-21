@@ -1,6 +1,8 @@
 use std::fmt;
 mod ascii;
+mod meta;
 pub use ascii::{parse_ascii_metadump_response, parse_ascii_response, parse_ascii_stats_response};
+pub use meta::{parse_meta_response};
 
 /// A value from memcached.
 #[derive(Clone, Debug, PartialEq)]

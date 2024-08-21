@@ -13,7 +13,7 @@ pub use self::error::Error;
 
 mod parser;
 use self::parser::{
-    parse_ascii_metadump_response, parse_ascii_response, parse_ascii_stats_response, Response,
+    parse_ascii_metadump_response, parse_ascii_response, parse_ascii_stats_response, parse_meta_response, Response,
 };
 pub use self::parser::{ErrorKind, KeyMetadata, MetadumpResponse, StatsResponse, Status, Value};
 
@@ -95,6 +95,10 @@ impl Client {
         self.drive_receive(parse_ascii_response).await
     }
 
+    pub(crate) async fn meta_get_read_write_response(&mut self) -> Result<Response, Error> {
+        self.drive_receive(parse_meta_response).await
+    }
+
     pub(crate) async fn get_metadump_response(&mut self) -> Result<MetadumpResponse, Error> {
         self.drive_receive(parse_ascii_metadump_response).await
     }
@@ -115,6 +119,33 @@ impl Client {
         self.conn.flush().await?;
 
         match self.get_read_write_response().await? {
+            Response::Status(Status::NotFound) => Ok(None),
+            Response::Status(s) => Err(s.into()),
+            Response::Data(d) => d
+                .map(|mut items| {
+                    if items.len() != 1 {
+                        Err(Status::Error(ErrorKind::Protocol(None)).into())
+                    } else {
+                        Ok(items.remove(0))
+                    }
+                })
+                .transpose(),
+            _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),
+        }
+    }
+
+    /// Meta_Gets the given key.
+    ///
+    /// If the key is found, `Some(Value)` is returned, describing the metadata and data of the key.
+    ///
+    /// Otherwise, [`Error`] is returned.
+    pub async fn meta_get<K: AsRef<[u8]>>(&mut self, key: K) -> Result<Option<Value>, Error> {
+        self.conn.write_all(b"mg ").await?;
+        self.conn.write_all(key.as_ref()).await?;
+        self.conn.write_all(b"\r\n").await?;
+        self.conn.flush().await?;
+
+        match self.meta_get_read_write_response().await? {
             Response::Status(Status::NotFound) => Ok(None),
             Response::Status(s) => Err(s.into()),
             Response::Data(d) => d
@@ -384,10 +415,10 @@ mod tests {
 
     const KEY: &str = "async-memcache-test-key";
 
-    #[ignore = "Relies on a running memcached server"]
+    // #[ignore = "Relies on a running memcached server"]
     #[tokio::test]
     async fn test_add() {
-        let mut client = Client::new("tcp://localhost:11211")
+        let mut client = Client::new("tcp://127.0.0.1:11211")
             .await
             .expect("Failed to connect to server");
 
@@ -399,10 +430,10 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    #[ignore = "Relies on a running memcached server"]
+    // #[ignore = "Relies on a running memcached server"]
     #[tokio::test]
     async fn test_delete() {
-        let mut client = Client::new("tcp://localhost:11211")
+        let mut client = Client::new("tcp://127.0.0.1:11211")
             .await
             .expect("Failed to connect to server");
 
@@ -429,5 +460,37 @@ mod tests {
         let result = client.delete(key).await;
 
         assert!(result.is_ok(), "failed to delete {}, {:?}", key, result);
+    }
+
+    #[tokio::test]
+    async fn test_get_and_set() {
+        let mut client = Client::new("tcp://127.0.0.1:11211")
+            .await
+            .expect("Failed to connect to server");
+
+        let item = client.set(KEY, "value", None, None).await;
+
+        println!("{:?}", item);
+
+        let retrieved_item = client.get(KEY).await;
+
+        println!("{:?}", retrieved_item);
+    }
+
+    #[tokio::test]
+    async fn meta_get() {
+        let mut client = Client::new("tcp://127.0.0.1:11211")
+            .await
+            .expect("Failed to connect to server");
+
+        let item = client.set(KEY, "value", None, None).await;
+
+        println!("{:?}", item);
+
+        let retrieved_item = client.get(KEY).await;
+
+        println!("{:?}", retrieved_item);
+
+        let _meta_retrieved = client.meta_get(KEY).await;
     }
 }
