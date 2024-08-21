@@ -387,7 +387,7 @@ mod tests {
     #[ignore = "Relies on a running memcached server"]
     #[tokio::test]
     async fn test_add() {
-        let mut client = Client::new("tcp://localhost:11211")
+        let mut client = Client::new("tcp://127.0.0.1:11211")
             .await
             .expect("Failed to connect to server");
 
@@ -402,7 +402,7 @@ mod tests {
     #[ignore = "Relies on a running memcached server"]
     #[tokio::test]
     async fn test_delete() {
-        let mut client = Client::new("tcp://localhost:11211")
+        let mut client = Client::new("tcp://127.0.0.1:11211")
             .await
             .expect("Failed to connect to server");
 
