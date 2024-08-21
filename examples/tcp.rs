@@ -2,7 +2,7 @@ use async_memcached::Client;
 
 #[tokio::main]
 async fn main() {
-    let mut client = Client::new("localhost:11211")
+    let mut client = Client::new("tcp://127.0.0.1:11211")
         .await
         .expect("failed to create client");
 
@@ -25,6 +25,34 @@ async fn main() {
     match client.get_many(keys).await {
         Ok(values) => println!("got values: {:?}", values),
         Err(status) => println!("got status during get_many: {:?}", status),
+    }
+
+    match client.add("add_key", "bar", None, None).await {
+        Ok(()) => println!("added 'add_key' successfully"),
+        Err(status) => println!("got status during 'add_key' add: {:?}", status),
+    }
+
+    match client.add("add_key", "bar", None, None).await {
+        Ok(()) => panic!("should not be able to add 'add_key' again"),
+        Err(status) => println!(
+            "duplicate add of 'add_key' fails as expected with: {:?}",
+            status
+        ),
+    }
+
+    match client.delete("foo").await {
+        Ok(()) => println!("deleted 'foo' successfully"),
+        Err(status) => println!("got status during 'foo' delete: {:?}", status),
+    }
+
+    match client.delete_no_reply("add_key").await {
+        Ok(()) => println!("deleted_no_reply 'add_key' successfully"),
+        Err(status) => println!("got status during 'add_key' deleted_no_reply: {:?}", status),
+    }
+
+    match client.version().await {
+        Ok(version) => println!("version {}", version),
+        Err(status) => println!("got status during 'foo' delete: {:?}", status),
     }
 
     match client.stats().await {
