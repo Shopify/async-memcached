@@ -283,12 +283,20 @@ impl Client {
     /// Increments the given key by the specified amount
     pub async fn increment<K>(&mut self, key: K, amount: u64) -> Result<u64, Error>
     where
-        K: AsRef<[u8]>
+        K: AsRef<[u8]>,
     {
         // if key exists then increment key by amount
         self.conn
             .write_all(
-                &[b"incr ", key.as_ref(), b" ", amount.to_string().as_bytes(), b"\r\n"].concat())
+                &[
+                    b"incr ",
+                    key.as_ref(),
+                    b" ",
+                    amount.to_string().as_bytes(),
+                    b"\r\n",
+                ]
+                .concat(),
+            )
             .await?;
         self.conn.flush().await?;
 
