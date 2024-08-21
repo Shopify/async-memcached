@@ -34,7 +34,10 @@ async fn main() {
 
     match client.add("add_key", "bar", None, None).await {
         Ok(()) => panic!("should not be able to add 'add_key' again"),
-        Err(status) => println!("duplicate add of 'add_key' fails as expected with: {:?}", status),
+        Err(status) => println!(
+            "duplicate add of 'add_key' fails as expected with: {:?}",
+            status
+        ),
     }
 
     match client.delete("foo").await {
