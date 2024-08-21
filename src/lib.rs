@@ -95,6 +95,10 @@ impl Client {
         self.drive_receive(parse_ascii_response).await
     }
 
+    pub(crate) async fn get_incrdecr_response(&mut self) -> Result<Response, Error> {
+        self.drive_receive(parse_ascii_response).await
+    }
+
     pub(crate) async fn get_metadump_response(&mut self) -> Result<MetadumpResponse, Error> {
         self.drive_receive(parse_ascii_metadump_response).await
     }
@@ -276,6 +280,34 @@ impl Client {
         }
     }
 
+    /// Increments the given key by the specified amount
+    pub async fn increment<K>(&mut self, key: K, amount: u64) -> Result<u64, Error>
+    where
+        K: AsRef<[u8]>,
+    {
+        // if key exists then increment key by amount
+        self.conn
+            .write_all(
+                &[
+                    b"incr ",
+                    key.as_ref(),
+                    b" ",
+                    amount.to_string().as_bytes(),
+                    b"\r\n",
+                ]
+                .concat(),
+            )
+            .await?;
+        self.conn.flush().await?;
+
+        match self.get_incrdecr_response().await? {
+            Response::Status(Status::NotFound) => Err(Error::NotFound),
+            Response::Status(s) => Err(s.into()),
+            Response::IncrDecr(amount) => Ok(amount),
+            _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),
+        }
+    }
+
     /// Gets the version of the server.
     ///
     /// If the version is retrieved successfully, `String` is returned containing the version
@@ -429,5 +461,45 @@ mod tests {
         let result = client.delete(key).await;
 
         assert!(result.is_ok(), "failed to delete {}, {:?}", key, result);
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    async fn test_increment_when_key_doesnt_exist() {
+        let mut client = Client::new("tcp://127.0.0.1:11211")
+            .await
+            .expect("Failed to connect to server");
+
+        let key = "thisisakey";
+        let amount = 1;
+
+        let result = client.increment(key, amount).await;
+
+        println!("{:?}", result);
+
+        assert!(result.is_err());
+        // assert!(matches!(result, Err(Error::NotFound)))
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    async fn test_increments_existing_key() {
+        let mut client = Client::new("tcp://127.0.0.1:11211")
+            .await
+            .expect("Failed to connect to server");
+
+        let key = "thisisadifferentkey";
+        let value = "1";
+
+        let amount = 1;
+
+        let _ = client.set(key, &value, None, None).await;
+
+        let result = client.increment(key, amount).await;
+
+        println!("{:?}", result);
+
+        assert!(result.is_ok());
+        assert_eq!(Ok(2), result);
     }
 }
