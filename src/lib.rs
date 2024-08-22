@@ -3,7 +3,6 @@
 use std::collections::HashMap;
 
 use bytes::BytesMut;
-use itoa::Buffer;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 
 mod connection;
@@ -281,9 +280,9 @@ impl Client {
         }
     }
 
-    /// Increments the given key by the specified amount
-    /// Can overflow from the max value of u64 (18446744073709551615) -> 0
-    /// Returns the new value of the key if key exists, otherwise returns KeyNotFound error
+    /// Increments the given key by the specified amount.
+    /// Can overflow from the max value of u64 (18446744073709551615) -> 0.
+    /// Returns the new value of the key if key exists, otherwise returns KeyNotFound error.
     pub async fn increment<K>(&mut self, key: K, amount: u64) -> Result<u64, Error>
     where
         K: AsRef<[u8]>,
@@ -310,39 +309,31 @@ impl Client {
         }
     }
 
-    /// docs
-    pub async fn increment_with_itoa<K>(&mut self, key: K, amount: u64) -> Result<u64, Error>
+    /// Increments the given key by the specified amount with no reply from the server.
+    /// /// Can overflow from the max value of u64 (18446744073709551615) -> 0.
+    pub async fn increment_no_reply<K>(&mut self, key: K, amount: u64) -> Result<(), Error>
     where
         K: AsRef<[u8]>,
     {
-        let mut buffer = Buffer::new();
-        let amount_str = buffer.format(amount);
-
         self.conn
             .write_all(
                 &[
                     b"incr ",
                     key.as_ref(),
                     b" ",
-                    amount_str.as_bytes(),
-                    b"\r\n",
+                    amount.to_string().as_bytes(),
+                    b" noreply\r\n",
                 ]
                 .concat(),
             )
             .await?;
         self.conn.flush().await?;
 
-        match self.get_incrdecr_response().await? {
-            Response::Status(Status::NotFound) => Err(Error::KeyNotFound),
-            Response::Status(s) => Err(s.into()),
-            Response::IncrDecr(amount) => Ok(amount),
-            _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),
-        }
+        Ok(())
     }
 
-    /// Decrements the given key by the specified amount
-    /// Will not decrement below 0
-    /// Returns the new value of the key if key exists, otherwise returns KeyNotFound error
+    /// Decrements the given key by the specified amount.
+    /// Will not decrement the counter below 0.
     pub async fn decrement<K>(&mut self, key: K, amount: u64) -> Result<u64, Error>
     where
         K: AsRef<[u8]>,
@@ -367,6 +358,30 @@ impl Client {
             Response::IncrDecr(amount) => Ok(amount),
             _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),
         }
+    }
+
+    /// Decrements the given key by the specified amount with no reply from the server.
+    /// Will not decrement the counter below 0.
+    /// Returns the new value of the key if key exists, otherwise returns KeyNotFound error.
+    pub async fn decrement_no_reply<K>(&mut self, key: K, amount: u64) -> Result<(), Error>
+    where
+        K: AsRef<[u8]>,
+    {
+        self.conn
+            .write_all(
+                &[
+                    b"decr ",
+                    key.as_ref(),
+                    b" ",
+                    amount.to_string().as_bytes(),
+                    b" noreply\r\n",
+                ]
+                .concat(),
+            )
+            .await?;
+        self.conn.flush().await?;
+
+        Ok(())
     }
 
     /// Gets the version of the server.
@@ -475,7 +490,7 @@ impl<'a> MetadumpIter<'a> {
 mod tests {
     use super::*;
 
-    const KEY: &str = "async-memcache-test-key";
+    // const KEY: &str = "async-memcache-test-key";
 
     #[ignore = "Relies on a running memcached server"]
     #[tokio::test]
@@ -484,10 +499,12 @@ mod tests {
             .await
             .expect("Failed to connect to server");
 
-        let result = client.delete_no_reply(KEY).await;
-        assert!(result.is_ok(), "failed to delete {}, {:?}", KEY, result);
+        let key = "async-memcache-test-key-add";
 
-        let result = client.add(KEY, "value", None, None).await;
+        let result = client.delete_no_reply(key).await;
+        assert!(result.is_ok(), "failed to delete {}, {:?}", key, result);
+
+        let result = client.add(key, "value", None, None).await;
 
         assert!(result.is_ok());
     }
@@ -499,7 +516,7 @@ mod tests {
             .await
             .expect("Failed to connect to server");
 
-        let key = "async-memcache-test-key";
+        let key = "async-memcache-test-key-delete";
 
         let value = rand::random::<u64>().to_string();
         let result = client.set(key, &value, None, None).await;
@@ -520,6 +537,38 @@ mod tests {
         }
 
         let result = client.delete(key).await;
+
+        assert!(result.is_ok(), "failed to delete {}, {:?}", key, result);
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    async fn test_delete_no_reply() {
+        let mut client = Client::new("tcp://127.0.0.1:11211")
+            .await
+            .expect("Failed to connect to server");
+
+        let key = "async-memcache-test-key-delete-no-reply";
+
+        let value = rand::random::<u64>().to_string();
+        let result = client.set(key, &value, None, None).await;
+
+        assert!(result.is_ok(), "failed to set {}, {:?}", key, result);
+
+        let result = client.get(key).await;
+
+        assert!(result.is_ok(), "failed to get {}, {:?}", key, result);
+        let get_result = result.unwrap();
+
+        match get_result {
+            Some(get_value) => assert_eq!(
+                String::from_utf8(get_value.data).expect("failed to parse a string"),
+                value
+            ),
+            None => panic!("failed to get {}", key),
+        }
+
+        let result = client.delete_no_reply(key).await;
 
         assert!(result.is_ok(), "failed to delete {}, {:?}", key, result);
     }
@@ -556,6 +605,8 @@ mod tests {
 
         let result = client.increment(key, amount).await;
 
+        println!("result: {:?}", result);
+
         assert!(result.is_ok());
         assert_eq!(Ok(2), result);
     }
@@ -577,14 +628,38 @@ mod tests {
         // First increment should overflow
         let result = client.increment(key, amount).await;
 
+        println!("result: {:?}", result);
+
         assert!(result.is_ok());
         assert_eq!(Ok(0), result);
 
         // Subsequent increments should work as normal
         let result = client.increment(key, amount).await;
 
+        println!("result: {:?}", result);
+
         assert!(result.is_ok());
         assert_eq!(Ok(1), result);
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    async fn test_increments_existing_key_with_no_reply() {
+        let mut client = Client::new("tcp://127.0.0.1:11211")
+            .await
+            .expect("Failed to connect to server");
+
+        let key = "key-to-increment-no-reply";
+        let value = "1";
+
+        let _ = client.set(key, &value, None, None).await;
+
+        let amount = 1;
+
+        let result = client.increment_no_reply(key, amount).await;
+
+        assert!(result.is_ok());
+        assert_eq!(Ok(()), result);
     }
 
     #[ignore = "Relies on a running memcached server"]
@@ -598,8 +673,6 @@ mod tests {
         let amount = 1;
 
         let result = client.decrement(key, amount).await;
-
-        println!("{:?}", result);
 
         assert!(result.is_err());
         assert!(matches!(result, Err(Error::KeyNotFound)))
@@ -643,5 +716,25 @@ mod tests {
 
         assert!(result.is_ok());
         assert_eq!(Ok(0), result);
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    async fn test_decrements_existing_key_with_no_reply() {
+        let mut client = Client::new("tcp://127.0.0.1:11211")
+            .await
+            .expect("Failed to connect to server");
+
+        let key = "key-to-decrement-no-reply";
+        let value = "1";
+
+        let _ = client.set(key, &value, None, None).await;
+
+        let amount = 1;
+
+        let result = client.decrement_no_reply(key, amount).await;
+
+        assert!(result.is_ok());
+        assert_eq!(Ok(()), result);
     }
 }

@@ -152,35 +152,14 @@ fn bench_increment(c: &mut Criterion) {
     });
 }
 
-fn bench_increment_with_itoa(c: &mut Criterion) {
-    let rt = Runtime::new().unwrap();
-
-    rt.block_on(async {
-        let mut client = setup_client().await;
-        client.set("foo", "bar", None, None).await.unwrap();
-    });
-
-    c.bench_function("increment_with_itoa", |b| {
-        b.to_async(&rt).iter_custom(|iters| async move {
-            let mut client = setup_client().await;
-            let start = std::time::Instant::now();
-            for _ in 0..iters {
-                let _ = client.increment_with_itoa("foo", 1).await;
-            }
-            start.elapsed()
-        });
-    });
-}
-
 criterion_group!(
     benches,
-    // bench_get,
-    // bench_set,
-    // bench_get_many,
-    // bench_set_large,
-    // bench_get_large,
-    // bench_get_many_large,
+    bench_get,
+    bench_set,
+    bench_get_many,
+    bench_set_large,
+    bench_get_large,
+    bench_get_many_large,
     bench_increment,
-    bench_increment_with_itoa,
 );
 criterion_main!(benches);
