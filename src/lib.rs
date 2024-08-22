@@ -493,12 +493,12 @@ mod tests {
 
     #[ignore = "Relies on a running memcached server"]
     #[tokio::test]
-    async fn test_increment_errors_when_key_doesnt_exist() {
+    async fn test_increment_raises_error_when_key_doesnt_exist() {
         let mut client = Client::new("tcp://127.0.0.1:11211")
             .await
             .expect("Failed to connect to server");
 
-        let key = "fails-to-increment";
+        let key = "key-does-not-exist";
         let amount = 1;
 
         let result = client.increment(key, amount).await;
@@ -517,9 +517,9 @@ mod tests {
         let key = "key-to-increment";
         let value = "1";
 
-        let amount = 1;
-
         let _ = client.set(key, &value, None, None).await;
+
+        let amount = 1;
 
         let result = client.increment(key, amount).await;
 
@@ -529,7 +529,27 @@ mod tests {
 
     #[ignore = "Relies on a running memcached server"]
     #[tokio::test]
-    async fn test_decrement_errors_when_key_doesnt_exist() {
+    async fn test_increment_can_overflow() {
+        let mut client = Client::new("tcp://127.0.0.1:11211")
+            .await
+            .expect("Failed to connect to server");
+
+        let key = "key-to-increment-overflow";
+        let value = "18446744073709551615"; // max value for u64
+
+        let _ = client.set(key, &value, None, None).await;
+
+        let amount = 1;
+
+        let result = client.increment(key, amount).await;
+
+        assert!(result.is_ok());
+        assert_eq!(Ok(0), result);
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    async fn test_decrement_raises_error_when_key_doesnt_exist() {
         let mut client = Client::new("tcp://127.0.0.1:11211")
             .await
             .expect("Failed to connect to server");
@@ -555,9 +575,9 @@ mod tests {
         let key = "key-to-decrement";
         let value = "2";
 
-        let amount = 1;
-
         let _ = client.set(key, &value, None, None).await;
+
+        let amount = 1;
 
         let result = client.decrement(key, amount).await;
 
@@ -567,7 +587,7 @@ mod tests {
 
     #[ignore = "Relies on a running memcached server"]
     #[tokio::test]
-    async fn test_does_not_decrement_below_zero() {
+    async fn test_decrement_does_not_reduce_value_below_zero() {
         let mut client = Client::new("tcp://127.0.0.1:11211")
             .await
             .expect("Failed to connect to server");
@@ -575,9 +595,9 @@ mod tests {
         let key = "key-to-decrement-past-zero";
         let value = 0.to_string();
 
-        let amount = 1;
-
         let _ = client.set(key, &value, None, None).await;
+
+        let amount = 1;
 
         let result = client.decrement(key, amount).await;
 
