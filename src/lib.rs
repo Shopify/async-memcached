@@ -3,7 +3,6 @@
 use std::collections::HashMap;
 
 use bytes::BytesMut;
-use itoa::Buffer;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 
 mod connection;
@@ -334,31 +333,6 @@ impl Client {
         Ok(())
     }
 
-    /// docs
-    pub async fn increment_with_itoa<K>(&mut self, key: K, amount: u64) -> Result<u64, Error>
-    where
-        K: AsRef<[u8]>,
-    {
-        println!("incr {:?} {:?}\r\n", key.as_ref(), amount.to_string());
-
-        let mut buffer = Buffer::new();
-        let amount_str = buffer.format(amount);
-
-        println!("incr {:?} {:?}\r\n", key.as_ref(), amount_str);
-
-        self.conn
-            .write_all(&[b"incr ", key.as_ref(), b" ", amount_str.as_bytes(), b"\r\n"].concat())
-            .await?;
-        self.conn.flush().await?;
-
-        match self.get_incrdecr_response().await? {
-            Response::Status(Status::NotFound) => Err(Error::KeyNotFound),
-            Response::Status(s) => Err(s.into()),
-            Response::IncrDecr(amount) => Ok(amount),
-            _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),
-        }
-    }
-
     /// Decrements the given key by the specified amount.
     /// Will not decrement the counter below 0.
     /// Returns the new value of the key if key exists, otherwise returns KeyNotFound error.
@@ -634,26 +608,6 @@ mod tests {
         let result = client.increment(key, amount).await;
 
         println!("result: {:?}", result);
-
-        assert!(result.is_ok());
-        assert_eq!(Ok(2), result);
-    }
-
-    #[ignore = "Relies on a running memcached server"]
-    #[tokio::test]
-    async fn test_itoa_increments_existing_key() {
-        let mut client = Client::new("tcp://127.0.0.1:11211")
-            .await
-            .expect("Failed to connect to server");
-
-        let key = "key-to-increment-with-itoa";
-        let value = "1";
-
-        let _ = client.set(key, &value, None, None).await;
-
-        let amount = 1;
-
-        let result = client.increment_with_itoa(key, amount).await;
 
         assert!(result.is_ok());
         assert_eq!(Ok(2), result);
