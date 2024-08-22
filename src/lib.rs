@@ -490,8 +490,6 @@ impl<'a> MetadumpIter<'a> {
 mod tests {
     use super::*;
 
-    // const KEY: &str = "async-memcache-test-key";
-
     #[ignore = "Relies on a running memcached server"]
     #[tokio::test]
     async fn test_add() {
