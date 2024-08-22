@@ -347,16 +347,7 @@ impl Client {
         println!("incr {:?} {:?}\r\n", key.as_ref(), amount_str);
 
         self.conn
-            .write_all(
-                &[
-                    b"incr ",
-                    key.as_ref(),
-                    b" ",
-                    amount_str.as_bytes(),
-                    b"\r\n",
-                ]
-                .concat(),
-            )
+            .write_all(&[b"incr ", key.as_ref(), b" ", amount_str.as_bytes(), b"\r\n"].concat())
             .await?;
         self.conn.flush().await?;
 
