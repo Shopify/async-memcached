@@ -311,7 +311,6 @@ impl Client {
 
     /// Increments the given key by the specified amount with no reply from the server.
     /// /// Can overflow from the max value of u64 (18446744073709551615) -> 0.
-    /// Returns the new value of the key if key exists, otherwise returns KeyNotFound error.
     pub async fn increment_no_reply<K>(&mut self, key: K, amount: u64) -> Result<(), Error>
     where
         K: AsRef<[u8]>,
@@ -335,7 +334,6 @@ impl Client {
 
     /// Decrements the given key by the specified amount.
     /// Will not decrement the counter below 0.
-    /// Returns the new value of the key if key exists, otherwise returns KeyNotFound error.
     pub async fn decrement<K>(&mut self, key: K, amount: u64) -> Result<u64, Error>
     where
         K: AsRef<[u8]>,
