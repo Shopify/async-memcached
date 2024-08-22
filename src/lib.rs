@@ -301,7 +301,35 @@ impl Client {
         self.conn.flush().await?;
 
         match self.get_incrdecr_response().await? {
-            Response::Status(Status::NotFound) => Err(Error::NotFound),
+            Response::Status(Status::NotFound) => Err(Error::KeyNotFound),
+            Response::Status(s) => Err(s.into()),
+            Response::IncrDecr(amount) => Ok(amount),
+            _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),
+        }
+    }
+
+    /// Increments the given key by the specified amount
+    pub async fn decrement<K>(&mut self, key: K, amount: u64) -> Result<u64, Error>
+    where
+        K: AsRef<[u8]>,
+    {
+        // if key exists then decrement key by amount
+        self.conn
+            .write_all(
+                &[
+                    b"decr ",
+                    key.as_ref(),
+                    b" ",
+                    amount.to_string().as_bytes(),
+                    b"\r\n",
+                ]
+                .concat(),
+            )
+            .await?;
+        self.conn.flush().await?;
+
+        match self.get_incrdecr_response().await? {
+            Response::Status(Status::NotFound) => Err(Error::KeyNotFound),
             Response::Status(s) => Err(s.into()),
             Response::IncrDecr(amount) => Ok(amount),
             _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),
@@ -465,20 +493,18 @@ mod tests {
 
     #[ignore = "Relies on a running memcached server"]
     #[tokio::test]
-    async fn test_increment_when_key_doesnt_exist() {
+    async fn test_increment_errors_when_key_doesnt_exist() {
         let mut client = Client::new("tcp://127.0.0.1:11211")
             .await
             .expect("Failed to connect to server");
 
-        let key = "thisisakey";
+        let key = "fails-to-increment";
         let amount = 1;
 
         let result = client.increment(key, amount).await;
 
-        println!("{:?}", result);
-
         assert!(result.is_err());
-        // assert!(matches!(result, Err(Error::NotFound)))
+        assert!(matches!(result, Err(Error::KeyNotFound)))
     }
 
     #[ignore = "Relies on a running memcached server"]
@@ -488,7 +514,7 @@ mod tests {
             .await
             .expect("Failed to connect to server");
 
-        let key = "thisisadifferentkey";
+        let key = "key-to-increment";
         let value = "1";
 
         let amount = 1;
@@ -497,9 +523,65 @@ mod tests {
 
         let result = client.increment(key, amount).await;
 
-        println!("{:?}", result);
-
         assert!(result.is_ok());
         assert_eq!(Ok(2), result);
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    async fn test_decrement_errors_when_key_doesnt_exist() {
+        let mut client = Client::new("tcp://127.0.0.1:11211")
+            .await
+            .expect("Failed to connect to server");
+
+        let key = "fails-to-decrement";
+        let amount = 1;
+
+        let result = client.decrement(key, amount).await;
+
+        println!("{:?}", result);
+
+        assert!(result.is_err());
+        assert!(matches!(result, Err(Error::KeyNotFound)))
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    async fn test_decrements_existing_key() {
+        let mut client = Client::new("tcp://127.0.0.1:11211")
+            .await
+            .expect("Failed to connect to server");
+
+        let key = "key-to-decrement";
+        let value = "2";
+
+        let amount = 1;
+
+        let _ = client.set(key, &value, None, None).await;
+
+        let result = client.decrement(key, amount).await;
+
+        assert!(result.is_ok());
+        assert_eq!(Ok(1), result);
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    async fn test_does_not_decrement_below_zero() {
+        let mut client = Client::new("tcp://127.0.0.1:11211")
+            .await
+            .expect("Failed to connect to server");
+
+        let key = "key-to-decrement-past-zero";
+        let value = 0.to_string();
+
+        let amount = 1;
+
+        let _ = client.set(key, &value, None, None).await;
+
+        let result = client.decrement(key, amount).await;
+
+        assert!(result.is_ok());
+        assert_eq!(Ok(0), result);
     }
 }
