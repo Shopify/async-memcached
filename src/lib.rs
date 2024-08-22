@@ -293,7 +293,7 @@ impl Client {
                     b"incr ",
                     key.as_ref(),
                     b" ",
-                    &amount.to_string().as_bytes(),
+                    amount.to_string().as_bytes(),
                     b"\r\n",
                 ]
                 .concat(),
@@ -322,7 +322,7 @@ impl Client {
                     b"incr ",
                     key.as_ref(),
                     b" ",
-                    &amount.to_string().as_bytes(),
+                    amount.to_string().as_bytes(),
                     b" noreply\r\n",
                 ]
                 .concat(),
