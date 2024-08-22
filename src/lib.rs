@@ -331,13 +331,6 @@ impl Client {
             .await?;
         self.conn.flush().await?;
 
-        // no response - no incrdecr_response
-        // match self.get_incrdecr_response().await? {
-        //     Response::Status(Status::NotFound) => Err(Error::KeyNotFound),
-        //     Response::Status(s) => Err(s.into()),
-        //     Response::IncrDecr(amount) => Ok(amount),
-        //     _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),
-        // }
         Ok(())
     }
 
@@ -425,13 +418,6 @@ impl Client {
             .await?;
         self.conn.flush().await?;
 
-        // no response - no incrdecr_response
-        // match self.get_incrdecr_response().await? {
-        //     Response::Status(Status::NotFound) => Err(Error::KeyNotFound),
-        //     Response::Status(s) => Err(s.into()),
-        //     Response::IncrDecr(amount) => Ok(amount),
-        //     _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),
-        // }
         Ok(())
     }
 
