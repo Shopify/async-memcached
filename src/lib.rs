@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 
 use bytes::BytesMut;
+use itoa::Buffer;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 
 mod connection;
@@ -294,6 +295,36 @@ impl Client {
                     key.as_ref(),
                     b" ",
                     amount.to_string().as_bytes(),
+                    b"\r\n",
+                ]
+                .concat(),
+            )
+            .await?;
+        self.conn.flush().await?;
+
+        match self.get_incrdecr_response().await? {
+            Response::Status(Status::NotFound) => Err(Error::KeyNotFound),
+            Response::Status(s) => Err(s.into()),
+            Response::IncrDecr(amount) => Ok(amount),
+            _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),
+        }
+    }
+
+    /// docs
+    pub async fn increment_with_itoa<K>(&mut self, key: K, amount: u64) -> Result<u64, Error>
+    where
+        K: AsRef<[u8]>,
+    {
+        let mut buffer = Buffer::new();
+        let amount_str = buffer.format(amount);
+
+        self.conn
+            .write_all(
+                &[
+                    b"incr ",
+                    key.as_ref(),
+                    b" ",
+                    amount_str.as_bytes(),
                     b"\r\n",
                 ]
                 .concat(),
