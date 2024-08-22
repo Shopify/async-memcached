@@ -95,10 +95,6 @@ impl Client {
         self.drive_receive(parse_ascii_response).await
     }
 
-    pub(crate) async fn get_incrdecr_response(&mut self) -> Result<Response, Error> {
-        self.drive_receive(parse_ascii_response).await
-    }
-
     pub(crate) async fn get_metadump_response(&mut self) -> Result<MetadumpResponse, Error> {
         self.drive_receive(parse_ascii_metadump_response).await
     }
@@ -301,7 +297,7 @@ impl Client {
             .await?;
         self.conn.flush().await?;
 
-        match self.get_incrdecr_response().await? {
+        match self.get_read_write_response().await? {
             Response::Status(Status::NotFound) => Err(Error::KeyNotFound),
             Response::Status(s) => Err(s.into()),
             Response::IncrDecr(amount) => Ok(amount),
@@ -352,7 +348,7 @@ impl Client {
             .await?;
         self.conn.flush().await?;
 
-        match self.get_incrdecr_response().await? {
+        match self.get_read_write_response().await? {
             Response::Status(Status::NotFound) => Err(Error::KeyNotFound),
             Response::Status(s) => Err(s.into()),
             Response::IncrDecr(amount) => Ok(amount),
@@ -489,8 +485,6 @@ impl<'a> MetadumpIter<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // const KEY: &str = "async-memcache-test-key";
 
     #[ignore = "Relies on a running memcached server"]
     #[tokio::test]
