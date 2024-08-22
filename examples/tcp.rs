@@ -52,29 +52,53 @@ async fn main() {
 
     let amount = 1;
     let increment_key = "increment_key";
-    client.set(increment_key, "0", None, None).await.expect("failed to set increment_key");
+    client
+        .set(increment_key, "0", None, None)
+        .await
+        .expect("failed to set increment_key");
 
     match client.increment("increment_key", amount).await {
-        Ok(value) => println!("incremented 'increment_key' by {} successfully, to {}", amount, value),
+        Ok(value) => println!(
+            "incremented 'increment_key' by {} successfully, to {}",
+            amount, value
+        ),
         Err(status) => println!("got status during 'increment_key' increment: {:?}", status),
     }
 
     match client.increment_no_reply("increment_key", amount).await {
-        Ok(()) => println!("incremented_no_reply 'increment_key' by {} successfully", amount),
-        Err(status) => println!("got status during 'increment_no_reply' increment_no_reply: {:?}", status),
+        Ok(()) => println!(
+            "incremented_no_reply 'increment_key' by {} successfully",
+            amount
+        ),
+        Err(status) => println!(
+            "got status during 'increment_no_reply' increment_no_reply: {:?}",
+            status
+        ),
     }
 
     let decrement_key = "decrement_key";
-    client.set(decrement_key, "10", None, None).await.expect("failed to set decrement_key");
+    client
+        .set(decrement_key, "10", None, None)
+        .await
+        .expect("failed to set decrement_key");
 
     match client.decrement("decrement_key", amount).await {
-        Ok(value) => println!("decremented 'decrement_key' by {} successfully, to {}", amount, value),
+        Ok(value) => println!(
+            "decremented 'decrement_key' by {} successfully, to {}",
+            amount, value
+        ),
         Err(status) => println!("got status during 'decrement_key' decrement: {:?}", status),
     }
 
     match client.decrement_no_reply("decrement_key", amount).await {
-        Ok(()) => println!("decremented_no_reply 'decrement_key' by {} successfully", amount),
-        Err(status) => println!("got status during 'decrement_no_reply' decrement_no_reply: {:?}", status),
+        Ok(()) => println!(
+            "decremented_no_reply 'decrement_key' by {} successfully",
+            amount
+        ),
+        Err(status) => println!(
+            "got status during 'decrement_no_reply' decrement_no_reply: {:?}",
+            status
+        ),
     }
 
     match client.version().await {
