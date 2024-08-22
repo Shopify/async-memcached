@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 
 use bytes::BytesMut;
+use itoa::Buffer;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 
 mod connection;
@@ -281,11 +282,12 @@ impl Client {
     }
 
     /// Increments the given key by the specified amount
+    /// Can overflow from the max value of u64 (18446744073709551615) -> 0
+    /// Returns the new value of the key if key exists, otherwise returns KeyNotFound error
     pub async fn increment<K>(&mut self, key: K, amount: u64) -> Result<u64, Error>
     where
         K: AsRef<[u8]>,
     {
-        // if key exists then increment key by amount
         self.conn
             .write_all(
                 &[
@@ -308,12 +310,43 @@ impl Client {
         }
     }
 
-    /// Increments the given key by the specified amount
+    /// docs
+    pub async fn increment_with_itoa<K>(&mut self, key: K, amount: u64) -> Result<u64, Error>
+    where
+        K: AsRef<[u8]>,
+    {
+        let mut buffer = Buffer::new();
+        let amount_str = buffer.format(amount);
+
+        self.conn
+            .write_all(
+                &[
+                    b"incr ",
+                    key.as_ref(),
+                    b" ",
+                    amount_str.as_bytes(),
+                    b"\r\n",
+                ]
+                .concat(),
+            )
+            .await?;
+        self.conn.flush().await?;
+
+        match self.get_incrdecr_response().await? {
+            Response::Status(Status::NotFound) => Err(Error::KeyNotFound),
+            Response::Status(s) => Err(s.into()),
+            Response::IncrDecr(amount) => Ok(amount),
+            _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),
+        }
+    }
+
+    /// Decrements the given key by the specified amount
+    /// Will not decrement below 0
+    /// Returns the new value of the key if key exists, otherwise returns KeyNotFound error
     pub async fn decrement<K>(&mut self, key: K, amount: u64) -> Result<u64, Error>
     where
         K: AsRef<[u8]>,
     {
-        // if key exists then decrement key by amount
         self.conn
             .write_all(
                 &[
@@ -493,12 +526,12 @@ mod tests {
 
     #[ignore = "Relies on a running memcached server"]
     #[tokio::test]
-    async fn test_increment_errors_when_key_doesnt_exist() {
+    async fn test_increment_raises_error_when_key_doesnt_exist() {
         let mut client = Client::new("tcp://127.0.0.1:11211")
             .await
             .expect("Failed to connect to server");
 
-        let key = "fails-to-increment";
+        let key = "key-does-not-exist";
         let amount = 1;
 
         let result = client.increment(key, amount).await;
@@ -517,9 +550,9 @@ mod tests {
         let key = "key-to-increment";
         let value = "1";
 
-        let amount = 1;
-
         let _ = client.set(key, &value, None, None).await;
+
+        let amount = 1;
 
         let result = client.increment(key, amount).await;
 
@@ -529,7 +562,34 @@ mod tests {
 
     #[ignore = "Relies on a running memcached server"]
     #[tokio::test]
-    async fn test_decrement_errors_when_key_doesnt_exist() {
+    async fn test_increment_can_overflow() {
+        let mut client = Client::new("tcp://127.0.0.1:11211")
+            .await
+            .expect("Failed to connect to server");
+
+        let key = "key-to-increment-overflow";
+        let value = "18446744073709551615"; // max value for u64
+
+        let _ = client.set(key, &value, None, None).await;
+
+        let amount = 1;
+
+        // First increment should overflow
+        let result = client.increment(key, amount).await;
+
+        assert!(result.is_ok());
+        assert_eq!(Ok(0), result);
+
+        // Subsequent increments should work as normal
+        let result = client.increment(key, amount).await;
+
+        assert!(result.is_ok());
+        assert_eq!(Ok(1), result);
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    async fn test_decrement_raises_error_when_key_doesnt_exist() {
         let mut client = Client::new("tcp://127.0.0.1:11211")
             .await
             .expect("Failed to connect to server");
@@ -555,9 +615,9 @@ mod tests {
         let key = "key-to-decrement";
         let value = "2";
 
-        let amount = 1;
-
         let _ = client.set(key, &value, None, None).await;
+
+        let amount = 1;
 
         let result = client.decrement(key, amount).await;
 
@@ -567,7 +627,7 @@ mod tests {
 
     #[ignore = "Relies on a running memcached server"]
     #[tokio::test]
-    async fn test_does_not_decrement_below_zero() {
+    async fn test_decrement_does_not_reduce_value_below_zero() {
         let mut client = Client::new("tcp://127.0.0.1:11211")
             .await
             .expect("Failed to connect to server");
@@ -575,9 +635,9 @@ mod tests {
         let key = "key-to-decrement-past-zero";
         let value = 0.to_string();
 
-        let amount = 1;
-
         let _ = client.set(key, &value, None, None).await;
+
+        let amount = 1;
 
         let result = client.decrement(key, amount).await;
 
