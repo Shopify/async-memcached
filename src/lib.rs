@@ -308,7 +308,7 @@ impl Client {
         }
     }
 
-    /// Increments the given key by the specified amount
+    /// Decrements the given key by the specified amount
     pub async fn decrement<K>(&mut self, key: K, amount: u64) -> Result<u64, Error>
     where
         K: AsRef<[u8]>,
