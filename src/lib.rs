@@ -281,11 +281,12 @@ impl Client {
     }
 
     /// Increments the given key by the specified amount
+    /// Can overflow from the max value of u64 (18446744073709551615) -> 0
+    /// Returns the new value of the key if key exists, otherwise returns KeyNotFound error
     pub async fn increment<K>(&mut self, key: K, amount: u64) -> Result<u64, Error>
     where
         K: AsRef<[u8]>,
     {
-        // if key exists then increment key by amount
         self.conn
             .write_all(
                 &[
@@ -309,11 +310,12 @@ impl Client {
     }
 
     /// Decrements the given key by the specified amount
+    /// Will not decrement below 0
+    /// Returns the new value of the key if key exists, otherwise returns KeyNotFound error
     pub async fn decrement<K>(&mut self, key: K, amount: u64) -> Result<u64, Error>
     where
         K: AsRef<[u8]>,
     {
-        // if key exists then decrement key by amount
         self.conn
             .write_all(
                 &[
@@ -541,10 +543,17 @@ mod tests {
 
         let amount = 1;
 
+        // First increment should overflow
         let result = client.increment(key, amount).await;
 
         assert!(result.is_ok());
         assert_eq!(Ok(0), result);
+
+        // Subsequent increments should work as normal
+        let result = client.increment(key, amount).await;
+
+        assert!(result.is_ok());
+        assert_eq!(Ok(1), result);
     }
 
     #[ignore = "Relies on a running memcached server"]
