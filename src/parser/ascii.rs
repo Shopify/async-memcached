@@ -139,6 +139,9 @@ pub fn parse_ascii_response(buf: &[u8]) -> Result<Option<(usize, Response)>, Err
     }
 }
 
+pub fn parse_ascii_many_response(buf: &[u8]) -> Result<Option<(usize, Response)>, ErrorKind> {
+}
+
 fn parse_lru_crawler_errors(buf: &[u8]) -> IResult<&[u8], MetadumpResponse> {
     terminated(
         alt((

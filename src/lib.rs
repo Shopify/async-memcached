@@ -98,6 +98,10 @@ impl Client {
         self.drive_receive(parse_ascii_response).await
     }
 
+    pub(crate) async fn get_read_write_many_response(&mut self) -> Result<Response, Error> {
+        self.drive_receive(parse_ascii_response).await
+    }
+
     pub(crate) async fn get_metadump_response(&mut self) -> Result<MetadumpResponse, Error> {
         self.drive_receive(parse_ascii_metadump_response).await
     }
@@ -145,7 +149,7 @@ impl Client {
         K: AsRef<[u8]>,
     {
         self.conn.write_all(b"get ").await?;
-        for key in keys.into_iter() {
+        for key in keys {
             self.conn.write_all(key.as_ref()).await?;
             self.conn.write_all(b" ").await?;
         }
@@ -193,6 +197,55 @@ impl Client {
 
         self.conn.write_all(vr.as_ref()).await?;
         self.conn.write_all(b"\r\n").await?;
+        self.conn.flush().await?;
+
+        match self.get_read_write_many_response().await? {
+            Response::Status(Status::Stored) => Ok(()),
+            Response::Status(s) => Err(s.into()),
+            _ => Err(Status::Error(ErrorKind::Protocol(None)).into()),
+        }
+    }
+
+    /// Sets the given keys.
+    ///
+    /// If `ttl` or `flags` are not specified, they will default to 0.  If the value is set
+    /// successfully, `()` is returned, otherwise [`Error`] is returned.
+    pub async fn set_multi<I, J, K, V>(
+        &mut self,
+        keys: I,
+        values: J,
+        ttl: Option<i64>,
+        flags: Option<u32>,
+    ) -> Result<(), Error>
+    where
+        I: IntoIterator<Item = K>,
+        J: IntoIterator<Item = V>,
+        K: AsRef<[u8]>,
+        V: AsRef<[u8]>,
+    {
+        for (key, value) in keys.into_iter().zip(values.into_iter()) {
+            let kr = key.as_ref();
+            let vr = value.as_ref();
+
+            self.conn.write_all(b"set ").await?;
+            self.conn.write_all(kr).await?;
+
+            let flags = flags.unwrap_or(0).to_string();
+            self.conn.write_all(b" ").await?;
+            self.conn.write_all(flags.as_ref()).await?;
+
+            let ttl = ttl.unwrap_or(0).to_string();
+            self.conn.write_all(b" ").await?;
+            self.conn.write_all(ttl.as_ref()).await?;
+
+            self.conn.write_all(b" ").await?;
+            let vlen = vr.len().to_string();
+            self.conn.write_all(vlen.as_ref()).await?;
+            self.conn.write_all(b"\r\n").await?;
+
+            self.conn.write_all(vr).await?;
+            self.conn.write_all(b"\r\n").await?;
+        }
         self.conn.flush().await?;
 
         match self.get_read_write_response().await? {
@@ -668,6 +721,29 @@ mod tests {
         let result = client.delete_no_reply(key).await;
 
         assert!(result.is_ok(), "failed to delete {}, {:?}", key, result);
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    async fn test_set_multi() {
+        let mut client = Client::new("tcp://127.0.0.1:11211")
+            .await
+            .expect("Failed to connect to server");
+
+        let keys = vec!["key1", "key2", "key3"];
+        let values = vec!["value1", "value2", "value3"];
+
+        let response = match client.set_multi(keys, values, None, None).await {
+            Ok(_) => (),
+            Err(e) => panic!("failed to set_multi: {}", e),
+        };
+
+        assert_eq!(response, ());
+
+        let result = client.get("key2").await;
+
+        println!("result: {:?}", result);
+        assert!(result.is_ok());
     }
 
     #[ignore = "Relies on a running memcached server"]
