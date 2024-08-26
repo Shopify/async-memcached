@@ -11,12 +11,18 @@ async fn main() {
         Err(status) => println!("got status during 'foo' get: {:?}", status),
     }
 
-    match client.set("foo", "might do popeyes", Some(5), None).await {
+    match client
+        .set("foo", "might do popeyes", Some(5), None)
+        .await
+    {
         Ok(()) => println!("set 'foo' successfully"),
         Err(status) => println!("got status during 'foo' set: {:?}", status),
     }
 
-    match client.set("bar", "barvalue", Some(5), None).await {
+    match client
+        .set("bar", "barvalue", Some(5), None)
+        .await
+    {
         Ok(()) => println!("set 'bar' successfully"),
         Err(status) => println!("got status during 'bar' set: {:?}", status),
     }
@@ -27,12 +33,12 @@ async fn main() {
         Err(status) => println!("got status during get_many: {:?}", status),
     }
 
-    match client.add("add_key", "bar", None, None).await {
+    match client.add("add_key", "bar".to_string(), None, None).await {
         Ok(()) => println!("added 'add_key' successfully"),
         Err(status) => println!("got status during 'add_key' add: {:?}", status),
     }
 
-    match client.add("add_key", "bar", None, None).await {
+    match client.add("add_key", "bar".to_string(), None, None).await {
         Ok(()) => panic!("should not be able to add 'add_key' again"),
         Err(status) => println!(
             "duplicate add of 'add_key' fails as expected with: {:?}",

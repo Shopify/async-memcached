@@ -15,7 +15,10 @@ fn bench_get(c: &mut Criterion) {
 
     rt.block_on(async {
         let mut client = setup_client().await;
-        client.set("foo", "bar", None, None).await.unwrap();
+        client
+            .set("foo", "bar", None, None)
+            .await
+            .unwrap();
     });
 
     c.bench_function("get_small", |b| {
@@ -52,7 +55,10 @@ fn bench_get_many(c: &mut Criterion) {
     rt.block_on(async {
         let mut client = setup_client().await;
         for key in keys {
-            client.set(key, "zzz", None, None).await.unwrap();
+            client
+                .set(key, "zzz", None, None)
+                .await
+                .unwrap();
         }
     });
 
@@ -77,7 +83,9 @@ fn bench_set_large(c: &mut Criterion) {
             let large_payload = "a".repeat(LARGE_PAYLOAD_SIZE);
             let start = std::time::Instant::now();
             for _ in 0..iters {
-                let _ = client.set("large_foo", &large_payload, None, None).await;
+                let _ = client
+                    .set("large_foo", large_payload.as_str(), None, None)
+                    .await;
             }
             start.elapsed()
         });
@@ -91,7 +99,7 @@ fn bench_get_large(c: &mut Criterion) {
     rt.block_on(async {
         let mut client = setup_client().await;
         client
-            .set("large_foo", &large_payload, None, None)
+            .set("large_foo", large_payload.as_str(), None, None)
             .await
             .unwrap();
     });
@@ -116,7 +124,10 @@ fn bench_get_many_large(c: &mut Criterion) {
     rt.block_on(async {
         let mut client = setup_client().await;
         for key in keys {
-            client.set(key, &large_payload, None, None).await.unwrap();
+            client
+                .set(key, large_payload.as_str(), None, None)
+                .await
+                .unwrap();
         }
     });
 
@@ -137,7 +148,7 @@ fn bench_increment(c: &mut Criterion) {
 
     rt.block_on(async {
         let mut client = setup_client().await;
-        client.set("foo", "bar", None, None).await.unwrap();
+        client.set("foo", 0, None, None).await.unwrap();
     });
 
     c.bench_function("increment", |b| {

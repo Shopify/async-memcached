@@ -3,7 +3,6 @@
 use std::collections::HashMap;
 
 use bytes::BytesMut;
-use once_cell::sync::Lazy;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 
 mod connection;
@@ -28,28 +27,21 @@ pub struct Client {
     conn: Connection,
 }
 
-/// A trait for parsing input of either u64 or str into bytes.
+/// A trait for parsing input of either u8 or str into ascii.
 pub trait ParseInput<T> {
     /// Parses the input into the target type.
-    fn parse_input(&self) -> &[u8];
+    fn parse_input(&self) -> Vec<u8>;
 }
 
 impl ParseInput<u64> for u64 {
-    fn parse_input(&self) -> &[u8] {
-        static mut BUFFER: Lazy<Vec<u8>> = Lazy::new(|| vec![0; 20]); // max size for u64 is 20 digits / bytes
-        let mut buf = itoa::Buffer::new();
-        let s = buf.format(*self);
-        unsafe {
-            let buffer = BUFFER.as_mut_slice();
-            buffer[..s.len()].copy_from_slice(s.as_bytes());
-            &buffer[..s.len()]
-        }
+    fn parse_input(&self) -> Vec<u8> {
+        self.to_string().into_bytes()
     }
 }
 
-impl ParseInput<&str> for &str {
-    fn parse_input(&self) -> &[u8] {
-        self.as_bytes()
+impl ParseInput<String> for String {
+    fn parse_input(&self) -> Vec<u8> {
+        self.as_bytes().to_vec()
     }
 }
 
@@ -220,7 +212,7 @@ impl Client {
         self.conn.write_all(vlen.as_ref()).await?;
         self.conn.write_all(b"\r\n").await?;
 
-        self.conn.write_all(vr).await?;
+        self.conn.write_all(&vr).await?;
         self.conn.write_all(b"\r\n").await?;
         self.conn.flush().await?;
 
@@ -542,15 +534,14 @@ mod tests {
 
         let key = "async-memcache-test-key-delete";
 
-        let value = format!("{}",rand::random::<u64>());
-        let result = client.set(key, value.as_str(), None, None).await;
+        let value = rand::random::<u64>().to_string();
+        let result = client.set(key, value.clone(), None, None).await;
 
         assert!(result.is_ok(), "failed to set {}, {:?}", key, result);
 
         let result = client.get(key).await;
 
         assert!(result.is_ok(), "failed to get {}, {:?}", key, result);
-
         let get_result = result.unwrap();
 
         match get_result {
@@ -575,15 +566,14 @@ mod tests {
 
         let key = "async-memcache-test-key-delete-no-reply";
 
-        let value = format!("{}",rand::random::<u64>());
-        let result = client.set(key, value.as_str(), None, None).await;
+        let value = rand::random::<u64>().to_string();
+        let result = client.set(key, value.clone(), None, None).await;
 
         assert!(result.is_ok(), "failed to set {}, {:?}", key, result);
 
         let result = client.get(key).await;
 
         assert!(result.is_ok(), "failed to get {}, {:?}", key, result);
-
         let get_result = result.unwrap();
 
         match get_result {
@@ -645,7 +635,7 @@ mod tests {
             .expect("Failed to connect to server");
 
         let key = "key-to-increment-overflow";
-        let value = u64::MAX; // max value for u64
+        let value = u64::MAX.to_string(); // max value for u64
 
         let _ = client.set(key, value, None, None).await;
 
@@ -676,9 +666,9 @@ mod tests {
             .expect("Failed to connect to server");
 
         let key = "key-to-increment-no-reply";
-        let value = 1;
+        let value = "1";
 
-        let _ = client.set(key, value, None, None).await;
+        let _ = client.set(key, value.to_string(), None, None).await;
 
         let amount = 1;
 
@@ -712,20 +702,16 @@ mod tests {
             .expect("Failed to connect to server");
 
         let key = "key-to-decrement";
-        let value = 10;
+        let value = 2;
 
         let _ = client.set(key, value, None, None).await;
-
-        // let get_response = client.get("key-to-decrement").await;
-
-        // println!("get_response: {:?}", get_response);
 
         let amount = 1;
 
         let result = client.decrement(key, amount).await;
 
         assert!(result.is_ok());
-        assert_eq!(Ok(9), result);
+        assert_eq!(Ok(1), result);
     }
 
     #[ignore = "Relies on a running memcached server"]

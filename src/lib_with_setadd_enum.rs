@@ -3,7 +3,6 @@
 use std::collections::HashMap;
 
 use bytes::BytesMut;
-use once_cell::sync::Lazy;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 
 mod connection;
@@ -22,50 +21,32 @@ pub use self::parser::{ErrorKind, KeyMetadata, MetadumpResponse, StatsResponse, 
 ///
 /// [`Client`] is mapped one-to-one with a given connection to a memcached server, and provides a
 /// high-level API for executing commands on that connection.
-pub struct Client {
+pub struct Client<'a> {
     buf: BytesMut,
     last_read_n: Option<usize>,
     conn: Connection,
+    _phantom: std::marker::PhantomData<&'a ()>,
 }
 
-/// A trait for parsing input of either u64 or str into bytes.
-pub trait ParseInput<T> {
-    /// Parses the input into the target type.
-    fn parse_input(&self) -> &[u8];
+enum SetAddInput<'a> {
+    Str(&'a str),
+    Int(u8),
 }
 
-impl ParseInput<u64> for u64 {
-    fn parse_input(&self) -> &[u8] {
-        static mut BUFFER: Lazy<Vec<u8>> = Lazy::new(|| vec![0; 20]); // max size for u64 is 20 digits / bytes
-        let mut buf = itoa::Buffer::new();
-        let s = buf.format(*self);
-        unsafe {
-            let buffer = BUFFER.as_mut_slice();
-            buffer[..s.len()].copy_from_slice(s.as_bytes());
-            &buffer[..s.len()]
-        }
-    }
-}
-
-impl ParseInput<&str> for &str {
-    fn parse_input(&self) -> &[u8] {
-        self.as_bytes()
-    }
-}
-
-impl Client {
+impl<'a> Client<'a> {
     /// Creates a new [`Client`] based on the given data source string.
     ///
     /// Supports UNIX domain sockets and TCP connections.
     /// For TCP: the DSN should be in the format of `tcp://<IP>:<port>` or `<IP>:<port>`.
     /// For UNIX: the DSN should be in the format of `unix://<path>`.
-    pub async fn new<S: AsRef<str>>(dsn: S) -> Result<Client, Error> {
+    pub async fn new<S: AsRef<str>>(dsn: S) -> Result<Client<'a>, Error> {
         let connection = Connection::new(dsn).await?;
 
         Ok(Client {
             buf: BytesMut::new(),
             last_read_n: None,
             conn: connection,
+            _phantom: std::marker::PhantomData,
         })
     }
 
@@ -190,19 +171,18 @@ impl Client {
     ///
     /// If `ttl` or `flags` are not specified, they will default to 0.  If the value is set
     /// successfully, `()` is returned, otherwise [`Error`] is returned.
-    pub async fn set<K, V>(
+    pub async fn set<K>(
         &mut self,
         key: K,
-        value: V,
+        value: SetAddInput<'a>,
         ttl: Option<i64>,
         flags: Option<u32>,
     ) -> Result<(), Error>
     where
         K: AsRef<[u8]>,
-        V: ParseInput<V>,
     {
         let kr = key.as_ref();
-        let vr = value.parse_input();
+        let vr = value;
 
         self.conn.write_all(b"set ").await?;
         self.conn.write_all(kr).await?;
@@ -220,7 +200,7 @@ impl Client {
         self.conn.write_all(vlen.as_ref()).await?;
         self.conn.write_all(b"\r\n").await?;
 
-        self.conn.write_all(vr).await?;
+        self.conn.write_all(&vr).await?;
         self.conn.write_all(b"\r\n").await?;
         self.conn.flush().await?;
 
@@ -542,15 +522,14 @@ mod tests {
 
         let key = "async-memcache-test-key-delete";
 
-        let value = format!("{}",rand::random::<u64>());
-        let result = client.set(key, value.as_str(), None, None).await;
+        let value = rand::random::<u64>().to_string();
+        let result = client.set(key, &value, None, None).await;
 
         assert!(result.is_ok(), "failed to set {}, {:?}", key, result);
 
         let result = client.get(key).await;
 
         assert!(result.is_ok(), "failed to get {}, {:?}", key, result);
-
         let get_result = result.unwrap();
 
         match get_result {
@@ -575,15 +554,14 @@ mod tests {
 
         let key = "async-memcache-test-key-delete-no-reply";
 
-        let value = format!("{}",rand::random::<u64>());
-        let result = client.set(key, value.as_str(), None, None).await;
+        let value = rand::random::<u64>().to_string();
+        let result = client.set(key, &value, None, None).await;
 
         assert!(result.is_ok(), "failed to set {}, {:?}", key, result);
 
         let result = client.get(key).await;
 
         assert!(result.is_ok(), "failed to get {}, {:?}", key, result);
-
         let get_result = result.unwrap();
 
         match get_result {
@@ -623,9 +601,9 @@ mod tests {
             .expect("Failed to connect to server");
 
         let key = "key-to-increment";
-        let value = 1;
+        let value = "1";
 
-        let _ = client.set(key, value, None, None).await;
+        let _ = client.set(key, &value, None, None).await;
 
         let amount = 1;
 
@@ -645,9 +623,9 @@ mod tests {
             .expect("Failed to connect to server");
 
         let key = "key-to-increment-overflow";
-        let value = u64::MAX; // max value for u64
+        let value = u64::MAX.to_string(); // max value for u64
 
-        let _ = client.set(key, value, None, None).await;
+        let _ = client.set(key, &value, None, None).await;
 
         let amount = 1;
 
@@ -676,9 +654,9 @@ mod tests {
             .expect("Failed to connect to server");
 
         let key = "key-to-increment-no-reply";
-        let value = 1;
+        let value = "1";
 
-        let _ = client.set(key, value, None, None).await;
+        let _ = client.set(key, &value, None, None).await;
 
         let amount = 1;
 
@@ -712,20 +690,16 @@ mod tests {
             .expect("Failed to connect to server");
 
         let key = "key-to-decrement";
-        let value = 10;
+        let value = "2";
 
-        let _ = client.set(key, value, None, None).await;
-
-        // let get_response = client.get("key-to-decrement").await;
-
-        // println!("get_response: {:?}", get_response);
+        let _ = client.set(key, &value, None, None).await;
 
         let amount = 1;
 
         let result = client.decrement(key, amount).await;
 
         assert!(result.is_ok());
-        assert_eq!(Ok(9), result);
+        assert_eq!(Ok(1), result);
     }
 
     #[ignore = "Relies on a running memcached server"]
@@ -736,9 +710,9 @@ mod tests {
             .expect("Failed to connect to server");
 
         let key = "key-to-decrement-past-zero";
-        let value = 0;
+        let value = 0.to_string();
 
-        let _ = client.set(key, value, None, None).await;
+        let _ = client.set(key, &value, None, None).await;
 
         let amount = 1;
 
@@ -756,9 +730,9 @@ mod tests {
             .expect("Failed to connect to server");
 
         let key = "key-to-decrement-no-reply";
-        let value = 1;
+        let value = "1";
 
-        let _ = client.set(key, value, None, None).await;
+        let _ = client.set(key, &value, None, None).await;
 
         let amount = 1;
 
