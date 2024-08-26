@@ -28,12 +28,12 @@ async fn main() {
         Err(status) => println!("got status during get_many: {:?}", status),
     }
 
-    match client.add("add_key", "bar".to_string(), None, None).await {
+    match client.add("add_key", "bar", None, None).await {
         Ok(()) => println!("added 'add_key' successfully"),
         Err(status) => println!("got status during 'add_key' add: {:?}", status),
     }
 
-    match client.add("add_key", "bar".to_string(), None, None).await {
+    match client.add("add_key", "bar", None, None).await {
         Ok(()) => panic!("should not be able to add 'add_key' again"),
         Err(status) => println!(
             "duplicate add of 'add_key' fails as expected with: {:?}",
@@ -46,9 +46,9 @@ async fn main() {
         Err(status) => println!("got status during 'foo' delete: {:?}", status),
     }
 
-    match client.delete_no_reply("add_key").await {
-        Ok(()) => println!("deleted_no_reply 'add_key' successfully"),
-        Err(status) => println!("got status during 'add_key' deleted_no_reply: {:?}", status),
+    match client.delete_no_reply("foo").await {
+        Ok(()) => println!("deleted_no_reply 'foo' successfully"),
+        Err(status) => println!("got status during 'foo' deleted_no_reply: {:?}", status),
     }
 
     let amount = 1;
