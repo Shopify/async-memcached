@@ -1,10 +1,14 @@
 //! A Tokio-based memcached client.
 #![deny(warnings, missing_docs)]
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    io::Write,
+};
 
 use bytes::BytesMut;
 use once_cell::sync::Lazy;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
+use itoa;
 
 mod connection;
 use self::connection::Connection;
@@ -36,14 +40,8 @@ pub trait ParseInput<T> {
 
 impl ParseInput<u64> for u64 {
     fn parse_input(&self) -> &[u8] {
-        static mut BUFFER: Lazy<Vec<u8>> = Lazy::new(|| vec![0; 20]); // max size for u64 is 20 digits / bytes
-        let mut buf = itoa::Buffer::new();
-        let s = buf.format(*self);
-        unsafe {
-            let buffer = BUFFER.as_mut_slice();
-            buffer[..s.len()].copy_from_slice(s.as_bytes());
-            &buffer[..s.len()]
-        }
+
+        self.to_be_bytes()
     }
 }
 
