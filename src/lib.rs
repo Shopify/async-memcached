@@ -98,8 +98,27 @@ impl Client {
         self.drive_receive(parse_ascii_response).await
     }
 
-    pub(crate) async fn get_read_write_many_response(&mut self) -> Result<Response, Error> {
-        self.drive_receive(parse_ascii_response).await
+    pub(crate) async fn get_read_write_many_response(
+        &mut self,
+        num_results: usize,
+    ) -> Result<(), Error> {
+        let mut results: Vec<Result<(), Error>> = Vec::new();
+
+        for _ in 0..num_results {
+            results.push(match self.drive_receive(parse_ascii_response).await? {
+                Response::Status(Status::Stored) => Ok(()),
+                Response::Status(s) => Err(s.into()),
+                _ => Err(Status::Error(ErrorKind::Protocol(None)).into()),
+            });
+        }
+
+        let errors: Vec<_> = results.into_iter().filter(|r| r.is_err()).collect();
+
+        if errors.contains(&Err(Status::Error(ErrorKind::Protocol(None)).into())) {
+            return Err(Status::Error(ErrorKind::Protocol(None)).into());
+        }
+
+        Ok(())
     }
 
     pub(crate) async fn get_metadump_response(&mut self) -> Result<MetadumpResponse, Error> {
@@ -199,7 +218,7 @@ impl Client {
         self.conn.write_all(b"\r\n").await?;
         self.conn.flush().await?;
 
-        match self.get_read_write_many_response().await? {
+        match self.get_read_write_response().await? {
             Response::Status(Status::Stored) => Ok(()),
             Response::Status(s) => Err(s.into()),
             _ => Err(Status::Error(ErrorKind::Protocol(None)).into()),
@@ -223,7 +242,11 @@ impl Client {
         K: AsRef<[u8]>,
         V: AsRef<[u8]>,
     {
+        let mut num_results = 0;
+
         for (key, value) in keys.into_iter().zip(values.into_iter()) {
+            num_results += 1;
+
             let kr = key.as_ref();
             let vr = value.as_ref();
 
@@ -248,11 +271,7 @@ impl Client {
         }
         self.conn.flush().await?;
 
-        match self.get_read_write_response().await? {
-            Response::Status(Status::Stored) => Ok(()),
-            Response::Status(s) => Err(s.into()),
-            _ => Err(Status::Error(ErrorKind::Protocol(None)).into()),
-        }
+        self.get_read_write_many_response(num_results).await
     }
 
     /// Add a key. If the value exists, Err(Protocol(NotStored)) is returned.
@@ -733,18 +752,32 @@ mod tests {
         let keys = vec!["key1", "key2", "key3"];
         let values = vec!["value1", "value2", "value3"];
 
-        let response = match client.set_multi(keys, values, None, None).await {
-            Ok(_) => (),
-            Err(e) => panic!("failed to set_multi: {}", e),
-        };
+        let response = client.set_multi(keys, values, None, None).await;
 
-        assert_eq!(response, ());
+        assert!(response.is_ok());
 
         let result = client.get("key2").await;
 
         println!("result: {:?}", result);
+
         assert!(result.is_ok());
     }
+
+    // #[ignore = "Relies on a running memcached server"]
+    // #[tokio::test]
+    // async fn test_set_multi_errors() {
+    //     // TODO: Need toxiproxy to simulate a failure
+    //     let mut client = Client::new("tcp://127.0.0.1:11211")
+    //         .await
+    //         .expect("Failed to connect to server");
+
+    //     let keys = vec!["key1", "key2", "key3"];
+    //     let values = vec!["value1", "value2", "value3"];
+
+    //     let result = client.set_multi(keys, values, None, None).await;
+
+    //     assert!(result.is_err());
+    // }
 
     #[ignore = "Relies on a running memcached server"]
     #[tokio::test]

@@ -286,6 +286,7 @@ fn bench_decrement_no_reply(c: &mut Criterion) {
 criterion_group!(
     benches,
     bench_get,
+    bench_get_many,
     bench_set_with_string,
     bench_set_with_u64,
     bench_add_with_string,
