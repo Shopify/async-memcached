@@ -2,6 +2,7 @@
 #![deny(warnings, missing_docs)]
 use std::{
     collections::HashMap,
+    fmt::Display,
     io::Write,
 };
 
@@ -38,10 +39,9 @@ pub trait ParseInput<T> {
     fn parse_input(&self) -> &[u8];
 }
 
-impl ParseInput<u64> for u64 {
+impl <R: AsRef<[u8]>> ParseInput<R> for u64 {
     fn parse_input(&self) -> &[u8] {
-
-        self.to_be_bytes()
+        self.as_ref();
     }
 }
 
@@ -50,6 +50,12 @@ impl ParseInput<&str> for &str {
         self.as_bytes()
     }
 }
+
+// impl <R: AsRef> ParseInput <R> for u64 {
+//     fn as_ref(&self) -> &[u8] {
+//         self.to_string().as_bytes()
+//     }
+// }
 
 impl Client {
     /// Creates a new [`Client`] based on the given data source string.
@@ -197,10 +203,11 @@ impl Client {
     ) -> Result<(), Error>
     where
         K: AsRef<[u8]>,
-        V: ParseInput<V>,
+        V: AsRef<[u8]> + Display,
     {
         let kr = key.as_ref();
-        let vr = value.parse_input();
+        let vr = value.to_string();
+        let vr = vr.as_bytes();
 
         self.conn.write_all(b"set ").await?;
         self.conn.write_all(kr).await?;
