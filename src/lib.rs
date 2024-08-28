@@ -205,6 +205,51 @@ impl Client {
         }
     }
 
+    /// Sets the given key.
+    ///
+    /// If `ttl` or `flags` are not specified, they will default to 0.  If the value is set
+    /// successfully, `()` is returned, otherwise [`Error`] is returned.
+    pub async fn original_set<K, V>(
+        &mut self,
+        key: K,
+        value: V,
+        ttl: Option<i64>,
+        flags: Option<u32>,
+    ) -> Result<(), Error>
+    where
+        K: AsRef<[u8]>,
+        V: AsRef<[u8]>,
+    {
+        let kr = key.as_ref();
+        let vr = value.as_ref();
+
+        self.conn.write_all(b"set ").await?;
+        self.conn.write_all(kr).await?;
+
+        let flags = flags.unwrap_or(0).to_string();
+        self.conn.write_all(b" ").await?;
+        self.conn.write_all(flags.as_ref()).await?;
+
+        let ttl = ttl.unwrap_or(0).to_string();
+        self.conn.write_all(b" ").await?;
+        self.conn.write_all(ttl.as_ref()).await?;
+
+        self.conn.write_all(b" ").await?;
+        let vlen = vr.len().to_string();
+        self.conn.write_all(vlen.as_ref()).await?;
+        self.conn.write_all(b"\r\n").await?;
+
+        self.conn.write_all(vr).await?;
+        self.conn.write_all(b"\r\n").await?;
+        self.conn.flush().await?;
+
+        match self.get_read_write_response().await? {
+            Response::Status(Status::Stored) => Ok(()),
+            Response::Status(s) => Err(s.into()),
+            _ => Err(Status::Error(ErrorKind::Protocol(None)).into()),
+        }
+    }
+
     /// Add a key. If the value exists, Err(Protocol(NotStored)) is returned.
     pub async fn add<K, V>(
         &mut self,
