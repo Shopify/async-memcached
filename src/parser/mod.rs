@@ -106,18 +106,19 @@ pub struct KeyMetadata {
 /// A trait for parsing input of either u64 or str into Vec<u8>.
 pub trait ParseInput<T> {
     /// Parses the input into the target type.
-    fn parse_input(&self) -> Vec<u8>;
+    fn parse_input(&self) -> &[u8];
 }
 
 impl ParseInput<u64> for u64 {
-    fn parse_input(&self) -> Vec<u8> {
-        self.to_string().into_bytes()
+    fn parse_input(&self) -> &[u8] {
+        let s = self.to_string();
+        unsafe { std::slice::from_raw_parts(s.as_ptr(), s.len()) }
     }
 }
 
 impl ParseInput<&str> for &str {
-    fn parse_input(&self) -> Vec<u8> {
-        self.as_bytes().to_vec()
+    fn parse_input(&self) -> &[u8] {
+        self.as_bytes()
     }
 }
 

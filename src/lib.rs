@@ -15,7 +15,9 @@ mod parser;
 use self::parser::{
     parse_ascii_metadump_response, parse_ascii_response, parse_ascii_stats_response, Response,
 };
-pub use self::parser::{ErrorKind, KeyMetadata, MetadumpResponse, StatsResponse, Status, Value, ParseInput};
+pub use self::parser::{
+    ErrorKind, KeyMetadata, MetadumpResponse, ParseInput, StatsResponse, Status, Value,
+};
 
 /// High-level memcached client.
 ///
@@ -561,7 +563,7 @@ mod tests {
 
         let key = "async-memcache-test-key-delete";
 
-        let value = format!("{}",rand::random::<u64>());
+        let value = format!("{}", rand::random::<u64>());
         let result = client.set(key, value.as_str(), None, None).await;
 
         assert!(result.is_ok(), "failed to set {}, {:?}", key, result);
@@ -594,7 +596,7 @@ mod tests {
 
         let key = "async-memcache-test-key-delete-no-reply";
 
-        let value = format!("{}",rand::random::<u64>());
+        let value = format!("{}", rand::random::<u64>());
         let result = client.set(key, value.as_str(), None, None).await;
 
         assert!(result.is_ok(), "failed to set {}, {:?}", key, result);

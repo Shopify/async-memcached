@@ -15,10 +15,7 @@ fn bench_get(c: &mut Criterion) {
 
     rt.block_on(async {
         let mut client = setup_client().await;
-        client
-            .set("foo", "bar", None, None)
-            .await
-            .unwrap();
+        client.set("foo", "bar", None, None).await.unwrap();
     });
 
     c.bench_function("get_small", |b| {
@@ -85,10 +82,7 @@ fn bench_get_many(c: &mut Criterion) {
     rt.block_on(async {
         let mut client = setup_client().await;
         for key in keys {
-            client
-                .set(key, "zzz", None, None)
-                .await
-                .unwrap();
+            client.set(key, "zzz", None, None).await.unwrap();
         }
     });
 
@@ -215,8 +209,8 @@ criterion_group!(
     benches,
     bench_get,
     bench_parsed_set_with_string,
-    bench_parsed_set_with_u64,
     bench_original_set_with_string,
+    bench_parsed_set_with_u64,
     bench_get_many,
     bench_new_set_large_with_string,
     bench_original_set_large_with_string,
