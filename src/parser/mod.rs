@@ -1,6 +1,7 @@
 use std::fmt;
 mod ascii;
 pub use ascii::{parse_ascii_metadump_response, parse_ascii_response, parse_ascii_stats_response};
+use nom::AsBytes;
 
 /// A value from memcached.
 #[derive(Clone, Debug, PartialEq)]
@@ -111,13 +112,20 @@ pub trait ParseInput<T> {
 
 impl ParseInput<u64> for u64 {
     fn parse_input(&self) -> &[u8] {
+
+        println!("self in parse_input<u64>: {}", self);
         let s = self.to_string();
-        unsafe { std::slice::from_raw_parts(s.as_ptr(), s.len()) }
+        let slice = unsafe { std::slice::from_raw_parts(s.as_ptr(), s.len()) };
+
+        println!("slice in parse_input<u64>: {:?}", slice);
+        println!("slice in parse_input<u64>: {:?}", slice.as_ref().as_bytes());
+        return slice.as_ref().as_bytes();
     }
 }
 
 impl ParseInput<&str> for &str {
     fn parse_input(&self) -> &[u8] {
+        println!("self in parse_input<&str>: {}", self);
         self.as_bytes()
     }
 }
