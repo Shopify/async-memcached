@@ -1,15 +1,9 @@
 //! A Tokio-based memcached client.
 #![deny(warnings, missing_docs)]
-use std::{
-    collections::HashMap,
-    fmt::Display,
-    io::Write,
-};
+use std::collections::HashMap;
 
 use bytes::BytesMut;
-use once_cell::sync::Lazy;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
-use itoa;
 
 mod connection;
 use self::connection::Connection;
@@ -21,7 +15,7 @@ mod parser;
 use self::parser::{
     parse_ascii_metadump_response, parse_ascii_response, parse_ascii_stats_response, Response,
 };
-pub use self::parser::{ErrorKind, KeyMetadata, MetadumpResponse, StatsResponse, Status, Value};
+pub use self::parser::{ErrorKind, KeyMetadata, MetadumpResponse, StatsResponse, Status, Value, ParseInput};
 
 /// High-level memcached client.
 ///
@@ -32,30 +26,6 @@ pub struct Client {
     last_read_n: Option<usize>,
     conn: Connection,
 }
-
-/// A trait for parsing input of either u64 or str into bytes.
-pub trait ParseInput<T> {
-    /// Parses the input into the target type.
-    fn parse_input(&self) -> &[u8];
-}
-
-impl <R: AsRef<[u8]>> ParseInput<R> for u64 {
-    fn parse_input(&self) -> &[u8] {
-        self.as_ref();
-    }
-}
-
-impl ParseInput<&str> for &str {
-    fn parse_input(&self) -> &[u8] {
-        self.as_bytes()
-    }
-}
-
-// impl <R: AsRef> ParseInput <R> for u64 {
-//     fn as_ref(&self) -> &[u8] {
-//         self.to_string().as_bytes()
-//     }
-// }
 
 impl Client {
     /// Creates a new [`Client`] based on the given data source string.
@@ -203,11 +173,10 @@ impl Client {
     ) -> Result<(), Error>
     where
         K: AsRef<[u8]>,
-        V: AsRef<[u8]> + Display,
+        V: ParseInput<V>,
     {
         let kr = key.as_ref();
-        let vr = value.to_string();
-        let vr = vr.as_bytes();
+        let vr = value.parse_input();
 
         self.conn.write_all(b"set ").await?;
         self.conn.write_all(kr).await?;
@@ -225,7 +194,7 @@ impl Client {
         self.conn.write_all(vlen.as_ref()).await?;
         self.conn.write_all(b"\r\n").await?;
 
-        self.conn.write_all(vr).await?;
+        self.conn.write_all(&vr).await?;
         self.conn.write_all(b"\r\n").await?;
         self.conn.flush().await?;
 

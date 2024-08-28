@@ -33,15 +33,30 @@ fn bench_get(c: &mut Criterion) {
     });
 }
 
-fn bench_set(c: &mut Criterion) {
+fn bench_set_with_string(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
 
-    c.bench_function("set_small", |b| {
+    c.bench_function("set_small_string_with_parse_input", |b| {
         b.to_async(&rt).iter_custom(|iters| async move {
             let mut client = setup_client().await;
             let start = std::time::Instant::now();
             for _ in 0..iters {
                 let _ = client.set("foo", "bar", None, None).await;
+            }
+            start.elapsed()
+        });
+    });
+}
+
+fn bench_set_with_u64(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+
+    c.bench_function("set_small_int", |b| {
+        b.to_async(&rt).iter_custom(|iters| async move {
+            let mut client = setup_client().await;
+            let start = std::time::Instant::now();
+            for _ in 0..iters {
+                let _ = client.set("foo", 1, None, None).await;
             }
             start.elapsed()
         });
@@ -166,7 +181,8 @@ fn bench_increment(c: &mut Criterion) {
 criterion_group!(
     benches,
     bench_get,
-    bench_set,
+    bench_set_with_string,
+    bench_set_with_u64,
     bench_get_many,
     bench_set_large,
     bench_get_large,

@@ -103,6 +103,24 @@ pub struct KeyMetadata {
     pub size: u32,
 }
 
+/// A trait for parsing input of either u64 or str into Vec<u8>.
+pub trait ParseInput<T> {
+    /// Parses the input into the target type.
+    fn parse_input(&self) -> Vec<u8>;
+}
+
+impl ParseInput<u64> for u64 {
+    fn parse_input(&self) -> Vec<u8> {
+        self.to_string().into_bytes()
+    }
+}
+
+impl ParseInput<&str> for &str {
+    fn parse_input(&self) -> Vec<u8> {
+        self.as_bytes().to_vec()
+    }
+}
+
 impl fmt::Display for Status {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
