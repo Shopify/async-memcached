@@ -12,8 +12,6 @@ pub enum Error {
     /// A protocol-level error i.e. a failed operation or message that
     /// does not match the protocol specification.
     Protocol(Status),
-    /// Key not found for incrdecr
-    KeyNotFound,
 }
 
 impl PartialEq for Error {
@@ -42,7 +40,6 @@ impl fmt::Display for Error {
             Self::Connect(e) => write!(f, "connect: {}", e),
             Self::Io(e) => write!(f, "io: {}", e),
             Self::Protocol(e) => write!(f, "protocol: {}", e),
-            Self::KeyNotFound => write!(f, "key not found"),
         }
     }
 }

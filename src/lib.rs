@@ -298,10 +298,9 @@ impl Client {
         self.conn.flush().await?;
 
         match self.get_read_write_response().await? {
-            Response::Status(Status::NotFound) => Err(Error::KeyNotFound),
             Response::Status(s) => Err(s.into()),
             Response::IncrDecr(amount) => Ok(amount),
-            _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),
+            _ => Err(Status::Error(ErrorKind::Protocol(None)).into()),
         }
     }
 
@@ -349,10 +348,9 @@ impl Client {
         self.conn.flush().await?;
 
         match self.get_read_write_response().await? {
-            Response::Status(Status::NotFound) => Err(Error::KeyNotFound),
             Response::Status(s) => Err(s.into()),
             Response::IncrDecr(amount) => Ok(amount),
-            _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),
+            _ => Err(Status::Error(ErrorKind::Protocol(None)).into()),
         }
     }
 
@@ -579,8 +577,7 @@ mod tests {
 
         let result = client.increment(key, amount).await;
 
-        assert!(result.is_err());
-        assert!(matches!(result, Err(Error::KeyNotFound)))
+        assert!(matches!(result, Err(Error::Protocol(Status::NotFound))));
     }
 
     #[ignore = "Relies on a running memcached server"]
@@ -599,9 +596,6 @@ mod tests {
 
         let result = client.increment(key, amount).await;
 
-        println!("result: {:?}", result);
-
-        assert!(result.is_ok());
         assert_eq!(Ok(2), result);
     }
 
@@ -622,17 +616,11 @@ mod tests {
         // First increment should overflow
         let result = client.increment(key, amount).await;
 
-        println!("result: {:?}", result);
-
-        assert!(result.is_ok());
         assert_eq!(Ok(0), result);
 
         // Subsequent increments should work as normal
         let result = client.increment(key, amount).await;
 
-        println!("result: {:?}", result);
-
-        assert!(result.is_ok());
         assert_eq!(Ok(1), result);
     }
 
@@ -646,13 +634,12 @@ mod tests {
         let key = "key-to-increment-no-reply";
         let value = "1";
 
-        let _ = client.set(key, &value, None, None).await;
+        let _ = client.set(key, value, None, None).await;
 
         let amount = 1;
 
         let result = client.increment_no_reply(key, amount).await;
 
-        assert!(result.is_ok());
         assert_eq!(Ok(()), result);
     }
 
@@ -668,8 +655,7 @@ mod tests {
 
         let result = client.decrement(key, amount).await;
 
-        assert!(result.is_err());
-        assert!(matches!(result, Err(Error::KeyNotFound)))
+        assert!(matches!(result, Err(Error::Protocol(Status::NotFound))));
     }
 
     #[ignore = "Relies on a running memcached server"]
@@ -682,13 +668,12 @@ mod tests {
         let key = "key-to-decrement";
         let value = "2";
 
-        let _ = client.set(key, &value, None, None).await;
+        let _ = client.set(key, value, None, None).await;
 
         let amount = 1;
 
         let result = client.decrement(key, amount).await;
 
-        assert!(result.is_ok());
         assert_eq!(Ok(1), result);
     }
 
@@ -700,15 +685,14 @@ mod tests {
             .expect("Failed to connect to server");
 
         let key = "key-to-decrement-past-zero";
-        let value = 0.to_string();
+        let value = "0";
 
-        let _ = client.set(key, &value, None, None).await;
+        let _ = client.set(key, value, None, None).await;
 
         let amount = 1;
 
         let result = client.decrement(key, amount).await;
 
-        assert!(result.is_ok());
         assert_eq!(Ok(0), result);
     }
 
@@ -722,13 +706,12 @@ mod tests {
         let key = "key-to-decrement-no-reply";
         let value = "1";
 
-        let _ = client.set(key, &value, None, None).await;
+        let _ = client.set(key, value, None, None).await;
 
         let amount = 1;
 
         let result = client.decrement_no_reply(key, amount).await;
 
-        assert!(result.is_ok());
         assert_eq!(Ok(()), result);
     }
 }
