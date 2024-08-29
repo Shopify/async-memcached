@@ -15,7 +15,7 @@ mod parser;
 use self::parser::{
     parse_ascii_metadump_response, parse_ascii_response, parse_ascii_stats_response, Response,
 };
-pub use self::parser::{ErrorKind, KeyMetadata, MetadumpResponse, StatsResponse, Status, Value, ParseInput};
+pub use self::parser::{ErrorKind, KeyMetadata, MetadumpResponse, StatsResponse, Status, Value, ToMemcachedValue};
 
 /// High-level memcached client.
 ///
@@ -173,7 +173,7 @@ impl Client {
     ) -> Result<(), Error>
     where
         K: AsRef<[u8]>,
-        V: ParseInput<V>,
+        V: ToMemcachedValue<W>,
     {
         let kr = key.as_ref();
         let vr = value.parse_input();
