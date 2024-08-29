@@ -2,6 +2,9 @@ use std::fmt;
 mod ascii;
 pub use ascii::{parse_ascii_metadump_response, parse_ascii_response, parse_ascii_stats_response};
 use nom::AsBytes;
+use std::io;
+use std::io::Write;
+use std::str;
 
 /// A value from memcached.
 #[derive(Clone, Debug, PartialEq)]
@@ -103,46 +106,80 @@ pub struct KeyMetadata {
     /// Size, in bytes.
     pub size: u32,
 }
-
-/// A trait for parsing input of either u64 or str into Vec<u8>.
-pub trait ParseInput<T> {
-    /// Parses the input into the target type.
-    fn parse_input(&self) -> &[u8];
+/// A trait for converting a value to a memcached value.
+pub trait ToMemcachedValue<W: Write> {
+    /// Get the length (number of bytes) of this value.
+    fn get_length(&self) -> usize;
+    /// Write this value to a buffer.
+    fn write_to(&self, buffer: &mut W) -> io::Result<()>;
 }
 
-impl ParseInput<u64> for u64 {
-    fn parse_input(&self) -> &[u8] {
-
-        println!("self in parse_input<u64>: {}", self);
-        let s = self.to_string();
-        let slice = unsafe { std::slice::from_raw_parts(s.as_ptr(), s.len()) };
-
-        println!("slice in parse_input<u64>: {:?}", slice);
-        println!("slice in parse_input<u64>: {:?}", slice.as_ref().as_bytes());
-        return slice.as_ref().as_bytes();
+impl<'a, W: Write> ToMemcachedValue<W> for &'a [u8] {
+    fn get_length(&self) -> usize {
+        self.len()
     }
-}
-
-impl ParseInput<&str> for &str {
-    fn parse_input(&self) -> &[u8] {
-        println!("self in parse_input<&str>: {}", self);
-        self.as_bytes()
-    }
-}
-
-impl fmt::Display for Status {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::Stored => write!(f, "stored"),
-            Self::NotStored => write!(f, "not stored"),
-            Self::Deleted => write!(f, "deleted"),
-            Self::Touched => write!(f, "touched"),
-            Self::Exists => write!(f, "exists"),
-            Self::NotFound => write!(f, "not found"),
-            Self::Error(ek) => write!(f, "error: {}", ek),
+    fn write_to(&self, buffer: &mut W) -> io::Result<()> {
+        match buffer.write_all(self) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(e),
         }
     }
 }
+
+impl<W: Write> ToMemcachedValue<W> for String {
+    fn get_length(&self) -> usize {
+        self.len()
+    }
+    fn write_to(&self, buffer: &mut W) -> io::Result<()> {
+        match buffer.write_all(self.as_bytes()) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(e),
+        }
+    }
+}
+
+impl<'a, W: Write> ToMemcachedValue<W> for &'a String {
+    fn get_length(&self) -> usize {
+        ToMemcachedValue::<W>::get_length(*self)
+    }
+    fn write_to(&self, buffer: &mut W) -> io::Result<()> {
+        ToMemcachedValue::<W>::write_to(*self, buffer)
+    }
+}
+
+impl<'a, W: Write> ToMemcachedValue<W> for &'a str {
+    fn get_length(&self) -> usize {
+        self.as_bytes().len()
+    }
+    fn write_to(&self, buffer: &mut W) -> io::Result<()> {
+        match buffer.write_all(self.as_bytes()) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(e),
+        }
+    }
+}
+
+macro_rules! impl_to_memcached_value_for_uint {
+    ($ty:ident) => {
+        impl<W: Write> ToMemcachedValue<W> for $ty {
+            fn get_length(&self) -> usize {
+                // std::mem::size_of_val(self)??
+                self.to_string().as_bytes().len() // can this be optimized?
+            }
+            fn write_to(&self, buffer: &mut W) -> io::Result<()> {
+                match buffer.write_all(self.to_string().as_bytes()) {  // same here
+                    Ok(_) => Ok(()),
+                    Err(e) => Err(e),
+                }
+            }
+        }
+    };
+}
+
+impl_to_memcached_value_for_uint!(u8);
+impl_to_memcached_value_for_uint!(u16);
+impl_to_memcached_value_for_uint!(u32);
+impl_to_memcached_value_for_uint!(u64);
 
 impl fmt::Display for ErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
