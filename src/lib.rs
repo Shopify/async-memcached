@@ -15,7 +15,9 @@ mod parser;
 use self::parser::{
     parse_ascii_metadump_response, parse_ascii_response, parse_ascii_stats_response, Response,
 };
-pub use self::parser::{ErrorKind, KeyMetadata, MetadumpResponse, StatsResponse, Status, Value};
+pub use self::parser::{
+    ErrorKind, KeyMetadata, MetadumpResponse, StatsResponse, Status, ToMemcachedValue, Value,
+};
 
 /// High-level memcached client.
 ///
@@ -169,6 +171,51 @@ impl Client {
     ) -> Result<(), Error>
     where
         K: AsRef<[u8]>,
+        V: ToMemcachedValue,
+    {
+        let kr = key.as_ref();
+
+        self.conn.write_all(b"set ").await?;
+        self.conn.write_all(kr).await?;
+
+        let flags = flags.unwrap_or(0).to_string();
+        self.conn.write_all(b" ").await?;
+        self.conn.write_all(flags.as_ref()).await?;
+
+        let ttl = ttl.unwrap_or(0).to_string();
+        self.conn.write_all(b" ").await?;
+        self.conn.write_all(ttl.as_ref()).await?;
+
+        self.conn.write_all(b" ").await?;
+        self.conn
+            .write_all(value.len().to_string().as_bytes())
+            .await?;
+        self.conn.write_all(b"\r\n").await?;
+
+        value.write_to(&mut self.conn).await?;
+        self.conn.write_all(b"\r\n").await?;
+        self.conn.flush().await?;
+
+        match self.get_read_write_response().await? {
+            Response::Status(Status::Stored) => Ok(()),
+            Response::Status(s) => Err(s.into()),
+            _ => Err(Status::Error(ErrorKind::Protocol(None)).into()),
+        }
+    }
+
+    /// Sets the given key.
+    ///
+    /// If `ttl` or `flags` are not specified, they will default to 0.  If the value is set
+    /// successfully, `()` is returned, otherwise [`Error`] is returned.
+    pub async fn original_set<K, V>(
+        &mut self,
+        key: K,
+        value: V,
+        ttl: Option<i64>,
+        flags: Option<u32>,
+    ) -> Result<(), Error>
+    where
+        K: AsRef<[u8]>,
         V: AsRef<[u8]>,
     {
         let kr = key.as_ref();
@@ -305,7 +352,7 @@ impl Client {
     }
 
     /// Increments the given key by the specified amount with no reply from the server.
-    /// /// Can overflow from the max value of u64 (18446744073709551615) -> 0.
+    /// Can overflow from the max value of u64 (18446744073709551615) -> 0.
     pub async fn increment_no_reply<K>(&mut self, key: K, amount: u64) -> Result<(), Error>
     where
         K: AsRef<[u8]>,
@@ -484,12 +531,18 @@ impl<'a> MetadumpIter<'a> {
 mod tests {
     use super::*;
 
+    async fn setup_client() -> Client {
+        let client = Client::new("tcp://127.0.0.1:11211")
+            .await
+            .expect("Failed to connect to server");
+
+        client
+    }
+
     #[ignore = "Relies on a running memcached server"]
     #[tokio::test]
     async fn test_add() {
-        let mut client = Client::new("tcp://127.0.0.1:11211")
-            .await
-            .expect("Failed to connect to server");
+        let mut client = setup_client().await;
 
         let key = "async-memcache-test-key-add";
 
@@ -503,27 +556,94 @@ mod tests {
 
     #[ignore = "Relies on a running memcached server"]
     #[tokio::test]
+    async fn test_original_set() {
+        let mut client = setup_client().await;
+
+        let key = "original-set-key";
+        let value = "value";
+        let result = client.original_set(key, value, None, None).await;
+
+        assert!(result.is_ok());
+
+        let result = client.get(key).await;
+
+        assert!(result.is_ok());
+
+        let get_result = result.unwrap();
+
+        assert_eq!(String::from_utf8(get_result.unwrap().data).unwrap(), value);
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    async fn test_new_set_with_string_value() {
+        let mut client = setup_client().await;
+
+        let key = "new-set-key";
+        let value = "value";
+        let result = client.set(key, value, None, None).await;
+
+        assert!(result.is_ok());
+
+        let result = client.get(key).await;
+
+        assert!(result.is_ok());
+
+        let get_result = result.unwrap();
+
+        assert_eq!(String::from_utf8(get_result.unwrap().data).unwrap(), value);
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    async fn test_new_set_with_u64_value() {
+        let mut client = setup_client().await;
+
+        let key = "new-set-key-with-u64-value";
+        let value: u64 = 20;
+
+        println!("value: {}", value);
+        let result = client.set(key, value, None, None).await;
+
+        println!("result: {:?}", result);
+        assert!(result.is_ok());
+
+        let result = client.get(key).await;
+
+        assert!(result.is_ok());
+
+        let get_result = result.unwrap();
+
+        println!("get_result: {:?}", get_result);
+
+        println!(
+            "get_result.unwrap().data: {:?}",
+            String::from_utf8(get_result.unwrap().data).unwrap()
+        );
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
     async fn test_delete() {
-        let mut client = Client::new("tcp://127.0.0.1:11211")
-            .await
-            .expect("Failed to connect to server");
+        let mut client = setup_client().await;
 
         let key = "async-memcache-test-key-delete";
 
-        let value = rand::random::<u64>().to_string();
-        let result = client.set(key, &value, None, None).await;
+        let value = rand::random::<u64>();
+        let result = client.set(key, value, None, None).await;
 
         assert!(result.is_ok(), "failed to set {}, {:?}", key, result);
 
         let result = client.get(key).await;
 
         assert!(result.is_ok(), "failed to get {}, {:?}", key, result);
+
         let get_result = result.unwrap();
 
         match get_result {
             Some(get_value) => assert_eq!(
                 String::from_utf8(get_value.data).expect("failed to parse a string"),
-                value
+                value.to_string()
             ),
             None => panic!("failed to get {}", key),
         }
@@ -536,20 +656,19 @@ mod tests {
     #[ignore = "Relies on a running memcached server"]
     #[tokio::test]
     async fn test_delete_no_reply() {
-        let mut client = Client::new("tcp://127.0.0.1:11211")
-            .await
-            .expect("Failed to connect to server");
+        let mut client = setup_client().await;
 
         let key = "async-memcache-test-key-delete-no-reply";
 
-        let value = rand::random::<u64>().to_string();
-        let result = client.set(key, &value, None, None).await;
+        let value = format!("{}", rand::random::<u64>());
+        let result = client.set(key, value.as_str(), None, None).await;
 
         assert!(result.is_ok(), "failed to set {}, {:?}", key, result);
 
         let result = client.get(key).await;
 
         assert!(result.is_ok(), "failed to get {}, {:?}", key, result);
+
         let get_result = result.unwrap();
 
         match get_result {
@@ -568,9 +687,7 @@ mod tests {
     #[ignore = "Relies on a running memcached server"]
     #[tokio::test]
     async fn test_increment_raises_error_when_key_doesnt_exist() {
-        let mut client = Client::new("tcp://127.0.0.1:11211")
-            .await
-            .expect("Failed to connect to server");
+        let mut client = setup_client().await;
 
         let key = "key-does-not-exist";
         let amount = 1;
@@ -583,14 +700,12 @@ mod tests {
     #[ignore = "Relies on a running memcached server"]
     #[tokio::test]
     async fn test_increments_existing_key() {
-        let mut client = Client::new("tcp://127.0.0.1:11211")
-            .await
-            .expect("Failed to connect to server");
+        let mut client = setup_client().await;
 
         let key = "key-to-increment";
-        let value = "1";
+        let value: u64 = 1;
 
-        let _ = client.set(key, &value, None, None).await;
+        let _ = client.set(key, value, None, None).await;
 
         let amount = 1;
 
@@ -602,14 +717,12 @@ mod tests {
     #[ignore = "Relies on a running memcached server"]
     #[tokio::test]
     async fn test_increment_can_overflow() {
-        let mut client = Client::new("tcp://127.0.0.1:11211")
-            .await
-            .expect("Failed to connect to server");
+        let mut client = setup_client().await;
 
         let key = "key-to-increment-overflow";
-        let value = "18446744073709551615"; // max value for u64
+        let value = u64::MAX; // max value for u64
 
-        let _ = client.set(key, &value, None, None).await;
+        let _ = client.set(key, value, None, None).await;
 
         let amount = 1;
 
@@ -627,12 +740,10 @@ mod tests {
     #[ignore = "Relies on a running memcached server"]
     #[tokio::test]
     async fn test_increments_existing_key_with_no_reply() {
-        let mut client = Client::new("tcp://127.0.0.1:11211")
-            .await
-            .expect("Failed to connect to server");
+        let mut client = setup_client().await;
 
         let key = "key-to-increment-no-reply";
-        let value = "1";
+        let value: u64 = 1;
 
         let _ = client.set(key, value, None, None).await;
 
@@ -646,9 +757,7 @@ mod tests {
     #[ignore = "Relies on a running memcached server"]
     #[tokio::test]
     async fn test_decrement_raises_error_when_key_doesnt_exist() {
-        let mut client = Client::new("tcp://127.0.0.1:11211")
-            .await
-            .expect("Failed to connect to server");
+        let mut client = setup_client().await;
 
         let key = "fails-to-decrement";
         let amount = 1;
@@ -661,12 +770,10 @@ mod tests {
     #[ignore = "Relies on a running memcached server"]
     #[tokio::test]
     async fn test_decrements_existing_key() {
-        let mut client = Client::new("tcp://127.0.0.1:11211")
-            .await
-            .expect("Failed to connect to server");
+        let mut client = setup_client().await;
 
         let key = "key-to-decrement";
-        let value = "2";
+        let value: u64 = 10;
 
         let _ = client.set(key, value, None, None).await;
 
@@ -674,18 +781,16 @@ mod tests {
 
         let result = client.decrement(key, amount).await;
 
-        assert_eq!(Ok(1), result);
+        assert_eq!(Ok(9), result);
     }
 
     #[ignore = "Relies on a running memcached server"]
     #[tokio::test]
     async fn test_decrement_does_not_reduce_value_below_zero() {
-        let mut client = Client::new("tcp://127.0.0.1:11211")
-            .await
-            .expect("Failed to connect to server");
+        let mut client = setup_client().await;
 
         let key = "key-to-decrement-past-zero";
-        let value = "0";
+        let value: u64 = 0;
 
         let _ = client.set(key, value, None, None).await;
 
@@ -699,12 +804,10 @@ mod tests {
     #[ignore = "Relies on a running memcached server"]
     #[tokio::test]
     async fn test_decrements_existing_key_with_no_reply() {
-        let mut client = Client::new("tcp://127.0.0.1:11211")
-            .await
-            .expect("Failed to connect to server");
+        let mut client = setup_client().await;
 
         let key = "key-to-decrement-no-reply";
-        let value = "1";
+        let value: u64 = 1;
 
         let _ = client.set(key, value, None, None).await;
 
