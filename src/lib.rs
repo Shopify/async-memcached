@@ -258,29 +258,29 @@ impl Client {
     ) -> Result<(), Error>
     where
         K: AsRef<[u8]>,
-        V: AsRef<[u8]>,
+        V: ToMemcachedValue,
     {
         let kr = key.as_ref();
-        let vr = value.as_ref();
 
+        self.conn.write_all(b"add ").await?;
+        self.conn.write_all(kr).await?;
+
+        let flags = flags.unwrap_or(0).to_string();
+        self.conn.write_all(b" ").await?;
+        self.conn.write_all(flags.as_ref()).await?;
+
+        let ttl = ttl.unwrap_or(0).to_string();
+        self.conn.write_all(b" ").await?;
+        self.conn.write_all(ttl.as_ref()).await?;
+
+        self.conn.write_all(b" ").await?;
         self.conn
-            .write_all(
-                &[
-                    b"add ",
-                    kr,
-                    b" ",
-                    flags.unwrap_or(0).to_string().as_ref(),
-                    b" ",
-                    ttl.unwrap_or(0).to_string().as_ref(),
-                    b" ",
-                    vr.len().to_string().as_ref(),
-                    b"\r\n",
-                    vr,
-                    b"\r\n",
-                ]
-                .concat(),
-            )
+            .write_all(value.length().to_string().as_bytes())
             .await?;
+        self.conn.write_all(b"\r\n").await?;
+
+        value.write_to(&mut self.conn).await?;
+        self.conn.write_all(b"\r\n").await?;
         self.conn.flush().await?;
 
         match self.get_read_write_response().await? {

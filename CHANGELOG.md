@@ -1,6 +1,7 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+Keep a running log of your changes with each PR under the `[Unreleased] - ReleaseDate` header.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -8,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- next-header -->
 
 ## [Unreleased] - ReleaseDate
+
+### Changed
+
+- `set` and `add` methods can now accept `uint`-type argument for value in addition to `&str` and `String` types
 
 ## [0.3.0] - 2024-08-30
 
