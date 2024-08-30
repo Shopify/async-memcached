@@ -97,10 +97,6 @@ impl Client {
         self.drive_receive(parse_ascii_response).await
     }
 
-    pub(crate) async fn get_incrdecr_response(&mut self) -> Result<Response, Error> {
-        self.drive_receive(parse_ascii_response).await
-    }
-
     pub(crate) async fn get_metadump_response(&mut self) -> Result<MetadumpResponse, Error> {
         self.drive_receive(parse_ascii_metadump_response).await
     }
@@ -348,11 +344,10 @@ impl Client {
             .await?;
         self.conn.flush().await?;
 
-        match self.get_incrdecr_response().await? {
-            Response::Status(Status::NotFound) => Err(Error::KeyNotFound),
+        match self.get_read_write_response().await? {
             Response::Status(s) => Err(s.into()),
             Response::IncrDecr(amount) => Ok(amount),
-            _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),
+            _ => Err(Status::Error(ErrorKind::Protocol(None)).into()),
         }
     }
 
@@ -399,11 +394,10 @@ impl Client {
             .await?;
         self.conn.flush().await?;
 
-        match self.get_incrdecr_response().await? {
-            Response::Status(Status::NotFound) => Err(Error::KeyNotFound),
+        match self.get_read_write_response().await? {
             Response::Status(s) => Err(s.into()),
             Response::IncrDecr(amount) => Ok(amount),
-            _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),
+            _ => Err(Status::Error(ErrorKind::Protocol(None)).into()),
         }
     }
 
@@ -700,8 +694,7 @@ mod tests {
 
         let result = client.increment(key, amount).await;
 
-        assert!(result.is_err());
-        assert!(matches!(result, Err(Error::KeyNotFound)))
+        assert!(matches!(result, Err(Error::Protocol(Status::NotFound))));
     }
 
     #[ignore = "Relies on a running memcached server"]
@@ -718,9 +711,6 @@ mod tests {
 
         let result = client.increment(key, amount).await;
 
-        println!("result: {:?}", result);
-
-        assert!(result.is_ok());
         assert_eq!(Ok(2), result);
     }
 
@@ -739,17 +729,11 @@ mod tests {
         // First increment should overflow
         let result = client.increment(key, amount).await;
 
-        println!("result: {:?}", result);
-
-        assert!(result.is_ok());
         assert_eq!(Ok(0), result);
 
         // Subsequent increments should work as normal
         let result = client.increment(key, amount).await;
 
-        println!("result: {:?}", result);
-
-        assert!(result.is_ok());
         assert_eq!(Ok(1), result);
     }
 
@@ -767,7 +751,6 @@ mod tests {
 
         let result = client.increment_no_reply(key, amount).await;
 
-        assert!(result.is_ok());
         assert_eq!(Ok(()), result);
     }
 
@@ -781,8 +764,7 @@ mod tests {
 
         let result = client.decrement(key, amount).await;
 
-        assert!(result.is_err());
-        assert!(matches!(result, Err(Error::KeyNotFound)))
+        assert!(matches!(result, Err(Error::Protocol(Status::NotFound))));
     }
 
     #[ignore = "Relies on a running memcached server"]
@@ -799,7 +781,6 @@ mod tests {
 
         let result = client.decrement(key, amount).await;
 
-        assert!(result.is_ok());
         assert_eq!(Ok(9), result);
     }
 
@@ -817,7 +798,6 @@ mod tests {
 
         let result = client.decrement(key, amount).await;
 
-        assert!(result.is_ok());
         assert_eq!(Ok(0), result);
     }
 
@@ -835,7 +815,6 @@ mod tests {
 
         let result = client.decrement_no_reply(key, amount).await;
 
-        assert!(result.is_ok());
         assert_eq!(Ok(()), result);
     }
 }
