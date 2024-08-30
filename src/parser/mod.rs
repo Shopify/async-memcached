@@ -107,16 +107,6 @@ pub struct KeyMetadata {
     pub size: u32,
 }
 
-// pub trait ToMemcachedValue {
-//     /// Returns the length of the value in bytes.
-//     fn len(&self) -> usize;
-//     /// Writes the value to a writer.
-//     async fn write_to<W: AsyncWriteExt + Unpin>(
-//         &self,
-//         writer: &mut W,
-//     ) -> Result<(), crate::Error>;
-// }
-
 // versus this one with -> impl Future<Output = Result<(), crate::Error>>
 /// A trait for parsing multiple types of values to memcached values.
 pub trait ToMemcachedValue {

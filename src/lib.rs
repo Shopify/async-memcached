@@ -178,12 +178,6 @@ impl Client {
         V: ToMemcachedValue,
     {
         let kr = key.as_ref();
-        // let v = value.to_string();
-        // let vr = value.parse_input();
-
-        // let vr = value.parse_input();
-
-        // println!("vr in set method: {:?}", vr.bytes());
 
         self.conn.write_all(b"set ").await?;
         self.conn.write_all(kr).await?;
@@ -197,16 +191,12 @@ impl Client {
         self.conn.write_all(ttl.as_ref()).await?;
 
         self.conn.write_all(b" ").await?;
-        // let vlen = value.len();
-        // value.write_to(&mut self.conn).await?;
-        // let vlen = vr.len().to_string();
         self.conn
             .write_all(value.len().to_string().as_bytes())
             .await?;
         self.conn.write_all(b"\r\n").await?;
 
         value.write_to(&mut self.conn).await?;
-        // value.write_to(&mut self.conn).await?;
         self.conn.write_all(b"\r\n").await?;
         self.conn.flush().await?;
 
@@ -645,10 +635,8 @@ mod tests {
 
         let key = "async-memcache-test-key-delete";
 
-        // let value = format!("{}",rand::random::<u64>());
-        let x: usize = 123;
-        // let xyz = String::from("xyz").as_bytes();
-        let result = client.set(key, x, None, None).await;
+        let value = rand::random::<u64>();
+        let result = client.set(key, value, None, None).await;
 
         assert!(result.is_ok(), "failed to set {}, {:?}", key, result);
 
@@ -656,15 +644,15 @@ mod tests {
 
         assert!(result.is_ok(), "failed to get {}, {:?}", key, result);
 
-        // let get_result = result.unwrap();
+        let get_result = result.unwrap();
 
-        // match get_result {
-        //     Some(get_value) => assert_eq!(
-        //         String::from_utf8(get_value.data).expect("failed to parse a string"),
-        //         value
-        //     ),
-        //     None => panic!("failed to get {}", key),
-        // }
+        match get_result {
+            Some(get_value) => assert_eq!(
+                String::from_utf8(get_value.data).expect("failed to parse a string"),
+                value.to_string()
+            ),
+            None => panic!("failed to get {}", key),
+        }
 
         let result = client.delete(key).await;
 
