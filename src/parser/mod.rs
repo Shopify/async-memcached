@@ -6,6 +6,8 @@ use std::future::Future;
 use std::str;
 use tokio::io::AsyncWriteExt;
 
+use itoa::Buffer;
+
 /// A value from memcached.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Value {
@@ -143,15 +145,18 @@ macro_rules! impl_to_memcached_value_for_uint {
     ($ty:ident) => {
         impl ToMemcachedValue for $ty {
             fn length(&self) -> usize {
-                // std::mem::size_of_val(self)??
-                self.to_string().as_bytes().len() // can this be optimized?
+                let mut buf = Buffer::new();
+
+                buf.format(*self).as_bytes().len()
             }
             async fn write_to<W: AsyncWriteExt + Unpin>(
                 &self,
                 writer: &mut W,
             ) -> Result<(), crate::Error> {
+                let mut buf = Buffer::new();
+
                 writer
-                    .write_all(self.to_string().as_bytes())
+                    .write_all(buf.format(*self).as_bytes())
                     .await
                     .map_err(crate::Error::from)
             }
