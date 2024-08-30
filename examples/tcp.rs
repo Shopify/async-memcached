@@ -55,7 +55,7 @@ async fn main() {
     let increment_key = "increment_key";
 
     client
-        .set(increment_key, 0, None, None)
+        .set(increment_key, 0 as u64, None, None)
         .await
         .expect(format!("failed to set {}", increment_key).as_str());
 
@@ -84,7 +84,7 @@ async fn main() {
     let decrement_key = "decrement_key";
 
     client
-        .set(decrement_key, 10, None, None)
+        .set(decrement_key, 10 as u64, None, None)
         .await
         .expect(format!("failed to set {}", decrement_key).as_str());
 

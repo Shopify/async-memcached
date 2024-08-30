@@ -2,9 +2,9 @@ use std::fmt;
 mod ascii;
 pub use ascii::{parse_ascii_metadump_response, parse_ascii_response, parse_ascii_stats_response};
 use nom::AsBytes;
-use std::io;
-use std::io::Write;
+use std::future::Future;
 use std::str;
+use tokio::io::AsyncWriteExt;
 
 /// A value from memcached.
 #[derive(Clone, Debug, PartialEq)]
@@ -106,71 +106,65 @@ pub struct KeyMetadata {
     /// Size, in bytes.
     pub size: u32,
 }
-/// A trait for converting a value to a memcached value.
-pub trait ToMemcachedValue<W: Write> {
-    /// Get the length (number of bytes) of this value.
-    fn get_length(&self) -> usize;
-    /// Write this value to a buffer.
-    fn write_to(&self, buffer: &mut W) -> io::Result<()>;
+
+// pub trait ToMemcachedValue {
+//     /// Returns the length of the value in bytes.
+//     fn len(&self) -> usize;
+//     /// Writes the value to a writer.
+//     async fn write_to<W: AsyncWriteExt + Unpin>(
+//         &self,
+//         writer: &mut W,
+//     ) -> Result<(), crate::Error>;
+// }
+
+// versus this one with -> impl Future<Output = Result<(), crate::Error>>
+/// A trait for parsing multiple types of values to memcached values.
+pub trait ToMemcachedValue {
+    /// Returns the length of the value in bytes.
+    fn len(&self) -> usize;
+    /// Writes the value to a writer.
+    fn write_to<W: AsyncWriteExt + Unpin>(
+        &self,
+        writer: &mut W,
+    ) -> impl Future<Output = Result<(), crate::Error>>;
 }
 
-impl<'a, W: Write> ToMemcachedValue<W> for &'a [u8] {
-    fn get_length(&self) -> usize {
-        self.len()
+impl ToMemcachedValue for &[u8] {
+    fn len(&self) -> usize {
+        <[u8]>::len(self)
     }
-    fn write_to(&self, buffer: &mut W) -> io::Result<()> {
-        match buffer.write_all(self) {
-            Ok(_) => Ok(()),
-            Err(e) => Err(e),
-        }
-    }
-}
-
-impl<W: Write> ToMemcachedValue<W> for String {
-    fn get_length(&self) -> usize {
-        self.len()
-    }
-    fn write_to(&self, buffer: &mut W) -> io::Result<()> {
-        match buffer.write_all(self.as_bytes()) {
-            Ok(_) => Ok(()),
-            Err(e) => Err(e),
-        }
-    }
-}
-
-impl<'a, W: Write> ToMemcachedValue<W> for &'a String {
-    fn get_length(&self) -> usize {
-        ToMemcachedValue::<W>::get_length(*self)
-    }
-    fn write_to(&self, buffer: &mut W) -> io::Result<()> {
-        ToMemcachedValue::<W>::write_to(*self, buffer)
+    async fn write_to<W: AsyncWriteExt + Unpin>(&self, writer: &mut W) -> Result<(), crate::Error> {
+        writer.write_all(self).await.map_err(crate::Error::from)
     }
 }
 
-impl<'a, W: Write> ToMemcachedValue<W> for &'a str {
-    fn get_length(&self) -> usize {
-        self.as_bytes().len()
+impl ToMemcachedValue for &str {
+    fn len(&self) -> usize {
+        <str>::len(self)
     }
-    fn write_to(&self, buffer: &mut W) -> io::Result<()> {
-        match buffer.write_all(self.as_bytes()) {
-            Ok(_) => Ok(()),
-            Err(e) => Err(e),
-        }
+    async fn write_to<W: AsyncWriteExt + Unpin>(&self, writer: &mut W) -> Result<(), crate::Error> {
+        writer
+            .write_all(self.as_bytes())
+            .await
+            .map_err(crate::Error::from)
     }
 }
 
 macro_rules! impl_to_memcached_value_for_uint {
     ($ty:ident) => {
-        impl<W: Write> ToMemcachedValue<W> for $ty {
-            fn get_length(&self) -> usize {
+        impl ToMemcachedValue for $ty {
+            fn len(&self) -> usize {
                 // std::mem::size_of_val(self)??
                 self.to_string().as_bytes().len() // can this be optimized?
             }
-            fn write_to(&self, buffer: &mut W) -> io::Result<()> {
-                match buffer.write_all(self.to_string().as_bytes()) {  // same here
-                    Ok(_) => Ok(()),
-                    Err(e) => Err(e),
-                }
+            async fn write_to<W: AsyncWriteExt + Unpin>(
+                &self,
+                writer: &mut W,
+            ) -> Result<(), crate::Error> {
+                writer
+                    .write_all(self.to_string().as_bytes())
+                    .await
+                    .map_err(crate::Error::from)
             }
         }
     };
@@ -180,6 +174,21 @@ impl_to_memcached_value_for_uint!(u8);
 impl_to_memcached_value_for_uint!(u16);
 impl_to_memcached_value_for_uint!(u32);
 impl_to_memcached_value_for_uint!(u64);
+impl_to_memcached_value_for_uint!(usize);
+
+impl fmt::Display for Status {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Stored => write!(f, "stored"),
+            Self::NotStored => write!(f, "not stored"),
+            Self::Deleted => write!(f, "deleted"),
+            Self::Touched => write!(f, "touched"),
+            Self::Exists => write!(f, "exists"),
+            Self::NotFound => write!(f, "not found"),
+            Self::Error(ek) => write!(f, "error: {}", ek),
+        }
+    }
+}
 
 impl fmt::Display for ErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

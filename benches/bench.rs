@@ -53,7 +53,7 @@ fn bench_parsed_set_with_u64(c: &mut Criterion) {
             let mut client = setup_client().await;
             let start = std::time::Instant::now();
             for _ in 0..iters {
-                let _ = client.set("foo", 1, None, None).await;
+                let _ = client.set("foo", 1 as u64, None, None).await;
             }
             start.elapsed()
         });
@@ -190,7 +190,7 @@ fn bench_increment(c: &mut Criterion) {
 
     rt.block_on(async {
         let mut client = setup_client().await;
-        client.set("foo", 0, None, None).await.unwrap();
+        client.set("foo", 0 as u64, None, None).await.unwrap();
     });
 
     c.bench_function("increment", |b| {
