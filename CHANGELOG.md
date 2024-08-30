@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+## [0.3.0] - 2024-08-30
+
+### Added
+
+- Added arithmetic methods to the ASCII protocol:
+  - `increment`
+  - `increment_no_reply`
+  - `decrement`
+  - `decrement_no_reply`
+- Added benchmarking suite
+
+### Changed
+
+- Disabled Nagle's Algorithm
+- Improved README instructions and sample code for `tcp` and `uds` connections
+
 ## [0.2.0] - 2024-07-12
 
 ### Added
