@@ -188,7 +188,7 @@ impl Client {
 
         self.conn.write_all(b" ").await?;
         self.conn
-            .write_all(value.len().to_string().as_bytes())
+            .write_all(value.length().to_string().as_bytes())
             .await?;
         self.conn.write_all(b"\r\n").await?;
 
@@ -532,11 +532,9 @@ mod tests {
     use super::*;
 
     async fn setup_client() -> Client {
-        let client = Client::new("tcp://127.0.0.1:11211")
+        Client::new("tcp://127.0.0.1:11211")
             .await
-            .expect("Failed to connect to server");
-
-        client
+            .expect("Failed to connect to server")
     }
 
     #[ignore = "Relies on a running memcached server"]

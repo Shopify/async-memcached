@@ -110,7 +110,7 @@ pub struct KeyMetadata {
 /// A trait for parsing multiple types of values to memcached values.
 pub trait ToMemcachedValue {
     /// Returns the length of the value in bytes.
-    fn len(&self) -> usize;
+    fn length(&self) -> usize;
     /// Writes the value to a writer.
     fn write_to<W: AsyncWriteExt + Unpin>(
         &self,
@@ -119,7 +119,7 @@ pub trait ToMemcachedValue {
 }
 
 impl ToMemcachedValue for &[u8] {
-    fn len(&self) -> usize {
+    fn length(&self) -> usize {
         <[u8]>::len(self)
     }
     async fn write_to<W: AsyncWriteExt + Unpin>(&self, writer: &mut W) -> Result<(), crate::Error> {
@@ -128,7 +128,7 @@ impl ToMemcachedValue for &[u8] {
 }
 
 impl ToMemcachedValue for &str {
-    fn len(&self) -> usize {
+    fn length(&self) -> usize {
         <str>::len(self)
     }
     async fn write_to<W: AsyncWriteExt + Unpin>(&self, writer: &mut W) -> Result<(), crate::Error> {
@@ -142,7 +142,7 @@ impl ToMemcachedValue for &str {
 macro_rules! impl_to_memcached_value_for_uint {
     ($ty:ident) => {
         impl ToMemcachedValue for $ty {
-            fn len(&self) -> usize {
+            fn length(&self) -> usize {
                 // std::mem::size_of_val(self)??
                 self.to_string().as_bytes().len() // can this be optimized?
             }
