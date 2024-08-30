@@ -30,15 +30,45 @@ fn bench_get(c: &mut Criterion) {
     });
 }
 
-fn bench_set(c: &mut Criterion) {
+fn bench_parsed_set_with_string(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
 
-    c.bench_function("set_small", |b| {
+    c.bench_function("new_set_small_with_string", |b| {
         b.to_async(&rt).iter_custom(|iters| async move {
             let mut client = setup_client().await;
             let start = std::time::Instant::now();
             for _ in 0..iters {
                 let _ = client.set("foo", "bar", None, None).await;
+            }
+            start.elapsed()
+        });
+    });
+}
+
+fn bench_parsed_set_with_u64(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+
+    c.bench_function("new_set_small_with_int", |b| {
+        b.to_async(&rt).iter_custom(|iters| async move {
+            let mut client = setup_client().await;
+            let start = std::time::Instant::now();
+            for _ in 0..iters {
+                let _ = client.set("foo", 1 as u64, None, None).await;
+            }
+            start.elapsed()
+        });
+    });
+}
+
+fn bench_original_set_with_string(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+
+    c.bench_function("original_set_small_string", |b| {
+        b.to_async(&rt).iter_custom(|iters| async move {
+            let mut client = setup_client().await;
+            let start = std::time::Instant::now();
+            for _ in 0..iters {
+                let _ = client.original_set("foo", "bar", None, None).await;
             }
             start.elapsed()
         });
@@ -68,16 +98,36 @@ fn bench_get_many(c: &mut Criterion) {
     });
 }
 
-fn bench_set_large(c: &mut Criterion) {
+fn bench_new_set_large_with_string(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
 
-    c.bench_function("set_large", |b| {
+    c.bench_function("new_set_large_with_string", |b| {
         b.to_async(&rt).iter_custom(|iters| async move {
             let mut client = setup_client().await;
             let large_payload = "a".repeat(LARGE_PAYLOAD_SIZE);
             let start = std::time::Instant::now();
             for _ in 0..iters {
-                let _ = client.set("large_foo", &large_payload, None, None).await;
+                let _ = client
+                    .set("large_foo", large_payload.as_str(), None, None)
+                    .await;
+            }
+            start.elapsed()
+        });
+    });
+}
+
+fn bench_original_set_large_with_string(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+
+    c.bench_function("original_set_large_with_string", |b| {
+        b.to_async(&rt).iter_custom(|iters| async move {
+            let mut client = setup_client().await;
+            let large_payload = "a".repeat(LARGE_PAYLOAD_SIZE);
+            let start = std::time::Instant::now();
+            for _ in 0..iters {
+                let _ = client
+                    .original_set("large_foo", large_payload.as_str(), None, None)
+                    .await;
             }
             start.elapsed()
         });
@@ -91,7 +141,7 @@ fn bench_get_large(c: &mut Criterion) {
     rt.block_on(async {
         let mut client = setup_client().await;
         client
-            .set("large_foo", &large_payload, None, None)
+            .set("large_foo", large_payload.as_str(), None, None)
             .await
             .unwrap();
     });
@@ -116,7 +166,10 @@ fn bench_get_many_large(c: &mut Criterion) {
     rt.block_on(async {
         let mut client = setup_client().await;
         for key in keys {
-            client.set(key, &large_payload, None, None).await.unwrap();
+            client
+                .set(key, large_payload.as_str(), None, None)
+                .await
+                .unwrap();
         }
     });
 
@@ -137,7 +190,7 @@ fn bench_increment(c: &mut Criterion) {
 
     rt.block_on(async {
         let mut client = setup_client().await;
-        client.set("foo", "0", None, None).await.unwrap();
+        client.set("foo", 0 as u64, None, None).await.unwrap();
     });
 
     c.bench_function("increment", |b| {
@@ -218,9 +271,12 @@ fn bench_decrement_no_reply(c: &mut Criterion) {
 criterion_group!(
     benches,
     bench_get,
-    bench_set,
+    bench_parsed_set_with_string,
+    bench_original_set_with_string,
+    bench_parsed_set_with_u64,
     bench_get_many,
-    bench_set_large,
+    bench_new_set_large_with_string,
+    bench_original_set_large_with_string,
     bench_get_large,
     bench_get_many_large,
     bench_increment,
