@@ -1,6 +1,10 @@
 use std::fmt;
 mod ascii;
 pub use ascii::{parse_ascii_metadump_response, parse_ascii_response, parse_ascii_stats_response};
+use nom::AsBytes;
+use std::future::Future;
+use std::str;
+use tokio::io::AsyncWriteExt;
 
 /// A value from memcached.
 #[derive(Clone, Debug, PartialEq)]
@@ -102,6 +106,64 @@ pub struct KeyMetadata {
     /// Size, in bytes.
     pub size: u32,
 }
+
+/// A trait for parsing multiple types of values to memcached values.
+pub trait ToMemcachedValue {
+    /// Returns the length of the value in bytes.
+    fn len(&self) -> usize;
+    /// Writes the value to a writer.
+    fn write_to<W: AsyncWriteExt + Unpin>(
+        &self,
+        writer: &mut W,
+    ) -> impl Future<Output = Result<(), crate::Error>>;
+}
+
+impl ToMemcachedValue for &[u8] {
+    fn len(&self) -> usize {
+        <[u8]>::len(self)
+    }
+    async fn write_to<W: AsyncWriteExt + Unpin>(&self, writer: &mut W) -> Result<(), crate::Error> {
+        writer.write_all(self).await.map_err(crate::Error::from)
+    }
+}
+
+impl ToMemcachedValue for &str {
+    fn len(&self) -> usize {
+        <str>::len(self)
+    }
+    async fn write_to<W: AsyncWriteExt + Unpin>(&self, writer: &mut W) -> Result<(), crate::Error> {
+        writer
+            .write_all(self.as_bytes())
+            .await
+            .map_err(crate::Error::from)
+    }
+}
+
+macro_rules! impl_to_memcached_value_for_uint {
+    ($ty:ident) => {
+        impl ToMemcachedValue for $ty {
+            fn len(&self) -> usize {
+                // std::mem::size_of_val(self)??
+                self.to_string().as_bytes().len() // can this be optimized?
+            }
+            async fn write_to<W: AsyncWriteExt + Unpin>(
+                &self,
+                writer: &mut W,
+            ) -> Result<(), crate::Error> {
+                writer
+                    .write_all(self.to_string().as_bytes())
+                    .await
+                    .map_err(crate::Error::from)
+            }
+        }
+    };
+}
+
+impl_to_memcached_value_for_uint!(u8);
+impl_to_memcached_value_for_uint!(u16);
+impl_to_memcached_value_for_uint!(u32);
+impl_to_memcached_value_for_uint!(u64);
+impl_to_memcached_value_for_uint!(usize);
 
 impl fmt::Display for Status {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
