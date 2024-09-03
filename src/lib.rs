@@ -205,51 +205,6 @@ impl Client {
         }
     }
 
-    /// Sets the given key.
-    ///
-    /// If `ttl` or `flags` are not specified, they will default to 0.  If the value is set
-    /// successfully, `()` is returned, otherwise [`Error`] is returned.
-    pub async fn original_set<K, V>(
-        &mut self,
-        key: K,
-        value: V,
-        ttl: Option<i64>,
-        flags: Option<u32>,
-    ) -> Result<(), Error>
-    where
-        K: AsRef<[u8]>,
-        V: AsRef<[u8]>,
-    {
-        let kr = key.as_ref();
-        let vr = value.as_ref();
-
-        self.conn.write_all(b"set ").await?;
-        self.conn.write_all(kr).await?;
-
-        let flags = flags.unwrap_or(0).to_string();
-        self.conn.write_all(b" ").await?;
-        self.conn.write_all(flags.as_ref()).await?;
-
-        let ttl = ttl.unwrap_or(0).to_string();
-        self.conn.write_all(b" ").await?;
-        self.conn.write_all(ttl.as_ref()).await?;
-
-        self.conn.write_all(b" ").await?;
-        let vlen = vr.len().to_string();
-        self.conn.write_all(vlen.as_ref()).await?;
-        self.conn.write_all(b"\r\n").await?;
-
-        self.conn.write_all(vr).await?;
-        self.conn.write_all(b"\r\n").await?;
-        self.conn.flush().await?;
-
-        match self.get_read_write_response().await? {
-            Response::Status(Status::Stored) => Ok(()),
-            Response::Status(s) => Err(s.into()),
-            _ => Err(Status::Error(ErrorKind::Protocol(None)).into()),
-        }
-    }
-
     /// Add a key. If the value exists, Err(Protocol(NotStored)) is returned.
     pub async fn add<K, V>(
         &mut self,
@@ -541,7 +496,7 @@ mod tests {
 
     #[ignore = "Relies on a running memcached server"]
     #[tokio::test]
-    async fn test_add() {
+    async fn test_add_with_string_value() {
         let mut client = setup_client().await;
 
         let key = "async-memcache-test-key-add";
@@ -556,30 +511,26 @@ mod tests {
 
     #[ignore = "Relies on a running memcached server"]
     #[tokio::test]
-    async fn test_original_set() {
+    async fn test_add_with_u64_value() {
         let mut client = setup_client().await;
 
-        let key = "original-set-key";
-        let value = "value";
-        let result = client.original_set(key, value, None, None).await;
+        let key = "async-memcache-test-key-add-u64";
+        let value: u64 = 10;
+
+        let result = client.delete_no_reply(key).await;
+        assert!(result.is_ok(), "failed to delete {}, {:?}", key, result);
+
+        let result = client.add(key, value, None, None).await;
 
         assert!(result.is_ok());
-
-        let result = client.get(key).await;
-
-        assert!(result.is_ok());
-
-        let get_result = result.unwrap();
-
-        assert_eq!(String::from_utf8(get_result.unwrap().data).unwrap(), value);
     }
 
     #[ignore = "Relies on a running memcached server"]
     #[tokio::test]
-    async fn test_new_set_with_string_value() {
+    async fn test_set_with_string_value() {
         let mut client = setup_client().await;
 
-        let key = "new-set-key";
+        let key = "set-key-with-string-value";
         let value = "value";
         let result = client.set(key, value, None, None).await;
 
@@ -596,10 +547,10 @@ mod tests {
 
     #[ignore = "Relies on a running memcached server"]
     #[tokio::test]
-    async fn test_new_set_with_u64_value() {
+    async fn test_set_with_u64_value() {
         let mut client = setup_client().await;
 
-        let key = "new-set-key-with-u64-value";
+        let key = "set-key-with-u64-value";
         let value: u64 = 20;
 
         println!("value: {}", value);
