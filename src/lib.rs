@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 
 use bytes::BytesMut;
+use itoa::Buffer;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 
 mod connection;
@@ -186,9 +187,10 @@ impl Client {
         self.conn.write_all(b" ").await?;
         self.conn.write_all(ttl.as_ref()).await?;
 
+        let mut buf = Buffer::new();
         self.conn.write_all(b" ").await?;
         self.conn
-            .write_all(value.length().to_string().as_bytes())
+            .write_all(buf.format(value.length()).as_bytes())
             .await?;
         self.conn.write_all(b"\r\n").await?;
 
