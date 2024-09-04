@@ -16,10 +16,10 @@ mod parser;
 use self::parser::{
     parse_ascii_metadump_response, parse_ascii_response, parse_ascii_stats_response, Response,
 };
-pub use self::parser::{
-    ErrorKind, KeyMetadata, MetadumpResponse, StatsResponse, Status, ToMemcachedValue, Value,
-};
+pub use self::parser::{ErrorKind, KeyMetadata, MetadumpResponse, StatsResponse, Status, Value};
 
+mod value_serializer;
+use self::value_serializer::ToMemcachedValue;
 /// High-level memcached client.
 ///
 /// [`Client`] is mapped one-to-one with a given connection to a memcached server, and provides a
