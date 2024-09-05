@@ -60,6 +60,36 @@ fn bench_set_with_u64(c: &mut Criterion) {
     });
 }
 
+fn bench_add_with_string(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+
+    c.bench_function("add_small_with_string", |b| {
+        b.to_async(&rt).iter_custom(|iters| async move {
+            let mut client = setup_client().await;
+            let start = std::time::Instant::now();
+            for _ in 0..iters {
+                let _ = client.add("foo", "bar", None, None).await;
+            }
+            start.elapsed()
+        });
+    });
+}
+
+fn bench_add_with_u64(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+
+    c.bench_function("add_small_with_int", |b| {
+        b.to_async(&rt).iter_custom(|iters| async move {
+            let mut client = setup_client().await;
+            let start = std::time::Instant::now();
+            for _ in 0..iters {
+                let _ = client.add("foo", 1 as u64, None, None).await;
+            }
+            start.elapsed()
+        });
+    });
+}
+
 fn bench_get_many(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
     let keys = &["foo", "bar", "baz"];
@@ -94,6 +124,24 @@ fn bench_set_large_with_string(c: &mut Criterion) {
             for _ in 0..iters {
                 let _ = client
                     .set("large_foo", large_payload.as_str(), None, None)
+                    .await;
+            }
+            start.elapsed()
+        });
+    });
+}
+
+fn bench_add_large_with_string(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+
+    c.bench_function("add_large_with_string", |b| {
+        b.to_async(&rt).iter_custom(|iters| async move {
+            let mut client = setup_client().await;
+            let large_payload = "a".repeat(LARGE_PAYLOAD_SIZE);
+            let start = std::time::Instant::now();
+            for _ in 0..iters {
+                let _ = client
+                    .add("large_foo", large_payload.as_str(), None, None)
                     .await;
             }
             start.elapsed()
@@ -240,8 +288,11 @@ criterion_group!(
     bench_get,
     bench_set_with_string,
     bench_set_with_u64,
+    bench_add_with_string,
+    bench_add_with_u64,
     bench_get_many,
     bench_set_large_with_string,
+    bench_add_large_with_string,
     bench_get_large,
     bench_get_many_large,
     bench_increment,

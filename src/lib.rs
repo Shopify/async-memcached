@@ -217,24 +217,22 @@ impl Client {
         let kr = key.as_ref();
         let vr = value.as_bytes();
 
-        self.conn
-            .write_all(
-                &[
-                    b"add ",
-                    kr,
-                    b" ",
-                    flags.unwrap_or(0).to_string().as_ref(),
-                    b" ",
-                    ttl.unwrap_or(0).to_string().as_ref(),
-                    b" ",
-                    vr.len().to_string().as_ref(),
-                    b"\r\n",
-                    vr.as_ref(),
-                    b"\r\n",
-                ]
-                .concat(),
-            )
-            .await?;
+        self.conn.write_all(b"add ").await?;
+        self.conn.write_all(kr).await?;
+        let flags = flags.unwrap_or(0).to_string();
+        self.conn.write_all(b" ").await?;
+        self.conn.write_all(flags.as_ref()).await?;
+        let ttl = ttl.unwrap_or(0).to_string();
+        self.conn.write_all(b" ").await?;
+        self.conn.write_all(ttl.as_ref()).await?;
+
+        self.conn.write_all(b" ").await?;
+        let vlen = vr.len().to_string();
+        self.conn.write_all(vlen.as_ref()).await?;
+        self.conn.write_all(b"\r\n").await?;
+
+        self.conn.write_all(vr.as_ref()).await?;
+        self.conn.write_all(b"\r\n").await?;
         self.conn.flush().await?;
 
         match self.get_read_write_response().await? {
