@@ -1,3 +1,4 @@
+// use std::borrow::Cow;
 use std::future::Future;
 use std::str;
 
@@ -8,7 +9,7 @@ mod private {
     pub trait Sealed {}
 }
 
-/// A trait for serializing multiple types of values in to memcached values.
+/// A trait for serializing multiple types of values in to appropriate memcached input values for the set and add commands.
 pub trait ToMemcachedValue: private::Sealed {
     /// Returns the length of the value in bytes.
     fn length(&self) -> usize;
@@ -21,6 +22,8 @@ pub trait ToMemcachedValue: private::Sealed {
 
 impl private::Sealed for &[u8] {}
 impl private::Sealed for &str {}
+impl private::Sealed for String {}
+impl private::Sealed for &String {}
 impl private::Sealed for u8 {}
 impl private::Sealed for u16 {}
 impl private::Sealed for u32 {}
@@ -39,6 +42,30 @@ impl ToMemcachedValue for &[u8] {
 impl ToMemcachedValue for &str {
     fn length(&self) -> usize {
         <str>::len(self)
+    }
+    async fn write_to<W: AsyncWriteExt + Unpin>(&self, writer: &mut W) -> Result<(), crate::Error> {
+        writer
+            .write_all(self.as_bytes())
+            .await
+            .map_err(crate::Error::from)
+    }
+}
+
+impl ToMemcachedValue for String {
+    fn length(&self) -> usize {
+        <String>::len(self)
+    }
+    async fn write_to<W: AsyncWriteExt + Unpin>(&self, writer: &mut W) -> Result<(), crate::Error> {
+        writer
+            .write_all(self.as_bytes())
+            .await
+            .map_err(crate::Error::from)
+    }
+}
+
+impl ToMemcachedValue for &String {
+    fn length(&self) -> usize {
+        <String>::len(self)
     }
     async fn write_to<W: AsyncWriteExt + Unpin>(&self, writer: &mut W) -> Result<(), crate::Error> {
         writer

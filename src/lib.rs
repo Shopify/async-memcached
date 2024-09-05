@@ -20,6 +20,7 @@ pub use self::parser::{ErrorKind, KeyMetadata, MetadumpResponse, StatsResponse, 
 
 mod value_serializer;
 use self::value_serializer::ToMemcachedValue;
+
 /// High-level memcached client.
 ///
 /// [`Client`] is mapped one-to-one with a given connection to a memcached server, and provides a
@@ -527,12 +528,52 @@ mod tests {
 
     #[ignore = "Relies on a running memcached server"]
     #[tokio::test]
-    async fn test_set_with_string_value() {
+    async fn test_set_with_str_ref_value() {
         let mut client = setup_client().await;
 
         let key = "set-key-with-string-value";
         let value = "value";
         let result = client.set(key, value, None, None).await;
+
+        assert!(result.is_ok());
+
+        let result = client.get(key).await;
+
+        assert!(result.is_ok());
+
+        let get_result = result.unwrap();
+
+        assert_eq!(String::from_utf8(get_result.unwrap().data).unwrap(), value);
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    async fn test_set_with_string_value() {
+        let mut client = setup_client().await;
+
+        let key = "set-key-with-string-value";
+        let value = String::from("value");
+        let result = client.set(key, value.clone(), None, None).await;
+
+        assert!(result.is_ok());
+
+        let result = client.get(key).await;
+
+        assert!(result.is_ok());
+
+        let get_result = result.unwrap();
+
+        assert_eq!(String::from_utf8(get_result.unwrap().data).unwrap(), value);
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    async fn test_set_with_string_ref_value() {
+        let mut client = setup_client().await;
+
+        let key = "set-key-with-string-reference-value";
+        let value = String::from("value");
+        let result = client.set(key, &value, None, None).await;
 
         assert!(result.is_ok());
 
