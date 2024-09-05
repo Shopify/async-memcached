@@ -1,98 +1,39 @@
-// use std::borrow::Cow;
-use std::future::Future;
 use std::str;
 
-use itoa::Buffer;
-use tokio::io::AsyncWriteExt;
-
 mod private {
-    pub trait Sealed {}
+    pub trait AsMemcachedValue {
+        fn as_bytes(&self) -> std::borrow::Cow<'_, [u8]>;
+    }
 }
 
 /// A trait for serializing multiple types of values in to appropriate memcached input values for the set and add commands.
-pub trait ToMemcachedValue: private::Sealed {
-    /// Returns the length of the value in bytes.
-    fn length(&self) -> usize;
-    /// Writes the value to a writer.
-    fn write_to<W: AsyncWriteExt + Unpin>(
-        &self,
-        writer: &mut W,
-    ) -> impl Future<Output = Result<(), crate::Error>>;
-}
+pub trait AsMemcachedValue: private::AsMemcachedValue {}
 
-impl private::Sealed for &[u8] {}
-impl private::Sealed for &str {}
-impl private::Sealed for String {}
-impl private::Sealed for &String {}
-impl private::Sealed for u8 {}
-impl private::Sealed for u16 {}
-impl private::Sealed for u32 {}
-impl private::Sealed for u64 {}
-impl private::Sealed for usize {}
+impl<T: private::AsMemcachedValue> AsMemcachedValue for T {}
 
-impl ToMemcachedValue for &[u8] {
-    fn length(&self) -> usize {
-        <[u8]>::len(self)
-    }
-    async fn write_to<W: AsyncWriteExt + Unpin>(&self, writer: &mut W) -> Result<(), crate::Error> {
-        writer.write_all(self).await.map_err(crate::Error::from)
+impl private::AsMemcachedValue for &[u8] {
+    fn as_bytes(&self) -> std::borrow::Cow<'_, [u8]> {
+        std::borrow::Cow::Borrowed(self)
     }
 }
 
-impl ToMemcachedValue for &str {
-    fn length(&self) -> usize {
-        <str>::len(self)
-    }
-    async fn write_to<W: AsyncWriteExt + Unpin>(&self, writer: &mut W) -> Result<(), crate::Error> {
-        writer
-            .write_all(self.as_bytes())
-            .await
-            .map_err(crate::Error::from)
+impl private::AsMemcachedValue for &str {
+    fn as_bytes(&self) -> std::borrow::Cow<'_, [u8]> {
+        std::borrow::Cow::Borrowed(str::as_bytes(self))
     }
 }
 
-impl ToMemcachedValue for String {
-    fn length(&self) -> usize {
-        <String>::len(self)
-    }
-    async fn write_to<W: AsyncWriteExt + Unpin>(&self, writer: &mut W) -> Result<(), crate::Error> {
-        writer
-            .write_all(self.as_bytes())
-            .await
-            .map_err(crate::Error::from)
-    }
-}
-
-impl ToMemcachedValue for &String {
-    fn length(&self) -> usize {
-        <String>::len(self)
-    }
-    async fn write_to<W: AsyncWriteExt + Unpin>(&self, writer: &mut W) -> Result<(), crate::Error> {
-        writer
-            .write_all(self.as_bytes())
-            .await
-            .map_err(crate::Error::from)
+impl private::AsMemcachedValue for &String {
+    fn as_bytes(&self) -> std::borrow::Cow<'_, [u8]> {
+        std::borrow::Cow::Borrowed(str::as_bytes(self))
     }
 }
 
 macro_rules! impl_to_memcached_value_for_uint {
     ($ty:ident) => {
-        impl ToMemcachedValue for $ty {
-            fn length(&self) -> usize {
-                let mut buf = Buffer::new();
-
-                buf.format(*self).as_bytes().len()
-            }
-            async fn write_to<W: AsyncWriteExt + Unpin>(
-                &self,
-                writer: &mut W,
-            ) -> Result<(), crate::Error> {
-                let mut buf = Buffer::new();
-
-                writer
-                    .write_all(buf.format(*self).as_bytes())
-                    .await
-                    .map_err(crate::Error::from)
+        impl private::AsMemcachedValue for $ty {
+            fn as_bytes(&self) -> std::borrow::Cow<'_, [u8]> {
+                std::borrow::Cow::Owned(self.to_string().into_bytes())
             }
         }
     };

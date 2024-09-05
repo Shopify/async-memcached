@@ -3,7 +3,6 @@
 use std::collections::HashMap;
 
 use bytes::BytesMut;
-use itoa::Buffer;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 
 mod connection;
@@ -19,7 +18,7 @@ use self::parser::{
 pub use self::parser::{ErrorKind, KeyMetadata, MetadumpResponse, StatsResponse, Status, Value};
 
 mod value_serializer;
-use self::value_serializer::ToMemcachedValue;
+use self::value_serializer::AsMemcachedValue;
 
 /// High-level memcached client.
 ///
@@ -173,29 +172,26 @@ impl Client {
     ) -> Result<(), Error>
     where
         K: AsRef<[u8]>,
-        V: ToMemcachedValue,
+        V: AsMemcachedValue,
     {
         let kr = key.as_ref();
+        let vr = value.as_bytes();
 
         self.conn.write_all(b"set ").await?;
         self.conn.write_all(kr).await?;
-
         let flags = flags.unwrap_or(0).to_string();
         self.conn.write_all(b" ").await?;
         self.conn.write_all(flags.as_ref()).await?;
-
         let ttl = ttl.unwrap_or(0).to_string();
         self.conn.write_all(b" ").await?;
         self.conn.write_all(ttl.as_ref()).await?;
 
-        let mut buf = Buffer::new();
         self.conn.write_all(b" ").await?;
-        self.conn
-            .write_all(buf.format(value.length()).as_bytes())
-            .await?;
+        let vlen = vr.len().to_string();
+        self.conn.write_all(vlen.as_ref()).await?;
         self.conn.write_all(b"\r\n").await?;
 
-        value.write_to(&mut self.conn).await?;
+        self.conn.write_all(vr.as_ref()).await?;
         self.conn.write_all(b"\r\n").await?;
         self.conn.flush().await?;
 
@@ -216,29 +212,29 @@ impl Client {
     ) -> Result<(), Error>
     where
         K: AsRef<[u8]>,
-        V: ToMemcachedValue,
+        V: AsMemcachedValue,
     {
         let kr = key.as_ref();
+        let vr = value.as_bytes();
 
-        self.conn.write_all(b"add ").await?;
-        self.conn.write_all(kr).await?;
-
-        let flags = flags.unwrap_or(0).to_string();
-        self.conn.write_all(b" ").await?;
-        self.conn.write_all(flags.as_ref()).await?;
-
-        let ttl = ttl.unwrap_or(0).to_string();
-        self.conn.write_all(b" ").await?;
-        self.conn.write_all(ttl.as_ref()).await?;
-
-        self.conn.write_all(b" ").await?;
         self.conn
-            .write_all(value.length().to_string().as_bytes())
+            .write_all(
+                &[
+                    b"add ",
+                    kr,
+                    b" ",
+                    flags.unwrap_or(0).to_string().as_ref(),
+                    b" ",
+                    ttl.unwrap_or(0).to_string().as_ref(),
+                    b" ",
+                    vr.len().to_string().as_ref(),
+                    b"\r\n",
+                    vr.as_ref(),
+                    b"\r\n",
+                ]
+                .concat(),
+            )
             .await?;
-        self.conn.write_all(b"\r\n").await?;
-
-        value.write_to(&mut self.conn).await?;
-        self.conn.write_all(b"\r\n").await?;
         self.conn.flush().await?;
 
         match self.get_read_write_response().await? {
@@ -553,7 +549,7 @@ mod tests {
 
         let key = "set-key-with-string-value";
         let value = String::from("value");
-        let result = client.set(key, value.clone(), None, None).await;
+        let result = client.set(key, &value, None, None).await;
 
         assert!(result.is_ok());
 
