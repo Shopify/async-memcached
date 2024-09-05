@@ -112,7 +112,7 @@ fn create_proxies_and_configs() -> (Vec<ProxyDrop>, String) {
 mod tests {
     use super::*;
 
-    // #[ignore = "Relies on a running memcached server and toxiproxy service"]
+    #[ignore = "Relies on a running memcached server and toxiproxy service"]
     #[test]
     fn test_set_multi_errors_with_toxiproxy_via_with_down() {
         let rt = tokio::runtime::Builder::new_multi_thread()
