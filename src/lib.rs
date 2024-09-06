@@ -242,8 +242,7 @@ impl Client {
         K: AsRef<[u8]>,
         V: AsMemcachedValue,
     {
-        let kv: Vec<_> = kv.into_iter().collect();
-        let num_results = kv.len();
+        let mut num_results = 0;
 
         for (key, value) in kv {
             let kr = key.as_ref();
@@ -267,6 +266,8 @@ impl Client {
 
             self.conn.write_all(vr.as_ref()).await?;
             self.conn.write_all(b"\r\n").await?;
+
+            num_results += 1;
         }
 
         self.conn.flush().await?;

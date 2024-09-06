@@ -126,7 +126,7 @@ mod tests {
         let toxic_proxy = &proxies[0];
         let keys = vec!["key1", "key2", "key3"];
         let values = vec!["value1", "value2", "value3"];
-
+        let kv: Vec<(&str, &str)> = keys.clone().into_iter().zip(values).collect();
         let mut clean_client = rt.block_on(async {
             async_memcached::Client::new("tcp://127.0.0.1:11211".to_string())
                 .await
@@ -136,19 +136,13 @@ mod tests {
         let mut toxic_client =
             rt.block_on(async { async_memcached::Client::new(toxic_local_url).await.unwrap() });
 
-        let result = rt.block_on(async {
-            clean_client
-                .set_multi(keys.clone(), values.clone(), None, None)
-                .await
-        });
+        let result = rt.block_on(async { clean_client.set_multi(kv.clone(), None, None).await });
 
         assert!(result.is_ok());
 
         let _ = toxic_proxy.with_down(|| {
             rt.block_on(async {
-                let result = toxic_client
-                    .set_multi(keys.clone(), values.clone(), None, None)
-                    .await;
+                let result = toxic_client.set_multi(kv.clone(), None, None).await;
                 println!("result: {:?}", result);
                 assert_eq!(
                     result,
