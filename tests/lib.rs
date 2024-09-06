@@ -199,12 +199,13 @@ async fn test_delete_no_reply() {
 #[tokio::test]
 async fn test_set_multi_with_same_number_of_keys_and_values() {
     let keys = vec!["key1", "key2", "key3"];
-
-    let mut client = setup_client(keys.clone()).await;
-
     let values = vec!["value1", "value2", "value3"];
 
-    let response = client.set_multi(keys, values, None, None).await;
+    let kv: Vec<(&str, &str)> = keys.clone().into_iter().zip(values.into_iter()).collect();
+
+    let mut client = setup_client(keys).await;
+
+    let response = client.set_multi(kv, None, None).await;
 
     assert!(response.is_ok());
 

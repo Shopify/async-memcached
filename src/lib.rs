@@ -231,35 +231,21 @@ impl Client {
     ///
     /// If `ttl` or `flags` are not specified, they will default to 0.  If the value is set
     /// successfully, `()` is returned, otherwise [`Error`] is returned.
-    pub async fn set_multi<I, J, K, V>(
+    pub async fn set_multi<I, K, V>(
         &mut self,
-        keys: I,
-        values: J,
-        // TODO kv: (K, V),
+        kv: I,
         ttl: Option<i64>,
         flags: Option<u32>,
     ) -> Result<(), Error>
     where
-        I: IntoIterator<Item = K>,
-        J: IntoIterator<Item = V>,
+        I: IntoIterator<Item = (K, V)>,
         K: AsRef<[u8]>,
         V: AsMemcachedValue,
     {
-        let mut num_results = 0;
+        let kv: Vec<_> = kv.into_iter().collect();
+        let num_results = kv.len();
 
-        let mut keys_iter = keys.into_iter();
-        let mut values_iter = values.into_iter();
-
-        let keys_size_hint = keys_iter.size_hint();
-        let values_size_hint = values_iter.size_hint();
-
-        if keys_size_hint.0 != values_size_hint.0 || keys_size_hint.1 != values_size_hint.1 {
-            return Err(Error::Protocol(Status::Error(ErrorKind::Protocol(Some(
-                "Number of keys and values must be equal".to_string(),
-            )))));
-        }
-
-        while let (Some(key), Some(value)) = (keys_iter.next(), values_iter.next()) {
+        for (key, value) in kv {
             let kr = key.as_ref();
             let vr = value.as_bytes();
 
@@ -281,15 +267,6 @@ impl Client {
 
             self.conn.write_all(vr.as_ref()).await?;
             self.conn.write_all(b"\r\n").await?;
-
-            num_results += 1;
-        }
-
-        // // Check if both iterators are fully consumed
-        if keys_iter.next().is_some() || values_iter.next().is_some() {
-            return Err(Error::Protocol(Status::Error(ErrorKind::Protocol(Some(
-                "Number of keys and values must be equal".to_string(),
-            )))));
         }
 
         self.conn.flush().await?;
