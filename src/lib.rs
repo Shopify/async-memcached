@@ -98,18 +98,22 @@ impl Client {
         self.drive_receive(parse_ascii_response).await
     }
 
-    pub(crate) async fn get_read_write_many_response(
+    pub(crate) async fn get_write_multi_responses(
         &mut self,
         num_results: usize,
-    ) -> Result<(), Error> {
+    ) -> Result<Response, Error> {
         let mut results: Vec<Result<(), Error>> = Vec::new();
 
         for _ in 0..num_results {
-            results.push(match self.drive_receive(parse_ascii_response).await? {
+            // The server will send a response for each key set, this parses each response into a Result or Error
+            // which can be dealt with accordingly.
+            let result = match self.drive_receive(parse_ascii_response).await? {
                 Response::Status(Status::Stored) => Ok(()),
                 Response::Status(s) => Err(s.into()),
                 _ => Err(Status::Error(ErrorKind::Protocol(None)).into()),
-            });
+            };
+
+            results.push(result);
         }
 
         let errors: Vec<_> = results.into_iter().filter(|r| r.is_err()).collect();
@@ -118,7 +122,7 @@ impl Client {
             return Err(Status::Error(ErrorKind::Protocol(None)).into());
         }
 
-        Ok(())
+        Ok(Response::Status(Status::Stored))
     }
 
     pub(crate) async fn get_metadump_response(&mut self) -> Result<MetadumpResponse, Error> {
@@ -242,9 +246,15 @@ impl Client {
         K: AsRef<[u8]>,
         V: AsMemcachedValue,
     {
+        let mut kv_iter = kv.into_iter().peekable();
+
+        if kv_iter.peek().is_none() {
+            return Ok(());
+        }
+
         let mut num_results = 0;
 
-        for (key, value) in kv {
+        for (key, value) in kv_iter {
             let kr = key.as_ref();
             let vr = value.as_bytes();
 
@@ -269,10 +279,13 @@ impl Client {
 
             num_results += 1;
         }
-
         self.conn.flush().await?;
 
-        self.get_read_write_many_response(num_results).await
+        match self.get_write_multi_responses(num_results).await? {
+            Response::Status(Status::Stored) => Ok(()),
+            Response::Status(s) => Err(s.into()),
+            _ => Err(Status::Error(ErrorKind::Protocol(None)).into()),
+        }
     }
 
     /// Add a key. If the value exists, Err(Protocol(NotStored)) is returned.
@@ -353,7 +366,8 @@ impl Client {
 
     /// Increments the given key by the specified amount.
     /// Can overflow from the max value of u64 (18446744073709551615) -> 0.
-    /// Returns the new value of the key if key exists, otherwise returns KeyNotFound error.
+    /// If the key does not exist, the server will return a KeyNotFound error.
+    /// If the key exists but the value is non-numeric, the server will return a ClientError.
     pub async fn increment<K>(&mut self, key: K, amount: u64) -> Result<u64, Error>
     where
         K: AsRef<[u8]>,
@@ -381,6 +395,7 @@ impl Client {
 
     /// Increments the given key by the specified amount with no reply from the server.
     /// Can overflow from the max value of u64 (18446744073709551615) -> 0.
+    /// Always returns Ok(()), will not return any indication of success or failure.
     pub async fn increment_no_reply<K>(&mut self, key: K, amount: u64) -> Result<(), Error>
     where
         K: AsRef<[u8]>,
@@ -404,6 +419,8 @@ impl Client {
 
     /// Decrements the given key by the specified amount.
     /// Will not decrement the counter below 0.
+    /// If the key does not exist, the server will return a KeyNotFound error.
+    /// If the key exists but the value is non-numeric, the server will return a ClientError.
     pub async fn decrement<K>(&mut self, key: K, amount: u64) -> Result<u64, Error>
     where
         K: AsRef<[u8]>,

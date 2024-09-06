@@ -186,6 +186,31 @@ fn bench_set_multi_large_strings(c: &mut Criterion) {
     });
 }
 
+fn bench_set_multi_with_100_large_string_values(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+
+    c.bench_function("set_multi_with_100_large_string_values", |b| {
+        b.to_async(&rt).iter_custom(|iters| async move {
+            let mut client = setup_client().await;
+
+            let large_payload = "a".repeat(LARGE_PAYLOAD_SIZE);
+
+            let mut keys = Vec::with_capacity(100);
+            let key_strings: Vec<String> = (0..100).map(|i| format!("key{}", i)).collect();
+            keys.extend(key_strings.iter().map(|s| s.as_str()));
+            let values = vec![large_payload.as_str(); 100];
+
+            let kv: Vec<(&str, &str)> = keys.into_iter().zip(values).collect();
+
+            let start = std::time::Instant::now();
+            for _ in 0..iters {
+                let _ = client.set_multi(kv.clone(), None, None).await;
+            }
+            start.elapsed()
+        });
+    });
+}
+
 fn bench_set_multi_u64(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
 
@@ -340,18 +365,18 @@ criterion_group!(
     benches,
     bench_get,
     bench_get_many,
+    bench_get_large,
+    bench_get_many_large,
     bench_set_with_string,
     bench_set_with_u64,
     bench_set_multi_small_strings,
     bench_set_multi_large_strings,
+    bench_set_multi_with_100_large_string_values,
     bench_set_multi_u64,
     bench_add_with_string,
     bench_add_with_u64,
-    bench_get_many,
     bench_set_large_with_string,
     bench_add_large_with_string,
-    bench_get_large,
-    bench_get_many_large,
     bench_increment,
     bench_increment_no_reply,
     bench_decrement,
