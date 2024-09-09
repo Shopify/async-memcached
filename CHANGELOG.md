@@ -1,7 +1,7 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
-Keep a running log of your changes with each PR under the `[Unreleased] - ReleaseDate` header.
+Keep a running log of your changes with each PR under the `[0.3.1] - 2024-09-09` header.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- next-header -->
 
 ## [Unreleased] - ReleaseDate
+
+## [0.3.1] - 2024-09-09
 
 ### Changed
 
