@@ -139,18 +139,18 @@ $ git checkout -b "release v<VERSION>"
 $ cargo release patch -v
 [2024-09-09T17:37:47Z DEBUG reqwest::connect] starting new connection: https://index.crates.io/
 [2024-09-09T17:37:48Z DEBUG cargo_release::steps] Files changed in async-memcached since v0.3.0: [
-        "/Users/mark/src/github.com/Shopify/async-memcached/CHANGELOG.md",
-        "/Users/mark/src/github.com/Shopify/async-memcached/benches/bench.rs",
-        "/Users/mark/src/github.com/Shopify/async-memcached/src/connection.rs",
-        "/Users/mark/src/github.com/Shopify/async-memcached/src/lib.rs",
-        "/Users/mark/src/github.com/Shopify/async-memcached/src/value_serializer.rs",
+        "/async-memcached/CHANGELOG.md",
+        "/async-memcached/benches/bench.rs",
+        "/async-memcached/src/connection.rs",
+        "/async-memcached/src/lib.rs",
+        "/async-memcached/src/value_serializer.rs",
     ]
 [2024-09-09T17:37:48Z DEBUG globset] glob converted to regex: Glob { glob: "**/*", re: "(?-u)^(?:/?|.*/)[^/]*$", opts: GlobOptions { case_insensitive: false, literal_separator: true, backslash_escape: true, empty_alternates: false }, tokens: Tokens([RecursivePrefix, ZeroOrMore]) }
 [2024-09-09T17:37:48Z DEBUG globset] built glob set; 0 literals, 1 basenames, 0 extensions, 0 prefixes, 0 suffixes, 0 required extensions, 1 regexes
    Upgrading async-memcached from 0.3.0 to 0.3.1
 [2024-09-09T17:37:48Z DEBUG cargo_release::ops::cargo] change:
-    --- /Users/mark/src/github.com/Shopify/async-memcached/Cargo.toml   original
-    +++ /Users/mark/src/github.com/Shopify/async-memcached/Cargo.toml   updated
+    --- /async-memcached/Cargo.toml   original
+    +++ /async-memcached/Cargo.toml   updated
     @@ -1,6 +1,6 @@
      [package]
      name = "async-memcached"
@@ -161,7 +161,7 @@ $ cargo release patch -v
      readme = "README.md"
 
 [2024-09-09T17:37:48Z DEBUG cargo_release::steps::release] updating lock file
-[2024-09-09T17:37:48Z DEBUG cargo_release::ops::replace] processing replacements for file /Users/mark/src/github.com/Shopify/async-memcached/CHANGELOG.md
+[2024-09-09T17:37:48Z DEBUG cargo_release::ops::replace] processing replacements for file async-memcached/CHANGELOG.md
    Replacing in CHANGELOG.md
 --- CHANGELOG.md        original
 +++ CHANGELOG.md        replaced
