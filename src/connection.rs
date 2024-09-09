@@ -1,6 +1,5 @@
 use pin_project::pin_project;
 use std::io;
-use std::net::SocketAddr;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncBufRead, AsyncRead, AsyncWrite, BufReader, BufWriter};
@@ -110,10 +109,7 @@ impl Connection {
                 .map(|c| Connection::Unix(BufReader::new(BufWriter::new(c))))
                 .map_err(Error::Connect),
             Addr::Tcp(url) | Addr::Unknown(url) => {
-                let addrs = lookup_host(url)
-                    .await
-                    .map_err(Error::Connect)?
-                    .collect::<Vec<SocketAddr>>();
+                let addrs = lookup_host(url).await.map_err(Error::Connect)?;
 
                 let mut last_err = None;
 
@@ -121,7 +117,9 @@ impl Connection {
                     let socket = TcpSocket::new_v4().map_err(Error::Connect)?;
                     socket.set_nodelay(true).map_err(Error::Connect)?;
                     match socket.connect(addr).await {
-                        Ok(stream) => return Ok(Connection::Tcp(BufReader::new(BufWriter::new(stream)))),
+                        Ok(stream) => {
+                            return Ok(Connection::Tcp(BufReader::new(BufWriter::new(stream))))
+                        }
                         Err(e) => last_err = Some(Error::Connect(e)),
                     }
                 }

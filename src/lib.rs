@@ -18,7 +18,7 @@ use self::parser::{
 pub use self::parser::{ErrorKind, KeyMetadata, MetadumpResponse, StatsResponse, Status, Value};
 
 mod value_serializer;
-use self::value_serializer::AsMemcachedValue;
+pub use self::value_serializer::AsMemcachedValue;
 
 /// High-level memcached client.
 ///
