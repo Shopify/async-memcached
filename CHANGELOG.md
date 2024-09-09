@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `set` and `add` methods can now accept `uint`-type argument for value in addition to `&str` and `&String` types.  The original implementation used an `AsRef` trait bound, which has been replaced with a custom `AsMemcachedValue` trait bound that should cover all of the applicable incoming types.
 
+- Fixed a bug related to DNS lookup that was preventing successful project builds in some cases.
+
 ## [0.3.0] - 2024-08-30
 
 ### Added
