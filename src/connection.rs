@@ -4,7 +4,7 @@ use std::net::SocketAddr;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncBufRead, AsyncRead, AsyncWrite, BufReader, BufWriter};
-use tokio::net::{TcpSocket, TcpStream, UnixStream};
+use tokio::net::{lookup_host, TcpSocket, TcpStream, UnixStream};
 
 use crate::Error;
 
@@ -110,16 +110,27 @@ impl Connection {
                 .map(|c| Connection::Unix(BufReader::new(BufWriter::new(c))))
                 .map_err(Error::Connect),
             Addr::Tcp(url) | Addr::Unknown(url) => {
-                let addr: SocketAddr = url.parse().map_err(|e| {
+                let addrs = lookup_host(url)
+                    .await
+                    .map_err(Error::Connect)?
+                    .collect::<Vec<SocketAddr>>();
+
+                let mut last_err = None;
+
+                for addr in addrs {
+                    let socket = TcpSocket::new_v4().map_err(Error::Connect)?;
+                    socket.set_nodelay(true).map_err(Error::Connect)?;
+                    match socket.connect(addr).await {
+                        Ok(stream) => return Ok(Connection::Tcp(BufReader::new(BufWriter::new(stream)))),
+                        Err(e) => last_err = Some(Error::Connect(e)),
+                    }
+                }
+                Err(last_err.unwrap_or_else(|| {
                     Error::Connect(io::Error::new(
                         io::ErrorKind::InvalidInput,
-                        format!("Invalid address: {}", e),
+                        "could not resolve to any address",
                     ))
-                })?;
-                let socket = TcpSocket::new_v4().map_err(Error::Connect)?;
-                socket.set_nodelay(true).map_err(Error::Connect)?;
-                let stream = socket.connect(addr).await.map_err(Error::Connect)?;
-                Ok(Connection::Tcp(BufReader::new(BufWriter::new(stream))))
+                }))
             }
         }
     }
