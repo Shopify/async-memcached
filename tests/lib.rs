@@ -1,6 +1,6 @@
 use async_memcached::{Client, Error, Status};
 
-const LARGE_PAYLOAD_SIZE: usize = 1000 * 1024;
+// const LARGE_PAYLOAD_SIZE: usize = 1000 * 1024;
 
 async fn setup_client(keys: Vec<&str>) -> Client {
     let mut client = Client::new("tcp://127.0.0.1:11211")
@@ -15,6 +15,18 @@ async fn setup_client(keys: Vec<&str>) -> Client {
     }
 
     client
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+async fn test_get_with_nonexistent_key() {
+    let key = "nonexistent-key";
+
+    let mut client = setup_client(vec![key]).await;
+
+    let result = client.get(key).await;
+
+    assert!(result.is_ok());
 }
 
 #[ignore = "Relies on a running memcached server"]
@@ -68,7 +80,7 @@ async fn test_add_with_a_key_that_already_exists() {
 #[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 async fn test_set_with_string_value() {
-    let key = "set-key-with-string-value";
+    let key = "set-key-with-str-value";
 
     let mut client = setup_client(vec![key]).await;
 
@@ -81,9 +93,7 @@ async fn test_set_with_string_value() {
 
     assert!(result.is_ok());
 
-    let get_result = result.unwrap();
-
-    assert_eq!(String::from_utf8(get_result.unwrap().data).unwrap(), value);
+    assert_eq!(String::from_utf8(result.unwrap().unwrap().data).unwrap(), value);
 }
 
 #[ignore = "Relies on a running memcached server"]
@@ -122,13 +132,41 @@ async fn test_set_with_u64_value() {
 
     let result = client.get(key).await;
 
-    assert!(result.is_ok());
+    println!("result: {:?}", result);
+
+    assert_eq!(
+        value,
+        btoi::btoi::<u64>(&result.unwrap().unwrap().data)
+            .expect("couldn't parse data from bytes to integer")
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+async fn test_set_no_reply_with_u64_value() {
+    let key = "set-no-reply-key-with-u64-value";
+
+    let mut client = setup_client(vec![key]).await;
+
+    let value: u64 = 20;
+
+    let result = client.set_no_reply(key, value, None, None).await;
+
+    assert_eq!(Ok(()), result);
+
+    let result = client.get(key).await;
+
+    assert_eq!(
+        value,
+        btoi::btoi::<u64>(&result.unwrap().unwrap().data)
+            .expect("couldn't parse data from bytes to integer")
+    );
 }
 
 #[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 async fn test_get_many() {
-    let keys = vec!["key1", "key2", "key3"];
+    let mut keys = vec!["key1", "key2", "key3"];
     let values = vec!["value1", "value2", "value3"];
 
     let mut client = setup_client(keys.clone()).await;
@@ -138,9 +176,43 @@ async fn test_get_many() {
         assert!(result.is_ok(), "failed to set {}, {:?}", key, result);
     }
 
+    keys.push("thisisakeythatisntset2342");
+
+    println!("keys: {:?}", keys);
+
     let result = client.get_many(keys).await;
 
+    println!("result: {:?}", result);
+
     assert!(result.is_ok());
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+async fn test_get_many_with_nonexistent_key() {
+    let mut keys = vec!["key1", "key2", "key3"];
+    let values = vec!["value1", "value2", "value3"];
+
+    let original_keys_length = keys.len();
+
+    let mut client = setup_client(keys.clone()).await;
+
+    for (key, value) in keys.iter().zip(values.iter()) {
+        let result = client.set(*key, *value, None, None).await;
+        assert!(result.is_ok(), "failed to set {}, {:?}", key, result);
+    }
+
+    keys.push("thisisakeythatisntset");
+
+    let results = client.get_many(keys.clone()).await.unwrap();
+
+    assert_eq!(original_keys_length, results.len());
+
+    for result in results {
+        let key_str = std::str::from_utf8(&result.key).unwrap();
+        assert!(keys.clone().contains(&key_str));
+    }
+
 }
 
 #[ignore = "Relies on a running memcached server"]
@@ -205,43 +277,47 @@ async fn test_delete_no_reply() {
     assert!(result.is_ok(), "failed to delete {}, {:?}", key, result);
 }
 
-#[ignore = "Relies on a running memcached server"]
-#[tokio::test]
-async fn test_set_multi_with_string_values() {
-    let keys = vec!["key1", "key2", "key3"];
-    let values = vec!["value1", "value2", "value3"];
+// #[ignore = "Relies on a running memcached server"]
+// #[tokio::test]
+// async fn test_set_multi_with_string_values() {
+//     let keys = vec!["key1", "key2", "key3"];
+//     let values = vec!["value1", "value2", "value3"];
 
-    let kv: Vec<(&str, &str)> = keys.clone().into_iter().zip(values.into_iter()).collect();
+//     let kv: Vec<(&str, &str)> = keys.clone().into_iter().zip(values.into_iter()).collect();
 
-    let mut client = setup_client(keys).await;
+//     let mut client = setup_client(keys).await;
 
-    let _ = client.set_multi(kv, None, None).await;
+//     let _ = client.set_multi(kv, None, None).await;
 
-    let result = client.get("key2").await;
+//     let result = client.get("key2").await;
 
-    assert!(result.is_ok());
-}
+//     if let Ok(Some(item)) = &result {
+//         println!("item: {:?}", item);
+//     }
 
-#[ignore = "Relies on a running memcached server"]
-#[tokio::test]
-async fn test_set_multi_with_large_string_values() {
-    let large_string = "a".repeat(LARGE_PAYLOAD_SIZE);
+//     assert!(result.is_ok());
+// }
 
-    let mut keys = Vec::with_capacity(100);
-    let key_strings: Vec<String> = (0..100).map(|i| format!("key{}", i)).collect();
-    keys.extend(key_strings.iter().map(|s| s.as_str()));
-    let values = vec![large_string.as_str(); 100];
+// #[ignore = "Relies on a running memcached server"]
+// #[tokio::test]
+// async fn test_set_multi_with_large_string_values() {
+//     let large_string = "a".repeat(LARGE_PAYLOAD_SIZE);
 
-    let kv: Vec<(&str, &str)> = keys.clone().into_iter().zip(values.into_iter()).collect();
+//     let mut keys = Vec::with_capacity(100);
+//     let key_strings: Vec<String> = (0..100).map(|i| format!("key{}", i)).collect();
+//     keys.extend(key_strings.iter().map(|s| s.as_str()));
+//     let values = vec![large_string.as_str(); 100];
 
-    let mut client = setup_client(keys).await;
+//     let kv: Vec<(&str, &str)> = keys.clone().into_iter().zip(values.into_iter()).collect();
 
-    let _ = client.set_multi(kv, None, None).await;
+//     let mut client = setup_client(keys).await;
 
-    let result = client.get("key2").await;
+//     let _ = client.set_multi(kv, None, None).await;
 
-    assert!(result.is_ok());
-}
+//     let result = client.get("key2").await;
+
+//     assert!(result.is_ok());
+// }
 
 #[ignore = "Relies on a running memcached server"]
 #[tokio::test]
@@ -337,7 +413,7 @@ async fn test_increments_existing_key_with_no_reply() {
     let result = client.get(key).await;
 
     assert_eq!(
-        2,
+        value + amount,
         btoi::btoi::<u64>(&result.unwrap().unwrap().data)
             .expect("couldn't parse data from bytes to integer")
     );
@@ -413,7 +489,7 @@ async fn test_decrements_existing_key_with_no_reply() {
     let result = client.get(key).await;
 
     assert_eq!(
-        0,
+        value - amount,
         btoi::btoi::<u64>(&result.unwrap().unwrap().data)
             .expect("couldn't parse data from bytes to integer")
     );
