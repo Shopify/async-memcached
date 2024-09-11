@@ -98,13 +98,13 @@ impl Client {
         self.drive_receive(parse_ascii_response).await
     }
 
-    pub(crate) async fn _get_write_multi_responses<I, K, V>(
+    pub(crate) async fn filter_set_multi_responses<I, K, V>(
         &mut self,
         kvp: I,
     ) -> Result<HashMap<K, Result<Response, Error>>, Error>
     where
         I: IntoIterator<Item = (K, V)>,
-        K: AsRef<[u8]> + Eq + std::hash::Hash + std::fmt::Debug,
+        K: AsRef<[u8]> + Eq + std::hash::Hash,
         V: AsMemcachedValue,
     {
         let mut results = HashMap::new();
@@ -180,14 +180,11 @@ impl Client {
         self.conn.write_all(b"\r\n").await?;
         self.conn.flush().await?;
 
-        let response = match self.get_read_write_response().await? {
+        match self.get_read_write_response().await? {
             Response::Status(s) => Err(s.into()),
             Response::Data(d) => d.ok_or(Status::NotFound.into()),
             _ => Err(Status::Error(ErrorKind::Protocol(None)).into()),
-        };
-
-        println!("response in get_many: {:?}", response);
-        response
+        }
     }
 
     /// Sets the given key.
@@ -234,10 +231,9 @@ impl Client {
         }
     }
 
-    /// Sets the given key.
+    /// Sets the given key without waiting for a reply from the server.
     ///
-    /// If `ttl` or `flags` are not specified, they will default to 0.  If the value is set
-    /// successfully, `()` is returned, otherwise [`Error`] is returned.
+    /// If `ttl` or `flags` are not specified, they will default to 0.
     pub async fn set_no_reply<K, V>(
         &mut self,
         key: K,
@@ -274,129 +270,91 @@ impl Client {
         Ok(())
     }
 
-    /// Sets the given keys.
+    /// Sets multiple keys.
     ///
     /// If `ttl` or `flags` are not specified, they will default to 0.  If the value is set
     /// successfully, `()` is returned, otherwise [`Error`] is returned.
-    // pub async fn _set_multi<I, K, V>(
-    //     &mut self,
-    //     kv: I,
-    //     ttl: Option<i64>,
-    //     flags: Option<u32>,
-    // ) -> Result<(), Vec<Error>>
-    // where
-    //     I: IntoIterator<Item = (K, V)>,
-    //     K: AsRef<[u8]>,
-    //     V: AsMemcachedValue,
-    // {
-    //     let mut kv_iter = &kv.into_iter().peekable();
+    pub async fn set_multi<I, K, V>(
+        &mut self,
+        kv: I,
+        ttl: Option<i64>,
+        flags: Option<u32>,
+    ) -> Result<HashMap<K, Result<Response, Error>>, Error>
+    where
+        I: IntoIterator<Item = (K, V)> + Clone,
+        K: AsRef<[u8]> + Eq + std::hash::Hash + std::fmt::Debug,
+        V: AsMemcachedValue,
+    {
+        let mut kv_iter = kv.clone().into_iter().peekable();
 
-    //     if kv_iter.peek().is_none() {
-    //         return Ok(());
-    //     }
+        if kv_iter.peek().is_none() {
+            return Ok(HashMap::new());
+        }
 
-    //     let mut num_results = 0;
+        for (key, value) in kv {
+            let kr = key.as_ref();
+            let vr = value.as_bytes();
 
-    //     let result: Result<(), Error> = (|| async {
-    //         for (key, value) in kv_iter {
-    //             let kr = key.as_ref();
-    //             let vr = value.as_bytes();
+            self.conn.write_all(b"set ").await?;
+            self.conn.write_all(kr).await?;
 
-    //             self.conn.write_all(b"set ").await?;
-    //             self.conn.write_all(kr).await?;
+            let flags = flags.unwrap_or(0).to_string();
+            self.conn.write_all(b" ").await?;
+            self.conn.write_all(flags.as_ref()).await?;
 
-    //             let flags = flags.unwrap_or(0).to_string();
-    //             self.conn.write_all(b" ").await?;
-    //             self.conn.write_all(flags.as_ref()).await?;
+            let ttl = ttl.unwrap_or(0).to_string();
+            self.conn.write_all(b" ").await?;
+            self.conn.write_all(ttl.as_ref()).await?;
 
-    //             let ttl = ttl.unwrap_or(0).to_string();
-    //             self.conn.write_all(b" ").await?;
-    //             self.conn.write_all(ttl.as_ref()).await?;
+            let vlen = vr.len().to_string();
+            self.conn.write_all(b" ").await?;
+            self.conn.write_all(vlen.as_ref()).await?;
+            self.conn.write_all(b"\r\n").await?;
 
-    //             let vlen = vr.len().to_string();
-    //             self.conn.write_all(b" ").await?;
-    //             self.conn.write_all(vlen.as_ref()).await?;
-    //             self.conn.write_all(b"\r\n").await?;
+            self.conn.write_all(vr.as_ref()).await?;
+            self.conn.write_all(b"\r\n").await?;
+        }
+        self.conn.flush().await?;
 
-    //             self.conn.write_all(vr.as_ref()).await?;
-    //             self.conn.write_all(b"\r\n").await?;
+        let results = self.filter_set_multi_responses(kv_iter).await?;
 
-    //             num_results += 1;
-    //         }
-    //         self.conn.flush().await?;
-    //         Ok(())
-    //     })().await;
-
-    //     // If there was an error in the write process, return it as a Vec<Error>
-    //     if let Err(e) = result {
-    //         return Err(vec![e]);
-    //     }
-
-    //     // Process the responses
-    //     match self.get_write_multi_responses(&kv).await {
-    //         vec_results => {
-    //             if vec_results.iter().all(|r| matches!(r, Ok(Response::Status(Status::Stored)))) {
-    //                 Ok(())
-    //             } else {
-    //                 Err(vec_results.into_iter().filter_map(Result::err).collect())
-    //             }
-    //         }
-    //     }
-    // }
+        Ok(results)
+    }
 
     /// Sets the given keys.
     ///
     /// If `ttl` or `flags` are not specified, they will default to 0.  If the value is set
     /// successfully, `()` is returned, otherwise [`Error`] is returned.
-    // pub async fn set_multi<I, K, V>(
-    //     &mut self,
-    //     kv: I,
-    //     ttl: Option<i64>,
-    //     flags: Option<u32>,
-    // ) -> Result<HashMap<K, Result<Response, Error>>, Error>
-    // where
-    //     I: IntoIterator<Item = (K, V)>,
-    //     K: AsRef<[u8]> + Eq + std::hash::Hash + std::fmt::Debug,
-    //     V: AsMemcachedValue + Eq + std::hash::Hash,
-    // {
-    //     // if kv.peekable().peek().is_none() {
-    //     //     return Ok(HashMap::new());
-    //     // }
+    pub async fn set_multi_loop<I, K, V>(
+        &mut self,
+        kv: I,
+        ttl: Option<i64>,
+        flags: Option<u32>,
+    ) -> Result<HashMap<K, Result<(), Error>>, Error>
+    where
+        I: IntoIterator<Item = (K, V)> + Clone,
+        K: AsRef<[u8]> + Eq + std::hash::Hash,
+        V: AsMemcachedValue,
+    {
+        let mut kv_iter = kv.into_iter().peekable();
 
-    //     // let mut error_map = HashMap::new();
+        if kv_iter.peek().is_none() {
+            return Ok(HashMap::new());
+        }
 
-    //     // Write commands and collect keys
-    //     for (key, value) in kv {
-    //         let kr = key.as_ref();
-    //         let vr = value.as_bytes();
+        let mut error_map: HashMap<K, Result<(), Error>> = HashMap::new();
 
-    //         self.conn.write_all(b"set ").await?;
-    //         self.conn.write_all(kr).await?;
+        // Write commands and collect key-error
+        for (key, value) in kv_iter {
+            let response = self.set(&key, value, ttl, flags).await;
 
-    //         let flags = flags.unwrap_or(0).to_string();
-    //         self.conn.write_all(b" ").await?;
-    //         self.conn.write_all(flags.as_ref()).await?;
+            if response.is_err() {
+                error_map.insert(key, response);
+            }
+        }
 
-    //         let ttl = ttl.unwrap_or(0).to_string();
-    //         self.conn.write_all(b" ").await?;
-    //         self.conn.write_all(ttl.as_ref()).await?;
-
-    //         let vlen = vr.len().to_string();
-    //         self.conn.write_all(b" ").await?;
-    //         self.conn.write_all(vlen.as_ref()).await?;
-    //         self.conn.write_all(b"\r\n").await?;
-
-    //         self.conn.write_all(vr.as_ref()).await?;
-    //         self.conn.write_all(b"\r\n").await?;
-    //     }
-
-    //     self.conn.flush().await?;
-
-    //     // Process responses
-    //     let results = self.get_write_multi_responses(kv).await?;
-
-    //     Ok(results)
-    // }
+        Ok(error_map)
+    }
 
     /// Add a key. If the value exists, Err(Protocol(NotStored)) is returned.
     pub async fn add<K, V>(
