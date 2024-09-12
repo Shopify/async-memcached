@@ -1,4 +1,8 @@
 use async_memcached::{Client, Error, Status};
+use rand::seq::IteratorRandom;
+
+// Note: Each test should run with keys unique to that test to avoid async conflicts.  Because these tests run concurrently,
+// it's possible to delete/overwrite keys created by another test before they're read.
 
 const LARGE_PAYLOAD_SIZE: usize = 1000 * 1024;
 
@@ -335,7 +339,7 @@ async fn test_delete_no_reply() {
 #[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 async fn test_set_multi_with_string_values() {
-    let keys = vec!["key1", "key2", "key3"];
+    let keys = vec!["smwsv-key1", "smwsv-key2", "smwsv-key3"];
     let values = vec!["value1", "value2", "value3"];
 
     let kv: Vec<(&str, &str)> = keys.clone().into_iter().zip(values.into_iter()).collect();
@@ -344,13 +348,130 @@ async fn test_set_multi_with_string_values() {
 
     let _ = client.set_multi(kv, None, None).await;
 
-    let result = client.get("key2").await;
+    let result = client.get("smwsv-key2").await;
 
     assert!(matches!(
-        std::str::from_utf8(&result.unwrap().unwrap().data)
-            .expect("failed to parse string from bytes"),
+        std::str::from_utf8(
+            &result
+                .expect("should have unwrapped a Result")
+                .expect("should have unwrapped an Option")
+                .data
+        )
+        .expect("failed to parse string from bytes"),
         "value2"
     ));
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+async fn test_set_multi_with_string_values_that_exceed_max_size() {
+    const NUM_PAIRS: usize = 100;
+    const LARGE_VALUE_SIZE: usize = 2_048_576;
+    const NUM_LARGE_KEYS: usize = 5;
+
+    let keys: Vec<String> = (0..NUM_PAIRS).map(|i| format!("multi-key{}", i)).collect();
+    let mut values: Vec<String> = (0..NUM_PAIRS).map(|i| format!("value{}", i)).collect();
+
+    let mut rng = rand::thread_rng();
+    let large_key_indices: Vec<usize> = (1..NUM_PAIRS)
+        .choose_multiple(&mut rng, NUM_LARGE_KEYS)
+        .into_iter()
+        .collect();
+
+    let mut large_key_strs = Vec::new();
+    for &index in &large_key_indices {
+        values[index] = "a".repeat(LARGE_VALUE_SIZE);
+        large_key_strs.push(keys[index].clone());
+    }
+
+    let kv: Vec<(&str, &str)> = keys
+        .iter()
+        .map(AsRef::as_ref)
+        .zip(values.iter().map(AsRef::as_ref))
+        .collect();
+
+    let mut client = setup_client(keys.iter().map(AsRef::as_ref).collect()).await;
+
+    let set_result = client.set_multi(kv, None, None).await;
+    assert!(
+        set_result.is_ok(),
+        "Failed to set multiple values: {:?}",
+        set_result
+    );
+
+    let result_map = set_result.unwrap();
+
+    for (key, value) in &result_map {
+        println!("key: {}, value: {:?}", key, value);
+    }
+
+    // The randomized large keys should have errors due to large values
+    for large_key in &large_key_strs {
+        assert!(
+            result_map.contains_key(large_key.as_str()),
+            "{} should be in the result map",
+            large_key
+        );
+        assert!(
+            result_map[large_key.as_str()].is_err(),
+            "{} should have an error",
+            large_key
+        );
+    }
+
+    // Check a small value - key0 never chosen to be a large value
+    let small_result = client.get("multi-key0").await;
+    assert!(matches!(
+        std::str::from_utf8(&small_result.unwrap().unwrap().data)
+            .expect("failed to parse string from bytes"),
+        "value0"
+    ));
+
+    // Check the large values (should not exist due to error)
+    for large_key in &large_key_strs {
+        let large_result = client.get(large_key.as_str()).await;
+        assert!(
+            large_result.unwrap().is_none(),
+            "Large value {} should not have been set",
+            large_key
+        );
+    }
+
+    // Check other keys were set successfully
+    for i in 0..NUM_PAIRS {
+        let key = format!("multi-key{}", i);
+        if !large_key_indices.contains(&i) {
+            assert!(
+                !result_map.contains_key(key.as_str()),
+                "Key {} should not be in the error map",
+                key
+            );
+            let get_result = client.get(key.as_str()).await.unwrap().unwrap();
+            assert_eq!(
+                std::str::from_utf8(&get_result.data).unwrap(),
+                format!("value{}", i),
+                "Mismatch for key {}",
+                key
+            );
+        } else {
+            assert!(
+                result_map.contains_key(key.as_str()),
+                "Key {} should be in the error map",
+                key
+            );
+            assert!(
+                result_map[key.as_str()].is_err(),
+                "Key {} should have an error",
+                key
+            );
+            let get_result = client.get(key.as_str()).await.unwrap();
+            assert!(
+                get_result.is_none(),
+                "Large value for key {} should not have been set",
+                key
+            );
+        }
+    }
 }
 
 #[ignore = "Relies on a running memcached server"]
