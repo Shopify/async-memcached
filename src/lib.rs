@@ -309,6 +309,35 @@ impl Client {
         Ok(results)
     }
 
+    /// Sets multiple keys.
+    ///
+    /// If `ttl` or `flags` are not specified, they will default to 0. The same values for `ttl` and `flags` will be applied to each key.
+    /// Returns a result with a HashMap of keys to the results of the set operation, or an error.
+    pub async fn set_multi_loop_no_reply<I, K, V>(
+        &mut self,
+        kv: impl AsRef<[(K, V)]>,
+        ttl: Option<i64>,
+        flags: Option<u32>,
+    ) -> Result<HashMap<K, Result<Response, Error>>, Error>
+    where
+        I: IntoIterator<Item = (K, V)> + Clone,
+        K: AsRef<[u8]> + Eq + std::hash::Hash,
+        V: AsMemcachedValue,
+    {
+        let mut kv_iter = kv.into_iter().peekable();
+
+        if kv_iter.peek().is_none() {
+            return Ok(());
+        }
+
+        // Write commands and collect key-error pairs
+        for (key, value) in kv_iter {
+            self.set_no_reply(&key, value, ttl, flags).await?;
+        }
+
+        Ok(())
+    }
+
     /// Add a key. If the value exists, Err(Protocol(NotStored)) is returned.
     pub async fn add<K, V>(
         &mut self,
