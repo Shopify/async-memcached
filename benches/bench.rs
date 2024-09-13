@@ -1,8 +1,11 @@
 use async_memcached::Client;
 use criterion::{criterion_group, criterion_main, Criterion};
+use rand::Rng;
 use tokio::runtime::Runtime;
 
 const LARGE_PAYLOAD_SIZE: usize = 1000 * 1024; // Memcached's ~default maximum payload size
+const MEDIUM_PAYLOAD_SIZE: usize = 100 * 1024; // 100 KB
+const SMALL_PAYLOAD_SIZE: usize = 10 * 1024; // 10 KB
 
 async fn setup_client() -> Client {
     Client::new("tcp://127.0.0.1:11211")
