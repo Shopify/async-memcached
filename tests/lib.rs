@@ -23,14 +23,40 @@ async fn setup_client(keys: Vec<&str>) -> Client {
 
 #[ignore = "Relies on a running memcached server"]
 #[tokio::test]
+async fn test_get_with_cached_key() {
+    let key = "key-that-exists";
+    let value = "value-that-exists";
+
+    let mut client = setup_client(vec![key]).await;
+
+    let set_result = client.set(key, value, None, None).await;
+    assert!(
+        set_result.is_ok(),
+        "failed to set {}, {:?}",
+        key,
+        set_result
+    );
+
+    let get_result = client.get(key).await;
+
+    assert!(
+        get_result.is_ok(),
+        "failed to get {}, {:?}",
+        key,
+        get_result
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
 async fn test_get_with_nonexistent_key() {
     let key = "nonexistent-key";
 
     let mut client = setup_client(vec![key]).await;
 
-    let result = client.get(key).await;
+    let get_result = client.get(key).await;
 
-    assert!(result.is_ok(), "failed to get {}, {:?}", key, result);
+    assert!(matches!(get_result, Ok(None)), "key should not be found");
 }
 
 #[ignore = "Relies on a running memcached server"]
@@ -111,7 +137,7 @@ async fn test_set_with_string_value() {
 #[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 async fn test_set_with_string_ref_value() {
-    let key = "set-key-with-string-reference-value";
+    let key = "set-key-with-String-reference-value";
 
     let mut client = setup_client(vec![key]).await;
 
@@ -164,6 +190,30 @@ async fn test_set_with_u64_value() {
         )
         .expect("couldn't parse data from bytes to integer")
     );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+async fn test_set_fails_with_value_too_large() {
+    let key = "too-large-set-key-with-str-value";
+
+    let mut client = setup_client(vec![key]).await;
+
+    let value = "a".repeat(LARGE_PAYLOAD_SIZE * 2);
+    let set_result = client.set(key, &value, None, None).await;
+
+    println!("set_result: {:?}", set_result);
+
+    assert!(
+        set_result.is_err(),
+        "failed to set {}, {:?}",
+        key,
+        set_result
+    );
+
+    let get_result = client.get(key).await;
+
+    assert!(matches!(get_result, Ok(None)));
 }
 
 #[ignore = "Relies on a running memcached server"]
@@ -392,7 +442,7 @@ async fn test_set_multi_with_string_values_that_exceed_max_size() {
         );
     }
 
-    // Check a small value - key0 never chosen to be a large value
+    // Check a small value to make sure it was cached properly - key0 is never chosen to be a large value
     let small_result = client.get("multi-key0").await;
     assert!(matches!(
         std::str::from_utf8(&small_result.unwrap().unwrap().data)
@@ -400,7 +450,7 @@ async fn test_set_multi_with_string_values_that_exceed_max_size() {
         "value0"
     ));
 
-    // Check the large values (should not exist due to error)
+    // Check that the large values were not cached(should not exist due to error)
     for large_key in &large_key_strs {
         let large_result = client.get(large_key.as_str()).await;
         assert!(
@@ -415,8 +465,8 @@ async fn test_set_multi_with_string_values_that_exceed_max_size() {
         let key = format!("multi-key{}", i);
         if !large_key_indices.contains(&i) {
             assert!(
-                !result_map.contains_key(key.as_str()),
-                "Key {} should not be in the error map",
+                result_map[key.as_str()].is_ok(),
+                "Key {} should be in the hashmap",
                 key
             );
             let get_result = client.get(key.as_str()).await.unwrap().unwrap();
@@ -429,7 +479,7 @@ async fn test_set_multi_with_string_values_that_exceed_max_size() {
         } else {
             assert!(
                 result_map.contains_key(key.as_str()),
-                "Key {} should be in the error map",
+                "Key {} should be in the hashmap",
                 key
             );
             assert!(
@@ -445,38 +495,6 @@ async fn test_set_multi_with_string_values_that_exceed_max_size() {
             );
         }
     }
-}
-
-#[ignore = "Relies on a running memcached server"]
-#[tokio::test]
-async fn test_set_multi_loop_with_string_values() {
-    let keys = vec!["sml-key1", "sml-key2", "sml-key3"];
-    let values = vec!["value1", "value2", "value3"];
-
-    let kv: Vec<(&str, &str)> = keys
-        .clone()
-        .into_iter()
-        .zip(values.clone().into_iter())
-        .collect();
-
-    let mut client = setup_client(keys.clone()).await;
-
-    let set_result = client.set_multi_loop(kv, None, None).await;
-
-    assert!(set_result.is_ok());
-
-    let get_result = client.get(keys[1]).await;
-
-    assert_eq!(
-        values[1],
-        std::str::from_utf8(
-            &get_result
-                .expect("should have unwrapped a Result")
-                .expect("should have unwrapped an Option")
-                .data
-        )
-        .expect("failed to parse string from bytes")
-    );
 }
 
 #[ignore = "Relies on a running memcached server"]
