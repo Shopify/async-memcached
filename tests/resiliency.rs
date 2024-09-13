@@ -138,7 +138,7 @@ mod tests {
 
         let _ = toxic_proxy.with_down(|| {
             rt.block_on(async {
-                let result = toxic_client.set_multi(kv.clone(), None, None).await;
+                let result = toxic_client.set_multi(kv, None, None).await;
                 assert_eq!(
                     result,
                     Err(async_memcached::Error::Io(

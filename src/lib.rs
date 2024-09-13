@@ -127,6 +127,34 @@ impl Client {
         Ok(results)
     }
 
+    pub(crate) async fn filter_set_multi_responses_no_clone<'a, K, V>(
+        &mut self,
+        kv: &'a [(K, V)],
+    ) -> Result<HashMap<&'a K, Result<Response, Error>>, Error>
+    where
+        K: AsRef<[u8]> + Eq + std::hash::Hash,
+        V: AsMemcachedValue,
+    {
+        let mut results = HashMap::new();
+
+        for (key, _) in kv {
+            let result = match self.drive_receive(parse_ascii_response).await {
+                Ok(Response::Status(Status::Stored)) => Ok(Response::Status(Status::Stored)),
+                Ok(Response::Status(s)) => Err(s.into()),
+                Ok(_) => Err(Status::Error(ErrorKind::Protocol(None)).into()),
+                Err(e) => return Err(e),
+            };
+
+            if let Ok(Response::Status(Status::Stored)) = result {
+                continue; // skip the insert if the server sends a STORED response
+            }
+
+            results.insert(key, result);
+        }
+
+        Ok(results)
+    }
+
     pub(crate) async fn get_metadump_response(&mut self) -> Result<MetadumpResponse, Error> {
         self.drive_receive(parse_ascii_metadump_response).await
     }
@@ -235,47 +263,6 @@ impl Client {
         }
     }
 
-    /// Sets the given key without waiting for a reply from the server.
-    ///
-    /// If `ttl` or `flags` are not specified, they will default to 0.
-    pub async fn set_no_reply<K, V>(
-        &mut self,
-        key: K,
-        value: V,
-        ttl: Option<i64>,
-        flags: Option<u32>,
-    ) -> Result<(), Error>
-    where
-        K: AsRef<[u8]>,
-        V: AsMemcachedValue,
-    {
-        let kr = key.as_ref();
-        let vr = value.as_bytes();
-
-        self.conn.write_all(b"set ").await?;
-        self.conn.write_all(kr).await?;
-
-        let flags = flags.unwrap_or(0).to_string();
-        self.conn.write_all(b" ").await?;
-        self.conn.write_all(flags.as_ref()).await?;
-
-        let ttl = ttl.unwrap_or(0).to_string();
-        self.conn.write_all(b" ").await?;
-        self.conn.write_all(ttl.as_ref()).await?;
-
-        let vlen = vr.len().to_string();
-        self.conn.write_all(b" ").await?;
-        self.conn.write_all(vlen.as_ref()).await?;
-        self.conn.write_all(b" noreply\r\n").await?;
-
-        self.conn.write_all(vr.as_ref()).await?;
-        self.conn.write_all(b"\r\n").await?;
-
-        self.conn.flush().await?;
-
-        Ok(())
-    }
-
     /// Sets multiple keys.
     ///
     /// If `ttl` or `flags` are not specified, they will default to 0.  If the value is set
@@ -323,6 +310,50 @@ impl Client {
         self.conn.flush().await?;
 
         let results = self.filter_set_multi_responses(kv_iter).await?;
+
+        Ok(results)
+    }
+
+    /// Sets multiple keys.
+    ///
+    /// If `ttl` or `flags` are not specified, they will default to 0.  If the value is set
+    /// successfully, `()` is returned, otherwise [`Error`] is returned.
+    pub async fn set_multi_no_clone<'a, K, V>(
+        &mut self,
+        kv: &'a [(K, V)],
+        ttl: Option<i64>,
+        flags: Option<u32>,
+    ) -> Result<HashMap<&'a K, Result<Response, Error>>, Error>
+    where
+        K: AsRef<[u8]> + Eq + std::hash::Hash + std::fmt::Debug,
+        V: AsMemcachedValue,
+    {
+        for (key, value) in kv.iter() {
+            let kr = key.as_ref();
+            let vr = value.as_bytes();
+
+            self.conn.write_all(b"set ").await?;
+            self.conn.write_all(kr).await?;
+
+            let flags = flags.unwrap_or(0).to_string();
+            self.conn.write_all(b" ").await?;
+            self.conn.write_all(flags.as_ref()).await?;
+
+            let ttl = ttl.unwrap_or(0).to_string();
+            self.conn.write_all(b" ").await?;
+            self.conn.write_all(ttl.as_ref()).await?;
+
+            let vlen = vr.len().to_string();
+            self.conn.write_all(b" ").await?;
+            self.conn.write_all(vlen.as_ref()).await?;
+            self.conn.write_all(b"\r\n").await?;
+
+            self.conn.write_all(vr.as_ref()).await?;
+            self.conn.write_all(b"\r\n").await?;
+        }
+        self.conn.flush().await?;
+
+        let results = self.filter_set_multi_responses_no_clone(kv).await?;
 
         Ok(results)
     }

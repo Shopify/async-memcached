@@ -168,33 +168,6 @@ async fn test_set_with_u64_value() {
 
 #[ignore = "Relies on a running memcached server"]
 #[tokio::test]
-async fn test_set_no_reply_with_u64_value() {
-    let key = "set-no-reply-key-with-u64-value";
-
-    let mut client = setup_client(vec![key]).await;
-
-    let value: u64 = 20;
-
-    let set_result = client.set_no_reply(key, value, None, None).await;
-
-    assert_eq!(Ok(()), set_result);
-
-    let get_result = client.get(key).await;
-
-    assert_eq!(
-        value,
-        btoi::btoi::<u64>(
-            &get_result
-                .expect("should have unwrapped a Result")
-                .expect("should have unwrapped an Option")
-                .data
-        )
-        .expect("couldn't parse data from bytes to integer")
-    );
-}
-
-#[ignore = "Relies on a running memcached server"]
-#[tokio::test]
 async fn test_get_many() {
     let keys = vec!["mg-key1", "mg-key2", "mg-key3"];
     let values = vec!["value1", "value2", "value3"];
