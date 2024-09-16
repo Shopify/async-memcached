@@ -369,7 +369,7 @@ async fn test_set_multi_with_string_values() {
 
     let mut client = setup_client(keys).await;
 
-    let _ = client.set_multi(kv, None, None).await;
+    let _ = client.set_multi(&kv, None, None).await;
 
     let result = client.get("smwsv-key2").await;
 
@@ -415,7 +415,7 @@ async fn test_set_multi_with_string_values_that_exceed_max_size() {
 
     let mut client = setup_client(keys.iter().map(AsRef::as_ref).collect()).await;
 
-    let set_result = client.set_multi(kv, None, None).await;
+    let set_result = client.set_multi(&kv, None, None).await;
     assert!(
         set_result.is_ok(),
         "Failed to set multiple values: {:?}",
@@ -429,14 +429,14 @@ async fn test_set_multi_with_string_values_that_exceed_max_size() {
     }
 
     // The randomized large keys should have errors due to large values
-    for large_key in &large_key_strs {
+    for large_key in large_key_strs.clone() {
         assert!(
-            result_map.contains_key(large_key.as_str()),
+            result_map.contains_key(&large_key.as_str()),
             "{} should be in the result map",
             large_key
         );
         assert!(
-            result_map[large_key.as_str()].is_err(),
+            result_map[&large_key.as_str()].is_err(),
             "{} should have an error",
             large_key
         );
@@ -451,7 +451,7 @@ async fn test_set_multi_with_string_values_that_exceed_max_size() {
     ));
 
     // Check that the large values were not cached(should not exist due to error)
-    for large_key in &large_key_strs {
+    for large_key in large_key_strs {
         let large_result = client.get(large_key.as_str()).await;
         assert!(
             large_result.unwrap().is_none(),
@@ -465,7 +465,7 @@ async fn test_set_multi_with_string_values_that_exceed_max_size() {
         let key = format!("multi-key{}", i);
         if !large_key_indices.contains(&i) {
             assert!(
-                result_map[key.as_str()].is_ok(),
+                result_map[&key.as_str()].is_ok(),
                 "Key {} should be in the hashmap",
                 key
             );
@@ -478,12 +478,12 @@ async fn test_set_multi_with_string_values_that_exceed_max_size() {
             );
         } else {
             assert!(
-                result_map.contains_key(key.as_str()),
+                result_map.contains_key(&key.as_str()),
                 "Key {} should be in the hashmap",
                 key
             );
             assert!(
-                result_map[key.as_str()].is_err(),
+                result_map[&key.as_str()].is_err(),
                 "Key {} should have an error",
                 key
             );
@@ -511,7 +511,7 @@ async fn test_set_multi_with_large_string_values() {
 
     let mut client = setup_client(keys).await;
 
-    let _ = client.set_multi(kv, None, None).await;
+    let _ = client.set_multi(&kv, None, None).await;
 
     let get_result = client.get("key2").await;
 

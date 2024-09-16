@@ -98,33 +98,7 @@ impl Client {
         self.drive_receive(parse_ascii_response).await
     }
 
-    #[inline]
-    pub(crate) async fn filter_set_multi_responses<I, K, V>(
-        &mut self,
-        kvp: I,
-    ) -> Result<HashMap<K, Result<Response, Error>>, Error>
-    where
-        I: IntoIterator<Item = (K, V)>,
-        K: AsRef<[u8]> + Eq + std::hash::Hash,
-        V: AsMemcachedValue,
-    {
-        let mut results = HashMap::new();
-
-        for (key, _) in kvp {
-            let result = match self.drive_receive(parse_ascii_response).await {
-                Ok(Response::Status(Status::Stored)) => Ok(Response::Status(Status::Stored)),
-                Ok(Response::Status(s)) => Err(s.into()),
-                Ok(_) => Err(Status::Error(ErrorKind::Protocol(None)).into()),
-                Err(e) => return Err(e),
-            };
-
-            results.insert(key, result);
-        }
-
-        Ok(results)
-    }
-
-    pub(crate) async fn filter_set_multi_responses_no_clone<'a, K, V>(
+    pub(crate) async fn map_set_multi_responses<'a, K, V>(
         &mut self,
         kv: &'a [(K, V)],
     ) -> Result<HashMap<&'a K, Result<Response, Error>>, Error>
@@ -132,7 +106,7 @@ impl Client {
         K: AsRef<[u8]> + Eq + std::hash::Hash,
         V: AsMemcachedValue,
     {
-        let mut results = HashMap::new();
+        let mut results = HashMap::with_capacity(kv.len());
 
         for (key, _) in kv {
             let result = match self.drive_receive(parse_ascii_response).await {
@@ -256,103 +230,11 @@ impl Client {
         }
     }
 
-    /// Sets the given key without waiting for a reply from the server.
-    ///
-    /// If `ttl` or `flags` are not specified, they will default to 0.
-    pub async fn set_no_reply<K, V>(
-        &mut self,
-        key: K,
-        value: V,
-        ttl: Option<i64>,
-        flags: Option<u32>,
-    ) -> Result<(), Error>
-    where
-        K: AsRef<[u8]>,
-        V: AsMemcachedValue,
-    {
-        let kr = key.as_ref();
-        let vr = value.as_bytes();
-
-        self.conn.write_all(b"set ").await?;
-        self.conn.write_all(kr).await?;
-
-        let flags = flags.unwrap_or(0).to_string();
-        self.conn.write_all(b" ").await?;
-        self.conn.write_all(flags.as_ref()).await?;
-
-        let ttl = ttl.unwrap_or(0).to_string();
-        self.conn.write_all(b" ").await?;
-        self.conn.write_all(ttl.as_ref()).await?;
-
-        let vlen = vr.len().to_string();
-        self.conn.write_all(b" ").await?;
-        self.conn.write_all(vlen.as_ref()).await?;
-        self.conn.write_all(b" noreply\r\n").await?;
-
-        self.conn.write_all(vr.as_ref()).await?;
-        self.conn.write_all(b"\r\n").await?;
-
-        self.conn.flush().await?;
-
-        Ok(())
-    }
-
-    /// Sets multiple keys.
+    /// Sets multiple keys and values through pipelined commands.
     ///
     /// If `ttl` or `flags` are not specified, they will default to 0. The same values for `ttl` and `flags` will be applied to each key.
-    /// Returns a result with a HashMap of keys to the results of the set operation, or an error.
-    pub async fn set_multi<I, K, V>(
-        &mut self,
-        kv: I,
-        ttl: Option<i64>,
-        flags: Option<u32>,
-    ) -> Result<HashMap<K, Result<Response, Error>>, Error>
-    where
-        I: IntoIterator<Item = (K, V)> + Clone,
-        K: AsRef<[u8]> + Eq + std::hash::Hash + std::fmt::Debug,
-        V: AsMemcachedValue,
-    {
-        let mut kv_iter = kv.clone().into_iter().peekable();
-
-        if kv_iter.peek().is_none() {
-            return Ok(HashMap::new());
-        }
-
-        for (key, value) in kv {
-            let kr = key.as_ref();
-            let vr = value.as_bytes();
-
-            self.conn.write_all(b"set ").await?;
-            self.conn.write_all(kr).await?;
-
-            let flags = flags.unwrap_or(0).to_string();
-            self.conn.write_all(b" ").await?;
-            self.conn.write_all(flags.as_ref()).await?;
-
-            let ttl = ttl.unwrap_or(0).to_string();
-            self.conn.write_all(b" ").await?;
-            self.conn.write_all(ttl.as_ref()).await?;
-
-            let vlen = vr.len().to_string();
-            self.conn.write_all(b" ").await?;
-            self.conn.write_all(vlen.as_ref()).await?;
-            self.conn.write_all(b"\r\n").await?;
-
-            self.conn.write_all(vr.as_ref()).await?;
-            self.conn.write_all(b"\r\n").await?;
-        }
-        self.conn.flush().await?;
-
-        let results = self.filter_set_multi_responses(kv_iter).await?;
-
-        Ok(results)
-    }
-
-    /// Sets multiple keys.
-    ///
-    /// If `ttl` or `flags` are not specified, they will default to 0. The same values for `ttl` and `flags` will be applied to each key.
-    /// Returns a result with a HashMap of keys to the results of the set operation, or an error.
-    pub async fn set_multi_no_clone<'a, K, V>(
+    /// Returns a result with a HashMap of keys mapped to the result of the set operation, or an error.
+    pub async fn set_multi<'a, K, V>(
         &mut self,
         kv: &'a [(K, V)],
         ttl: Option<i64>,
@@ -362,54 +244,6 @@ impl Client {
         K: AsRef<[u8]> + Eq + std::hash::Hash + std::fmt::Debug,
         V: AsMemcachedValue,
     {
-        for (key, value) in kv.iter() {
-            let kr = key.as_ref();
-            let vr = value.as_bytes();
-
-            self.conn.write_all(b"set ").await?;
-            self.conn.write_all(kr).await?;
-
-            let flags = flags.unwrap_or(0).to_string();
-            self.conn.write_all(b" ").await?;
-            self.conn.write_all(flags.as_ref()).await?;
-
-            let ttl = ttl.unwrap_or(0).to_string();
-            self.conn.write_all(b" ").await?;
-            self.conn.write_all(ttl.as_ref()).await?;
-
-            let vlen = vr.len().to_string();
-            self.conn.write_all(b" ").await?;
-            self.conn.write_all(vlen.as_ref()).await?;
-            self.conn.write_all(b"\r\n").await?;
-
-            self.conn.write_all(vr.as_ref()).await?;
-            self.conn.write_all(b"\r\n").await?;
-        }
-        self.conn.flush().await?;
-
-        let results = self.filter_set_multi_responses_no_clone(kv).await?;
-
-        Ok(results)
-    }
-
-    /// Sets multiple keys.
-    ///
-    /// If `ttl` or `flags` are not specified, they will default to 0. The same values for `ttl` and `flags` will be applied to each key.
-    /// Returns a result with a HashMap of keys to the results of the set operation, or an error.
-    pub async fn set_multi_test_two<I, K, V>(
-        &mut self,
-        kv: I,
-        ttl: Option<i64>,
-        flags: Option<u32>,
-    ) -> Result<HashMap<K, Result<Response, Error>>, Error>
-    where
-        I: IntoIterator<Item = (K, V)>,
-        K: AsRef<[u8]> + Eq + std::hash::Hash,
-        V: AsMemcachedValue,
-    {
-        // This method avoids copying the whole kv and instead copies keys to a new vec in the order that they're processed.
-        let mut keys = Vec::new();
-
         for (key, value) in kv {
             let kr = key.as_ref();
             let vr = value.as_bytes();
@@ -432,25 +266,10 @@ impl Client {
 
             self.conn.write_all(vr.as_ref()).await?;
             self.conn.write_all(b"\r\n").await?;
-
-            keys.push(key);
         }
         self.conn.flush().await?;
 
-        // With this approach we can also allocate the proper size hashmap up front.
-        let mut results: HashMap<K, Result<Response, Error>> = HashMap::with_capacity(keys.len());
-
-        // Inline the previous filter_set_multi_responses behaviour.
-        for key in keys {
-            let response = match self.drive_receive(parse_ascii_response).await {
-                Ok(Response::Status(Status::Stored)) => Ok(Response::Status(Status::Stored)),
-                Ok(Response::Status(s)) => Err(s.into()),
-                Ok(_) => Err(Status::Error(ErrorKind::Protocol(None)).into()),
-                Err(e) => return Err(e),
-            };
-
-            results.insert(key, response);
-        }
+        let results = self.map_set_multi_responses(kv).await?;
 
         Ok(results)
     }
@@ -562,7 +381,7 @@ impl Client {
 
     /// Increments the given key by the specified amount with no reply from the server.
     /// Can overflow from the max value of u64 (18446744073709551615) -> 0.
-    /// Always returns Ok(()), will not return any indication of success or failure.
+    /// Always returns () for a complete request, will not return any indication of success or failure.
     pub async fn increment_no_reply<K>(&mut self, key: K, amount: u64) -> Result<(), Error>
     where
         K: AsRef<[u8]>,
@@ -615,7 +434,7 @@ impl Client {
 
     /// Decrements the given key by the specified amount with no reply from the server.
     /// Will not decrement the counter below 0.
-    /// Returns the new value of the key if key exists, otherwise returns KeyNotFound error.
+    /// Always returns () for a complete request, will not return any indication of success or failure.
     pub async fn decrement_no_reply<K>(&mut self, key: K, amount: u64) -> Result<(), Error>
     where
         K: AsRef<[u8]>,
