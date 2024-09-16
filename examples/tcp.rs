@@ -23,7 +23,7 @@ async fn main() {
 
     let keys = &["foo", "bar"];
 
-    match client.get_many(keys).await {
+    match client.get_multi(keys).await {
         Ok(values) => println!("got values: {:?}", values),
         Err(status) => println!("got status during get_many: {:?}", status),
     }

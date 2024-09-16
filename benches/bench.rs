@@ -124,7 +124,7 @@ fn bench_get_many(c: &mut Criterion) {
             let mut client = setup_client().await;
             let start = std::time::Instant::now();
             for _ in 0..iters {
-                let _ = client.get_many(keys).await;
+                let _ = client.get_multi(keys).await;
             }
             start.elapsed()
         });
@@ -249,7 +249,7 @@ fn bench_get_many_large(c: &mut Criterion) {
             let mut client = setup_client().await;
             let start = std::time::Instant::now();
             for _ in 0..iters {
-                let _ = client.get_many(keys).await;
+                let _ = client.get_multi(keys).await;
             }
             start.elapsed()
         });

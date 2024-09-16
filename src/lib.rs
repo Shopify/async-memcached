@@ -163,12 +163,19 @@ impl Client {
     /// describes the metadata and data of the key.
     ///
     /// Otherwise, [`Error`] is returned.
-    /// This will eventually be deprecated in favor of `get_multi`
-    pub async fn get_many<I, K>(&mut self, keys: I) -> Result<Vec<Value>, Error>
+    pub async fn get_multi<'a, K>(
+        &mut self,
+        keys: &'a [K],
+    ) -> Result<HashMap<&'a K, Result<Option<Value>, Error>>, Error>
     where
-        I: IntoIterator<Item = K>,
-        K: AsRef<[u8]>,
+        K: AsRef<[u8]> + Eq + std::hash::Hash + Clone,
     {
+        if keys.is_empty() {
+            return Ok(HashMap::with_capacity(0));
+        }
+
+        let results = HashMap::with_capacity(keys.len());
+
         self.conn.write_all(b"get ").await?;
         for key in keys {
             self.conn.write_all(key.as_ref()).await?;
@@ -178,10 +185,30 @@ impl Client {
         self.conn.flush().await?;
 
         match self.get_read_write_response().await? {
-            Response::Status(s) => Err(s.into()),
-            Response::Data(d) => d.ok_or(Status::NotFound.into()),
-            _ => Err(Status::Error(ErrorKind::Protocol(None)).into()),
+            Response::Status(s) => return Err(s.into()),
+            Response::Data(Some(items)) => {
+                let mut map: HashMap<Vec<u8>, Value> = items
+                    .into_iter()
+                    .map(|item| (item.key.clone(), item))
+                    .collect();
+                let results: HashMap<&K, Result<Option<Value>, Error>> = keys
+                    .iter()
+                    .map(|k| {
+                        let v = map.remove(k.as_ref());
+                        let vl: Result<Option<Value>, Error> = match v {
+                            Some(v) => Ok(Some(v)),
+                            None => Ok(None),
+                        };
+                        (k, vl)
+                    })
+                    .collect();
+                return Ok(results);
+            }
+            Response::Data(None) => {}
+            _ => return Err(Status::Error(ErrorKind::Protocol(None)).into()),
         }
+
+        Ok(results)
     }
 
     /// Sets the given key.
