@@ -1,6 +1,19 @@
+use btoi::{btoi, btou};
+use nom::{
+    branch::alt,
+    bytes::streaming::{tag, take_while_m_n},
+    character::{is_digit, streaming::crlf},
+    combinator::{map, map_res, value},
+    sequence::terminated,
+    IResult,
+};
 use std::fmt;
+
 mod ascii;
 pub use ascii::{parse_ascii_metadump_response, parse_ascii_response, parse_ascii_stats_response};
+
+mod meta;
+pub use meta::parse_meta_response;
 
 /// A value from memcached.
 #[derive(Clone, Debug, PartialEq)]
@@ -10,11 +23,23 @@ pub struct Value {
     /// CAS identifier.
     pub cas: Option<u64>,
     /// Flags for this key.
-    ///
     /// Defaults to 0.
     pub flags: u32,
     /// Data for this key.
     pub data: Vec<u8>,
+    /// optional extra Meta Flags Response Data
+    pub meta_values: Option<MetaValue>,
+}
+
+// Add this new struct for meta protocol responses
+#[derive(Clone, Debug, PartialEq)]
+pub struct MetaValue {
+    /// Whether the item has been accessed before (X flag)
+    pub hit_before: Option<bool>,
+    /// Last access time in seconds since the epoch (h flag)
+    pub last_accessed: Option<u64>,
+    /// Remaining TTL in seconds, or -1 for unlimited (t flag)
+    pub ttl_remaining: Option<i64>,
 }
 
 /// Status of a memcached operation.
@@ -145,4 +170,34 @@ impl From<MetadumpResponse> for Status {
             _ => unreachable!("Metadump Entry/End states should never be used as a Status!"),
         }
     }
+}
+
+// shared parsing functions
+pub(crate) fn parse_u64(buf: &[u8]) -> IResult<&[u8], u64> {
+    map_res(take_while_m_n(1, 20, is_digit), btou)(buf)
+}
+
+pub(crate) fn parse_i64(buf: &[u8]) -> IResult<&[u8], i64> {
+    map_res(take_while_m_n(1, 20, is_signed_digit), btoi)(buf)
+}
+
+pub(crate) fn parse_bool(buf: &[u8]) -> IResult<&[u8], bool> {
+    alt((value(true, tag(b"yes")), value(false, tag(b"no"))))(buf)
+}
+
+pub(crate) fn parse_incrdecr(buf: &[u8]) -> IResult<&[u8], Response> {
+    terminated(map(parse_u64, Response::IncrDecr), crlf)(buf)
+}
+
+pub(crate) fn is_key_char(chr: u8) -> bool {
+    chr > 32 && chr < 127
+}
+
+pub(crate) fn is_signed_digit(chr: u8) -> bool {
+    chr == 45 || (48..=57).contains(&chr)
+}
+
+// Add this function to mod.rs
+pub(crate) fn parse_u32(buf: &[u8]) -> IResult<&[u8], u32> {
+    map_res(take_while_m_n(1, 10, is_digit), btou)(buf)
 }
