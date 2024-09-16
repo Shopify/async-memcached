@@ -1,0 +1,14 @@
+**/node_modules/
+.dev/
+.devcontainer/
+.git
+.github/
+.idea/
+.profile.d/
+.vscode/
+log/
+public/
+script/
+sorbet/
+tmp/
+vendor/

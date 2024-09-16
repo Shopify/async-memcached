@@ -13,7 +13,8 @@ pub use self::error::Error;
 
 mod parser;
 use self::parser::{
-    parse_ascii_metadump_response, parse_ascii_response, parse_ascii_stats_response, Response,
+    parse_ascii_metadump_response, parse_ascii_response, parse_ascii_stats_response,
+    parse_meta_response, Response,
 };
 pub use self::parser::{ErrorKind, KeyMetadata, MetadumpResponse, StatsResponse, Status, Value};
 
@@ -150,6 +151,55 @@ impl Client {
                         Err(Status::Error(ErrorKind::Protocol(None)).into())
                     } else {
                         Ok(items.remove(0))
+                    }
+                })
+                .transpose(),
+            _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),
+        }
+    }
+
+    /// Gets the given key with additional metadata.
+    ///
+    /// If the key is found, `Some(Value)` is returned, describing the metadata and data of the key.
+    ///
+    /// Otherwise, `None` is returned.
+    ///
+    /// Supported meta flags:
+    /// - h: return whether item has been hit before as a 0 or 1
+    /// - l: return time since item was last accessed in seconds
+    /// - t: return item TTL remaining in seconds (-1 for unlimited)
+    pub async fn meta_get<K: AsRef<[u8]>>(
+        &mut self,
+        key: K,
+        flags: &[char],
+    ) -> Result<Option<Value>, Error> {
+        let mut command = Vec::with_capacity(64);
+        command.extend_from_slice(b"mg ");
+        command.extend_from_slice(key.as_ref());
+        // TODO: Do we want to always add the v flag? so all gets return the value? or we want clients to know to request it?
+        command.extend_from_slice(b" v");
+        if !flags.is_empty() {
+            for flag in flags {
+                command.push(b' ');
+                command.push(*flag as u8);
+            }
+        }
+        command.extend_from_slice(b"\r\n");
+
+        self.conn.write_all(&command).await?;
+        self.conn.flush().await?;
+
+        match self.drive_receive(parse_meta_response).await? {
+            Response::Status(Status::NotFound) => Ok(None),
+            Response::Status(s) => Err(s.into()),
+            Response::Data(d) => d
+                .map(|mut items| {
+                    if items.len() != 1 {
+                        Err(Status::Error(ErrorKind::Protocol(None)).into())
+                    } else {
+                        let mut item = items.remove(0);
+                        item.key = key.as_ref().to_vec();
+                        Ok(item)
                     }
                 })
                 .transpose(),
@@ -650,5 +700,390 @@ impl<'a> MetadumpIter<'a> {
             Ok(MetadumpResponse::Entry(km)) => Some(Ok(km)),
             Err(e) => Some(Err(e)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn setup_client() -> Client {
+        Client::new("tcp://127.0.0.1:11211")
+            .await
+            .expect("Failed to connect to server")
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    async fn test_add_with_string_value() {
+        let mut client = setup_client().await;
+
+        let key = "async-memcache-test-key-add";
+
+        let result = client.delete_no_reply(key).await;
+        assert!(result.is_ok(), "failed to delete {}, {:?}", key, result);
+
+        let result = client.add(key, "value", None, None).await;
+
+        assert!(result.is_ok());
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    async fn test_add_with_u64_value() {
+        let mut client = setup_client().await;
+
+        let key = "async-memcache-test-key-add-u64";
+        let value: u64 = 10;
+
+        let result = client.delete_no_reply(key).await;
+        assert!(result.is_ok(), "failed to delete {}, {:?}", key, result);
+
+        let result = client.add(key, value, None, None).await;
+
+        assert!(result.is_ok());
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    async fn test_set_with_str_ref_value() {
+        let mut client = setup_client().await;
+
+        let key = "set-key-with-string-value";
+        let value = "value";
+        let result = client.set(key, value, None, None).await;
+
+        assert!(result.is_ok());
+
+        let result = client.get(key).await;
+
+        assert!(result.is_ok());
+
+        let get_result = result.unwrap();
+
+        assert_eq!(String::from_utf8(get_result.unwrap().data).unwrap(), value);
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    async fn test_set_with_string_value() {
+        let mut client = setup_client().await;
+
+        let key = "set-key-with-string-value";
+        let value = String::from("value");
+        let result = client.set(key, &value, None, None).await;
+
+        assert!(result.is_ok());
+
+        let result = client.get(key).await;
+
+        assert!(result.is_ok());
+
+        let get_result = result.unwrap();
+
+        assert_eq!(String::from_utf8(get_result.unwrap().data).unwrap(), value);
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    async fn test_set_with_string_ref_value() {
+        let mut client = setup_client().await;
+
+        let key = "set-key-with-string-reference-value";
+        let value = String::from("value");
+        let result = client.set(key, &value, None, None).await;
+
+        assert!(result.is_ok());
+
+        let result = client.get(key).await;
+
+        assert!(result.is_ok());
+
+        let get_result = result.unwrap();
+
+        assert_eq!(String::from_utf8(get_result.unwrap().data).unwrap(), value);
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    async fn test_set_with_u64_value() {
+        let mut client = setup_client().await;
+
+        let key = "set-key-with-u64-value";
+        let value: u64 = 20;
+
+        let result = client.set(key, value, None, None).await;
+
+        assert!(result.is_ok());
+
+        let result = client.get(key).await;
+
+        assert!(result.is_ok());
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    async fn test_delete() {
+        let mut client = setup_client().await;
+
+        let key = "async-memcache-test-key-delete";
+
+        let value = rand::random::<u64>();
+        let result = client.set(key, value, None, None).await;
+
+        assert!(result.is_ok(), "failed to set {}, {:?}", key, result);
+
+        let result = client.get(key).await;
+
+        assert!(result.is_ok(), "failed to get {}, {:?}", key, result);
+
+        let get_result = result.unwrap();
+
+        match get_result {
+            Some(get_value) => assert_eq!(
+                String::from_utf8(get_value.data).expect("failed to parse a string"),
+                value.to_string()
+            ),
+            None => panic!("failed to get {}", key),
+        }
+
+        let result = client.delete(key).await;
+
+        assert!(result.is_ok(), "failed to delete {}, {:?}", key, result);
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    async fn test_delete_no_reply() {
+        let mut client = setup_client().await;
+
+        let key = "async-memcache-test-key-delete-no-reply";
+
+        let value = format!("{}", rand::random::<u64>());
+        let result = client.set(key, value.as_str(), None, None).await;
+
+        assert!(result.is_ok(), "failed to set {}, {:?}", key, result);
+
+        let result = client.get(key).await;
+
+        assert!(result.is_ok(), "failed to get {}, {:?}", key, result);
+
+        let get_result = result.unwrap();
+
+        match get_result {
+            Some(get_value) => assert_eq!(
+                String::from_utf8(get_value.data).expect("failed to parse a string"),
+                value
+            ),
+            None => panic!("failed to get {}", key),
+        }
+
+        let result = client.delete_no_reply(key).await;
+
+        assert!(result.is_ok(), "failed to delete {}, {:?}", key, result);
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    async fn test_increment_raises_error_when_key_doesnt_exist() {
+        let mut client = setup_client().await;
+
+        let key = "key-does-not-exist";
+        let amount = 1;
+
+        let result = client.increment(key, amount).await;
+
+        assert!(matches!(result, Err(Error::Protocol(Status::NotFound))));
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    async fn test_increments_existing_key() {
+        let mut client = setup_client().await;
+
+        let key = "key-to-increment";
+        let value: u64 = 1;
+
+        let _ = client.set(key, value, None, None).await;
+
+        let amount = 1;
+
+        let result = client.increment(key, amount).await;
+
+        assert_eq!(Ok(2), result);
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    async fn test_increment_can_overflow() {
+        let mut client = setup_client().await;
+
+        let key = "key-to-increment-overflow";
+        let value = u64::MAX; // max value for u64
+
+        let _ = client.set(key, value, None, None).await;
+
+        let amount = 1;
+
+        // First increment should overflow
+        let result = client.increment(key, amount).await;
+
+        assert_eq!(Ok(0), result);
+
+        // Subsequent increments should work as normal
+        let result = client.increment(key, amount).await;
+
+        assert_eq!(Ok(1), result);
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    async fn test_increments_existing_key_with_no_reply() {
+        let mut client = setup_client().await;
+
+        let key = "key-to-increment-no-reply";
+        let value: u64 = 1;
+
+        let _ = client.set(key, value, None, None).await;
+
+        let amount = 1;
+
+        let result = client.increment_no_reply(key, amount).await;
+
+        assert_eq!(Ok(()), result);
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    async fn test_decrement_raises_error_when_key_doesnt_exist() {
+        let mut client = setup_client().await;
+
+        let key = "fails-to-decrement";
+        let amount = 1;
+
+        let result = client.decrement(key, amount).await;
+
+        assert!(matches!(result, Err(Error::Protocol(Status::NotFound))));
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    async fn test_decrements_existing_key() {
+        let mut client = setup_client().await;
+
+        let key = "key-to-decrement";
+        let value: u64 = 10;
+
+        let _ = client.set(key, value, None, None).await;
+
+        let amount = 1;
+
+        let result = client.decrement(key, amount).await;
+
+        assert_eq!(Ok(9), result);
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    async fn test_decrement_does_not_reduce_value_below_zero() {
+        let mut client = setup_client().await;
+
+        let key = "key-to-decrement-past-zero";
+        let value: u64 = 0;
+
+        let _ = client.set(key, value, None, None).await;
+
+        let amount = 1;
+
+        let result = client.decrement(key, amount).await;
+
+        assert_eq!(Ok(0), result);
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    async fn test_decrements_existing_key_with_no_reply() {
+        let mut client = setup_client().await;
+
+        let key = "key-to-decrement-no-reply";
+        let value: u64 = 1;
+
+        let _ = client.set(key, value, None, None).await;
+
+        let amount = 1;
+
+        let result = client.decrement_no_reply(key, amount).await;
+
+        assert_eq!(Ok(()), result);
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    async fn test_get() {
+        let mut client = setup_client().await;
+
+        let key = "meta-get-test-key";
+        let value = "test-value";
+        let ttl = 3600; // 1 hour
+
+        // Set the key with a TTL
+        client.set(key, value, Some(ttl), None).await.unwrap();
+
+        // Perform a get to ensure the item has been hit
+        let result = client.get(key).await.unwrap();
+        let result_value = result.unwrap();
+        assert_eq!(String::from_utf8(result_value.data).unwrap(), value);
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    async fn test_get_not_found() {
+        let mut client = setup_client().await;
+
+        let key = "not-found-get-test-key";
+        let result = client.get(key).await.unwrap();
+        assert_eq!(result, None);
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    async fn test_meta_get_with_all_flags() {
+        let mut client = setup_client().await;
+
+        let key = "a-get-test-key";
+        let value = "test-value";
+        let ttl = 3600; // 1 hour
+
+        // Set the key with a TTL
+        client.set(key, value, Some(ttl), None).await.unwrap();
+
+        // Perform a get to ensure the item has been hit
+        let result = client.get(key).await.unwrap();
+        let result_value = result.unwrap();
+        assert_eq!(String::from_utf8(result_value.data).unwrap(), value);
+
+        let flags = ['h', 'l', 't'];
+        let result = client.meta_get(key, &flags).await.unwrap();
+
+        assert!(result.is_some());
+        let result_meta_value = result.unwrap();
+
+        assert_eq!(String::from_utf8(result_meta_value.data).unwrap(), value);
+
+        let meta_flag_values = result_meta_value.meta_values.unwrap();
+        assert!(meta_flag_values.hit_before.unwrap());
+        assert_eq!(meta_flag_values.last_accessed.unwrap(), 0);
+        assert!(meta_flag_values.ttl_remaining.unwrap() > 0);
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    async fn test_meta_get_not_found() {
+        let mut client = setup_client().await;
+
+        let key = "not-found-meta-get-test-key";
+        let flags = ['h', 'l', 't'];
+        let result = client.meta_get(key, &flags).await.unwrap();
+        assert_eq!(result, None);
     }
 }
