@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 
 use bytes::BytesMut;
+use fxhash::FxHashMap;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 
 mod connection;
@@ -166,15 +167,15 @@ impl Client {
     pub async fn get_multi<'a, K>(
         &mut self,
         keys: &'a [K],
-    ) -> Result<HashMap<&'a K, Result<Option<Value>, Error>>, Error>
+    ) -> Result<FxHashMap<Vec<u8>, Result<Option<Value>, Error>>, Error>
     where
         K: AsRef<[u8]> + Eq + std::hash::Hash + Clone,
     {
         if keys.is_empty() {
-            return Ok(HashMap::with_capacity(0));
+            return Ok(FxHashMap::default());
         }
 
-        let results = HashMap::with_capacity(keys.len());
+        let mut results = FxHashMap::with_capacity_and_hasher(keys.len(), Default::default());
 
         self.conn.write_all(b"get ").await?;
         for key in keys {
@@ -187,28 +188,31 @@ impl Client {
         match self.get_read_write_response().await? {
             Response::Status(s) => return Err(s.into()),
             Response::Data(Some(items)) => {
-                let mut map: HashMap<Vec<u8>, Value> = items
-                    .into_iter()
-                    .map(|item| (item.key.clone(), item))
-                    .collect();
-                let results: HashMap<&K, Result<Option<Value>, Error>> = keys
-                    .iter()
-                    .map(|k| {
-                        let v = map.remove(k.as_ref());
-                        let vl: Result<Option<Value>, Error> = match v {
-                            Some(v) => Ok(Some(v)),
-                            None => Ok(None),
-                        };
-                        (k, vl)
-                    })
-                    .collect();
-                return Ok(results);
+                for item in items {
+                    results.insert(item.key.clone(), Ok(Some(item)));
+                }
             }
             Response::Data(None) => {}
             _ => return Err(Status::Error(ErrorKind::Protocol(None)).into()),
         }
 
         Ok(results)
+    }
+    /// Gets the given keys.
+    ///
+    /// Deprecated: This is now an alias for `get_multi`, which will be removed in the future.
+    #[deprecated(
+        since = "1.0.0",
+        note = "This is now an alias for `get_multi`, which will be removed in the future."
+    )]
+    pub async fn get_many<'a, K>(
+        &mut self,
+        keys: &'a [K],
+    ) -> Result<FxHashMap<Vec<u8>, Result<Option<Value>, Error>>, Error>
+    where
+        K: AsRef<[u8]> + Eq + std::hash::Hash + Clone,
+    {
+        self.get_multi(keys).await
     }
 
     /// Sets the given key.

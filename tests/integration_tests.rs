@@ -229,7 +229,7 @@ async fn test_set_fails_with_value_too_large() {
 #[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
-async fn test_get_many() {
+async fn test_get_multi() {
     let keys = vec!["mg-key1", "mg-key2", "mg-key3"];
     let values = vec!["value1", "value2", "value3"];
 
@@ -254,7 +254,7 @@ async fn test_get_many() {
 #[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
-async fn test_get_many_with_nonexistent_key() {
+async fn test_get_multi_with_nonexistent_key() {
     let mut keys = vec!["mgne-key1", "mgne-key2", "mgne-key3"];
     let values = vec!["value1", "value2", "value3"];
 
@@ -272,26 +272,49 @@ async fn test_get_many_with_nonexistent_key() {
         );
     }
 
-    let unset_key = "thisisakeythatisntset";
+    let unset_key = "thisisakeythatisnotset";
 
     keys.push(unset_key);
 
     let results = client.get_multi(&keys).await.unwrap();
 
-    assert_eq!(keys.len(), results.len());
+    assert_eq!(original_keys_length, results.len());
 
-    let unset_key_result = results.get(&unset_key);
-
-    // 'None' response is included in the results HashMap for a cache miss
-    assert!(matches!(unset_key_result, Some(Ok(None))));
+    // Hashmap should only contain keys that have a cache hit
+    assert!(!results.contains_key(unset_key.as_bytes()));
 
     for result in results {
-        if let Some(value) = result.1.expect("should have unwrapped a Result") {
+        if let Some(value) = result.1.expect("should have unwrapped to a Value") {
             let key_str = std::str::from_utf8(&value.key)
                 .expect("should have been able to parse key as utf8");
             assert!(keys.clone().contains(&key_str));
         }
     }
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+async fn test_get_many_aliases_get_multi_properly() {
+    let keys = vec!["mg2-key1", "mg2-key2", "mg2-key3"];
+    let values = vec!["value1", "value2", "value3"];
+
+    let mut client = setup_client(&keys).await;
+
+    for (key, value) in keys.iter().zip(values.iter()) {
+        let result = client.set(*key, *value, None, None).await;
+        assert!(result.is_ok(), "failed to set {}, {:?}", key, result);
+    }
+
+    #[allow(deprecated)] // specifically testing deprecated functionality
+    let result = client.get_many(&keys).await;
+
+    assert!(
+        result.is_ok(),
+        "failed to get many {:?}, {:?}",
+        keys,
+        result
+    );
+    assert_eq!(result.unwrap().len(), keys.len());
 }
 
 #[ignore = "Relies on a running memcached server"]
