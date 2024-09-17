@@ -194,7 +194,6 @@ pub(crate) fn is_signed_digit(chr: u8) -> bool {
     chr == 45 || (48..=57).contains(&chr)
 }
 
-// Add this function to mod.rs
 pub(crate) fn parse_u32(buf: &[u8]) -> IResult<&[u8], u32> {
     map_res(take_while_m_n(1, 10, is_digit), btou)(buf)
 }

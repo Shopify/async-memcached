@@ -3,7 +3,7 @@ use nom::{
     bytes::streaming::{tag, take, take_while1},
     character::{
         complete::digit1,
-        streaming::{crlf, line_ending, space0},
+        streaming::{crlf, space0},
     },
     combinator::{map, map_res, value},
     multi::many0,
@@ -73,14 +73,12 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
     let (input, success) = parse_meta_get_status(buf)?;
     match success {
         Response::Status(Status::Exists) => {
-            let (input, _size) = parse_u32(input)?;
+            let (input, size) = parse_u32(input)?;
             let (input, _tag) = tag(" ")(input)?;
             let (input, meta_values_array) = parse_meta_tag_values(input)?;
             // remove the \r\n from the input
             let (input, _) = crlf(input)?;
-            let (input, data) = take_while1(|c| c != b'\r')(input)?;
-            // Remove the '\r\n' sequence
-            let (input, _) = line_ending(input)?;
+            let (input, data) = take_until_size(input, size)?;
 
             let mut meta_values = MetaValue {
                 hit_before: None,
@@ -103,7 +101,7 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
                 key: b"key".to_vec(),
                 cas: None,
                 flags: 0,
-                data: data.to_vec(),
+                data,
                 meta_values: Some(meta_values),
             };
 
@@ -120,6 +118,26 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
     }
 }
 
+pub fn take_until_size(mut buf: &[u8], byte_size: u32) -> IResult<&[u8], Vec<u8>> {
+    let mut data = Vec::with_capacity(byte_size as usize);
+    while (data.len() as u32) < byte_size {
+        let (remaining, chunk) = take_while1(|c| c != b'\r')(buf)?;
+        data.extend_from_slice(chunk);
+        buf = remaining;
+        if data.len() as u32 == byte_size {
+            // break out of the loop
+            break;
+        } else {
+            let (remaining, chunk) = tag("\r\n")(buf)?;
+            data.extend_from_slice(chunk);
+            buf = remaining;
+        }
+    }
+    // If we have reached byte_size, consume '\r\n' and return the data
+    let (buf, _) = tag("\r\n")(buf)?;
+    Ok((buf, data))
+}
+
 fn parse_meta_tag_values(input: &[u8]) -> IResult<&[u8], Vec<(u8, u32)>> {
     many0(pair(
         preceded(space0, map(take(1usize), |s: &[u8]| s[0])),
@@ -133,6 +151,7 @@ fn parse_meta_tag_values(input: &[u8]) -> IResult<&[u8], Vec<(u8, u32)>> {
 mod tests {
     use super::*;
     use crate::parser::parse_u32;
+    use std::str;
 
     #[test]
     fn test_parse_u32() {
@@ -210,7 +229,7 @@ mod tests {
             Response::Data(Some(values)) => {
                 assert_eq!(values.len(), 1);
                 let value = &values[0];
-                assert_eq!(value.data, b"test-value");
+                assert_eq!(str::from_utf8(&value.data).unwrap(), "test-value");
                 assert_eq!(value.flags, 0);
                 assert_eq!(value.cas, None);
 
@@ -234,7 +253,7 @@ mod tests {
             Response::Data(Some(values)) => {
                 assert_eq!(values.len(), 1);
                 let value = &values[0];
-                assert_eq!(value.data, b"test-value");
+                assert_eq!(str::from_utf8(&value.data).unwrap(), "test-value");
                 assert_eq!(value.flags, 0);
                 assert_eq!(value.cas, None);
 
@@ -258,7 +277,7 @@ mod tests {
             Response::Data(Some(values)) => {
                 assert_eq!(values.len(), 1);
                 let value = &values[0];
-                assert_eq!(value.data, b"test-value");
+                assert_eq!(str::from_utf8(&value.data).unwrap(), "test-value");
                 assert_eq!(value.flags, 0);
                 assert_eq!(value.cas, None);
 
@@ -277,5 +296,41 @@ mod tests {
         let (remaining, response) = parse_meta_get_data_value(input).unwrap();
         assert_eq!(remaining, b"");
         assert_eq!(response, Response::Status(Status::NotFound));
+    }
+
+    // Text lines are always terminated by \r\n. Unstructured data is _also_
+    // terminated by \r\n, even though \r, \n or any other 8-bit characters
+    // may also appear inside the data. Therefore, when a client retrieves
+    // data from a server, it must use the length of the data block (which it
+    // will be provided with) to determine where the data block ends, and not
+    // the fact that \r\n follows the end of the data block, even though it
+    // does.
+    // https://github.com/memcached/memcached/blob/master/doc/protocol.txt
+    #[test]
+    fn test_parse_meta_get_data_value_handles_data_with_embedded_crlf() {
+        let input = b"VA 12 h1 l56 t2179\r\ntest-\r\nvalue\r\n";
+        let (remaining, response) = parse_meta_get_data_value(input).unwrap();
+
+        assert_eq!(
+            remaining,
+            b"",
+            "Remaining input should be empty but was {:?}",
+            str::from_utf8(remaining).unwrap()
+        );
+        match response {
+            Response::Data(Some(values)) => {
+                assert_eq!(values.len(), 1);
+                let value = &values[0];
+                assert_eq!(str::from_utf8(&value.data).unwrap(), "test-\r\nvalue");
+                assert_eq!(value.flags, 0);
+                assert_eq!(value.cas, None);
+
+                let meta_values = value.meta_values.as_ref().unwrap();
+                assert_eq!(meta_values.hit_before, Some(true));
+                assert_eq!(meta_values.last_accessed, Some(56));
+                assert_eq!(meta_values.ttl_remaining, Some(2179));
+            }
+            _ => panic!("Expected Response::Data, got something else"),
+        }
     }
 }
