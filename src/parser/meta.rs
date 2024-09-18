@@ -1,13 +1,16 @@
+use core::str;
+use std::convert::TryInto;
+
 use nom::{
     branch::alt,
     bytes::streaming::{tag, take, take_while1},
     character::{
         complete::digit1,
-        streaming::{crlf, space0},
+        streaming::{crlf, space0, space1},
     },
     combinator::{map, map_res, value},
     multi::many0,
-    sequence::{pair, preceded, terminated},
+    sequence::{pair, preceded, terminated, tuple},
     IResult,
 };
 
@@ -16,7 +19,6 @@ use super::{parse_u32, ErrorKind, MetaValue, Response, Status, Value};
 pub fn parse_meta_status(buf: &[u8]) -> IResult<&[u8], Response> {
     terminated(
         alt((
-            value(Response::Status(Status::Stored), tag(b"HD")),
             value(Response::Status(Status::NotStored), tag(b"NS")),
             value(Response::Status(Status::Deleted), tag(b"DE")),
             value(Response::Status(Status::Touched), tag(b"TO")),
@@ -25,6 +27,10 @@ pub fn parse_meta_status(buf: &[u8]) -> IResult<&[u8], Response> {
         )),
         crlf,
     )(buf)
+}
+
+pub fn parse_meta_set_status(buf: &[u8]) -> IResult<&[u8], Response> {
+    alt((value(Response::Status(Status::Stored), tag(b"HD")),))(buf)
 }
 
 pub fn parse_meta_get_status(buf: &[u8]) -> IResult<&[u8], Response> {
@@ -37,7 +43,11 @@ pub fn parse_meta_get_status(buf: &[u8]) -> IResult<&[u8], Response> {
 
 pub fn parse_meta_response(buf: &[u8]) -> Result<Option<(usize, Response)>, ErrorKind> {
     let bufn = buf.len();
-    let result = alt((parse_meta_status, |input| parse_meta_get_data_value(input)))(buf);
+    let result = alt((
+        parse_meta_status,
+        |input| parse_meta_get_data_value(input),
+        |input| parse_meta_set_data_value(input),
+    ))(buf);
 
     match result {
         Ok((left, response)) => {
@@ -48,6 +58,49 @@ pub fn parse_meta_response(buf: &[u8]) -> Result<Option<(usize, Response)>, Erro
         Err(nom::Err::Error(e)) | Err(nom::Err::Failure(e)) => {
             Err(ErrorKind::Protocol(Some(e.code.description().to_string())))
         }
+    }
+}
+
+fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
+    let (input, success) = parse_meta_set_status(buf)?;
+    match success {
+        Response::Status(Status::Stored) => {
+            // TODO: dont' call if there are no flags
+            let (input, meta_values_array) = parse_meta_tag_values_as_slice(input)?;
+
+            let mut meta_values = MetaValue {
+                hit_before: None,
+                last_accessed: None,
+                ttl_remaining: None,
+                opaque_token: None,
+            };
+            let mut value = Value {
+                key: b"key".to_vec(),
+                cas: None,
+                flags: None,
+                data: None,
+                meta_values: None,
+            };
+
+            for (flag, meta_value) in meta_values_array {
+                match flag {
+                    b'O' => meta_values.opaque_token = Some(meta_value.to_vec()),
+                    b'c' => {
+                        value.cas =
+                            Some(u64::from_be_bytes(meta_value.try_into().unwrap_or([0; 8])));
+                    }
+                    _ => {}
+                }
+            }
+
+            value.meta_values = Some(meta_values);
+            let (input, _) = tag("\r\n")(input)?;
+            Ok((input, Response::Data(Some(vec![value]))))
+        }
+        _ => Err(nom::Err::Error(nom::error::Error::new(
+            input,
+            nom::error::ErrorKind::Eof,
+        ))),
     }
 }
 
@@ -75,7 +128,7 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
         Response::Status(Status::Exists) => {
             let (input, size) = parse_u32(input)?;
             let (input, _tag) = tag(" ")(input)?;
-            let (input, meta_values_array) = parse_meta_tag_values(input)?;
+            let (input, meta_values_array) = parse_meta_tag_values_as_u32(input)?;
             // remove the \r\n from the input
             let (input, _) = crlf(input)?;
             let (input, data) = take_until_size(input, size)?;
@@ -84,6 +137,7 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
                 hit_before: None,
                 last_accessed: None,
                 ttl_remaining: None,
+                opaque_token: None,
             };
             for (flag, value) in meta_values_array {
                 match flag {
@@ -100,8 +154,8 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
             let value = Value {
                 key: b"key".to_vec(),
                 cas: None,
-                flags: 0,
-                data,
+                flags: Some(0),
+                data: Some(data),
                 meta_values: Some(meta_values),
             };
 
@@ -138,7 +192,7 @@ pub fn take_until_size(mut buf: &[u8], byte_size: u32) -> IResult<&[u8], Vec<u8>
     Ok((buf, data))
 }
 
-fn parse_meta_tag_values(input: &[u8]) -> IResult<&[u8], Vec<(u8, u32)>> {
+fn parse_meta_tag_values_as_u32(input: &[u8]) -> IResult<&[u8], Vec<(u8, u32)>> {
     many0(pair(
         preceded(space0, map(take(1usize), |s: &[u8]| s[0])),
         map_res(digit1, |s: &[u8]| {
@@ -147,11 +201,48 @@ fn parse_meta_tag_values(input: &[u8]) -> IResult<&[u8], Vec<(u8, u32)>> {
     ))(input)
 }
 
+fn parse_meta_tag_values_as_slice(input: &[u8]) -> IResult<&[u8], Vec<(u8, &[u8])>> {
+    if input.is_empty() || input == b"\r\n" {
+        Ok((input, Vec::new()))
+    } else {
+        map(
+            tuple((
+                space1,
+                map(take(1usize), |s: &[u8]| s[0]),
+                take_while1(|c: u8| c != b'\r'),
+            )),
+            |(_, flag, value)| vec![(flag, value)],
+        )(input)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::parser::parse_u32;
     use std::str;
+
+    #[test]
+    fn test_parse_meta_tag_values_as_slice() {
+        let input = b" Oopaque-token\r\n";
+        let (remaining, result) = parse_meta_tag_values_as_slice(input).unwrap();
+
+        let token: &[u8] = "opaque-token".as_bytes();
+        assert_eq!(result, vec![(b'O', token)]);
+        assert_eq!(remaining, b"\r\n");
+
+        // Test with empty input
+        let empty_input = b"";
+        let (remaining, result) = parse_meta_tag_values_as_slice(empty_input).unwrap();
+        assert_eq!(result, vec![]);
+        assert_eq!(remaining, b"");
+
+        // Test with new line
+        let empty_input = b"\r\n";
+        let (remaining, result) = parse_meta_tag_values_as_slice(empty_input).unwrap();
+        assert_eq!(result, vec![]);
+        assert_eq!(remaining, b"\r\n");
+    }
 
     #[test]
     fn test_parse_u32() {
@@ -191,7 +282,7 @@ mod tests {
     #[test]
     fn test_parse_meta_tag_values() {
         let input = b"h1 l56 t2179\r\ntest-value";
-        let (remaining, result) = parse_meta_tag_values(input).unwrap();
+        let (remaining, result) = parse_meta_tag_values_as_u32(input).unwrap();
 
         assert_eq!(result, vec![(b'h', 1), (b'l', 56), (b't', 2179),]);
         assert_eq!(remaining, b"\r\ntest-value");
@@ -200,7 +291,7 @@ mod tests {
     #[test]
     fn test_parse_meta_tag_values_order_does_not_matter() {
         let input = b"t2179 h1 l56\r\ntest-value";
-        let (remaining, result) = parse_meta_tag_values(input).unwrap();
+        let (remaining, result) = parse_meta_tag_values_as_u32(input).unwrap();
 
         assert_eq!(result, vec![(b't', 2179), (b'h', 1), (b'l', 56),]);
         assert_eq!(remaining, b"\r\ntest-value");
@@ -209,7 +300,7 @@ mod tests {
     #[test]
     fn test_parse_meta_tag_values_handles_unknown_tags() {
         let input = b"h1 l56 t2179 x100\r\ntest-value";
-        let (remaining, result) = parse_meta_tag_values(input).unwrap();
+        let (remaining, result) = parse_meta_tag_values_as_u32(input).unwrap();
 
         assert_eq!(
             result,
@@ -229,8 +320,11 @@ mod tests {
             Response::Data(Some(values)) => {
                 assert_eq!(values.len(), 1);
                 let value = &values[0];
-                assert_eq!(str::from_utf8(&value.data).unwrap(), "test-value");
-                assert_eq!(value.flags, 0);
+                assert_eq!(
+                    str::from_utf8(value.data.as_ref().unwrap()).unwrap(),
+                    "test-value"
+                );
+                assert_eq!(value.flags, Some(0));
                 assert_eq!(value.cas, None);
 
                 let meta_values = value.meta_values.as_ref().unwrap();
@@ -253,8 +347,11 @@ mod tests {
             Response::Data(Some(values)) => {
                 assert_eq!(values.len(), 1);
                 let value = &values[0];
-                assert_eq!(str::from_utf8(&value.data).unwrap(), "test-value");
-                assert_eq!(value.flags, 0);
+                assert_eq!(
+                    str::from_utf8(value.data.as_ref().unwrap()).unwrap(),
+                    "test-value"
+                );
+                assert_eq!(value.flags, Some(0));
                 assert_eq!(value.cas, None);
 
                 let meta_values = value.meta_values.as_ref().unwrap();
@@ -277,8 +374,11 @@ mod tests {
             Response::Data(Some(values)) => {
                 assert_eq!(values.len(), 1);
                 let value = &values[0];
-                assert_eq!(str::from_utf8(&value.data).unwrap(), "test-value");
-                assert_eq!(value.flags, 0);
+                assert_eq!(
+                    str::from_utf8(value.data.as_ref().unwrap()).unwrap(),
+                    "test-value"
+                );
+                assert_eq!(value.flags, Some(0));
                 assert_eq!(value.cas, None);
 
                 let meta_values = value.meta_values.as_ref().unwrap();
@@ -321,8 +421,11 @@ mod tests {
             Response::Data(Some(values)) => {
                 assert_eq!(values.len(), 1);
                 let value = &values[0];
-                assert_eq!(str::from_utf8(&value.data).unwrap(), "test-\r\nvalue");
-                assert_eq!(value.flags, 0);
+                assert_eq!(
+                    str::from_utf8(value.data.as_ref().unwrap()).unwrap(),
+                    "test-\r\nvalue"
+                );
+                assert_eq!(value.flags, Some(0));
                 assert_eq!(value.cas, None);
 
                 let meta_values = value.meta_values.as_ref().unwrap();
