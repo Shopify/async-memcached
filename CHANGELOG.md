@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Implemented `set_multi` method.
 - Added `flush_all` method to the ASCII protocol
+- Added `delete_multi_no_reply` method to the ASCII protocol
 
 ### Changed
 
