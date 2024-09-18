@@ -249,6 +249,7 @@ mod tests {
                     .expect("should have unwrapped a Result")
                     .expect("should have unwrapped an Option")
                     .data
+                    .unwrap()
             )
             .expect("failed to parse string from bytes"),
             "value1"
@@ -261,6 +262,7 @@ mod tests {
                     .expect("should have unwrapped a Result")
                     .expect("should have unwrapped an Option")
                     .data
+                    .unwrap()
             )
             .expect("failed to parse string from bytes"),
             "value2"
@@ -313,6 +315,7 @@ mod tests {
                         .expect("should have unwrapped a Result")
                         .expect("should have unwrapped an Option")
                         .data
+                        .unwrap()
                 )
                 .expect("failed to parse string from bytes"),
                 _expected_value
