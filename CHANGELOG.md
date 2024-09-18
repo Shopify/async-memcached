@@ -10,6 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+
+- Implemented `set_multi` method.
+
+### Changed
+
+- Outlined the process of releasing a new crate version in README.md
+
 ## [0.3.1] - 2024-09-09
 
 ### Changed

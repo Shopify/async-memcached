@@ -98,6 +98,30 @@ impl Client {
         self.drive_receive(parse_ascii_response).await
     }
 
+    pub(crate) async fn map_set_multi_responses<'a, K, V>(
+        &mut self,
+        kv: &'a [(K, V)],
+    ) -> Result<HashMap<&'a K, Result<Response, Error>>, Error>
+    where
+        K: AsRef<[u8]> + Eq + std::hash::Hash,
+        V: AsMemcachedValue,
+    {
+        let mut results = HashMap::with_capacity(kv.len());
+
+        for (key, _) in kv {
+            let result = match self.drive_receive(parse_ascii_response).await {
+                Ok(Response::Status(Status::Stored)) => Ok(Response::Status(Status::Stored)),
+                Ok(Response::Status(s)) => Err(s.into()),
+                Ok(_) => Err(Status::Error(ErrorKind::Protocol(None)).into()),
+                Err(e) => return Err(e),
+            };
+
+            results.insert(key, result);
+        }
+
+        Ok(results)
+    }
+
     pub(crate) async fn get_metadump_response(&mut self) -> Result<MetadumpResponse, Error> {
         self.drive_receive(parse_ascii_metadump_response).await
     }
@@ -139,13 +163,14 @@ impl Client {
     /// describes the metadata and data of the key.
     ///
     /// Otherwise, [`Error`] is returned.
+    /// This will eventually be deprecated in favor of `get_multi`
     pub async fn get_many<I, K>(&mut self, keys: I) -> Result<Vec<Value>, Error>
     where
         I: IntoIterator<Item = K>,
         K: AsRef<[u8]>,
     {
         self.conn.write_all(b"get ").await?;
-        for key in keys.into_iter() {
+        for key in keys {
             self.conn.write_all(key.as_ref()).await?;
             self.conn.write_all(b" ").await?;
         }
@@ -179,20 +204,23 @@ impl Client {
 
         self.conn.write_all(b"set ").await?;
         self.conn.write_all(kr).await?;
+
         let flags = flags.unwrap_or(0).to_string();
         self.conn.write_all(b" ").await?;
         self.conn.write_all(flags.as_ref()).await?;
+
         let ttl = ttl.unwrap_or(0).to_string();
         self.conn.write_all(b" ").await?;
         self.conn.write_all(ttl.as_ref()).await?;
 
-        self.conn.write_all(b" ").await?;
         let vlen = vr.len().to_string();
+        self.conn.write_all(b" ").await?;
         self.conn.write_all(vlen.as_ref()).await?;
         self.conn.write_all(b"\r\n").await?;
 
         self.conn.write_all(vr.as_ref()).await?;
         self.conn.write_all(b"\r\n").await?;
+
         self.conn.flush().await?;
 
         match self.get_read_write_response().await? {
@@ -200,6 +228,50 @@ impl Client {
             Response::Status(s) => Err(s.into()),
             _ => Err(Status::Error(ErrorKind::Protocol(None)).into()),
         }
+    }
+
+    /// Sets multiple keys and values through pipelined commands.
+    ///
+    /// If `ttl` or `flags` are not specified, they will default to 0. The same values for `ttl` and `flags` will be applied to each key.
+    /// Returns a result with a HashMap of keys mapped to the result of the set operation, or an error.
+    pub async fn set_multi<'a, K, V>(
+        &mut self,
+        kv: &'a [(K, V)],
+        ttl: Option<i64>,
+        flags: Option<u32>,
+    ) -> Result<HashMap<&'a K, Result<Response, Error>>, Error>
+    where
+        K: AsRef<[u8]> + Eq + std::hash::Hash + std::fmt::Debug,
+        V: AsMemcachedValue,
+    {
+        for (key, value) in kv {
+            let kr = key.as_ref();
+            let vr = value.as_bytes();
+
+            self.conn.write_all(b"set ").await?;
+            self.conn.write_all(kr).await?;
+
+            let flags = flags.unwrap_or(0).to_string();
+            self.conn.write_all(b" ").await?;
+            self.conn.write_all(flags.as_ref()).await?;
+
+            let ttl = ttl.unwrap_or(0).to_string();
+            self.conn.write_all(b" ").await?;
+            self.conn.write_all(ttl.as_ref()).await?;
+
+            let vlen = vr.len().to_string();
+            self.conn.write_all(b" ").await?;
+            self.conn.write_all(vlen.as_ref()).await?;
+            self.conn.write_all(b"\r\n").await?;
+
+            self.conn.write_all(vr.as_ref()).await?;
+            self.conn.write_all(b"\r\n").await?;
+        }
+        self.conn.flush().await?;
+
+        let results = self.map_set_multi_responses(kv).await?;
+
+        Ok(results)
     }
 
     /// Add a key. If the value exists, Err(Protocol(NotStored)) is returned.
@@ -219,20 +291,23 @@ impl Client {
 
         self.conn.write_all(b"add ").await?;
         self.conn.write_all(kr).await?;
+
         let flags = flags.unwrap_or(0).to_string();
         self.conn.write_all(b" ").await?;
         self.conn.write_all(flags.as_ref()).await?;
+
         let ttl = ttl.unwrap_or(0).to_string();
         self.conn.write_all(b" ").await?;
         self.conn.write_all(ttl.as_ref()).await?;
 
-        self.conn.write_all(b" ").await?;
         let vlen = vr.len().to_string();
+        self.conn.write_all(b" ").await?;
         self.conn.write_all(vlen.as_ref()).await?;
         self.conn.write_all(b"\r\n").await?;
 
         self.conn.write_all(vr.as_ref()).await?;
         self.conn.write_all(b"\r\n").await?;
+
         self.conn.flush().await?;
 
         match self.get_read_write_response().await? {
@@ -277,7 +352,8 @@ impl Client {
 
     /// Increments the given key by the specified amount.
     /// Can overflow from the max value of u64 (18446744073709551615) -> 0.
-    /// Returns the new value of the key if key exists, otherwise returns KeyNotFound error.
+    /// If the key does not exist, the server will return a KeyNotFound error.
+    /// If the key exists but the value is non-numeric, the server will return a ClientError.
     pub async fn increment<K>(&mut self, key: K, amount: u64) -> Result<u64, Error>
     where
         K: AsRef<[u8]>,
@@ -305,6 +381,7 @@ impl Client {
 
     /// Increments the given key by the specified amount with no reply from the server.
     /// Can overflow from the max value of u64 (18446744073709551615) -> 0.
+    /// Always returns () for a complete request, will not return any indication of success or failure.
     pub async fn increment_no_reply<K>(&mut self, key: K, amount: u64) -> Result<(), Error>
     where
         K: AsRef<[u8]>,
@@ -328,6 +405,8 @@ impl Client {
 
     /// Decrements the given key by the specified amount.
     /// Will not decrement the counter below 0.
+    /// If the key does not exist, the server will return a KeyNotFound error.
+    /// If the key exists but the value is non-numeric, the server will return a ClientError.
     pub async fn decrement<K>(&mut self, key: K, amount: u64) -> Result<u64, Error>
     where
         K: AsRef<[u8]>,
@@ -355,7 +434,7 @@ impl Client {
 
     /// Decrements the given key by the specified amount with no reply from the server.
     /// Will not decrement the counter below 0.
-    /// Returns the new value of the key if key exists, otherwise returns KeyNotFound error.
+    /// Always returns () for a complete request, will not return any indication of success or failure.
     pub async fn decrement_no_reply<K>(&mut self, key: K, amount: u64) -> Result<(), Error>
     where
         K: AsRef<[u8]>,
@@ -476,331 +555,5 @@ impl<'a> MetadumpIter<'a> {
             Ok(MetadumpResponse::Entry(km)) => Some(Ok(km)),
             Err(e) => Some(Err(e)),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    async fn setup_client() -> Client {
-        Client::new("tcp://127.0.0.1:11211")
-            .await
-            .expect("Failed to connect to server")
-    }
-
-    #[ignore = "Relies on a running memcached server"]
-    #[tokio::test]
-    async fn test_add_with_string_value() {
-        let mut client = setup_client().await;
-
-        let key = "async-memcache-test-key-add";
-
-        let result = client.delete_no_reply(key).await;
-        assert!(result.is_ok(), "failed to delete {}, {:?}", key, result);
-
-        let result = client.add(key, "value", None, None).await;
-
-        assert!(result.is_ok());
-    }
-
-    #[ignore = "Relies on a running memcached server"]
-    #[tokio::test]
-    async fn test_add_with_u64_value() {
-        let mut client = setup_client().await;
-
-        let key = "async-memcache-test-key-add-u64";
-        let value: u64 = 10;
-
-        let result = client.delete_no_reply(key).await;
-        assert!(result.is_ok(), "failed to delete {}, {:?}", key, result);
-
-        let result = client.add(key, value, None, None).await;
-
-        assert!(result.is_ok());
-    }
-
-    #[ignore = "Relies on a running memcached server"]
-    #[tokio::test]
-    async fn test_set_with_str_ref_value() {
-        let mut client = setup_client().await;
-
-        let key = "set-key-with-string-value";
-        let value = "value";
-        let result = client.set(key, value, None, None).await;
-
-        assert!(result.is_ok());
-
-        let result = client.get(key).await;
-
-        assert!(result.is_ok());
-
-        let get_result = result.unwrap();
-
-        assert_eq!(String::from_utf8(get_result.unwrap().data).unwrap(), value);
-    }
-
-    #[ignore = "Relies on a running memcached server"]
-    #[tokio::test]
-    async fn test_set_with_string_value() {
-        let mut client = setup_client().await;
-
-        let key = "set-key-with-string-value";
-        let value = String::from("value");
-        let result = client.set(key, &value, None, None).await;
-
-        assert!(result.is_ok());
-
-        let result = client.get(key).await;
-
-        assert!(result.is_ok());
-
-        let get_result = result.unwrap();
-
-        assert_eq!(String::from_utf8(get_result.unwrap().data).unwrap(), value);
-    }
-
-    #[ignore = "Relies on a running memcached server"]
-    #[tokio::test]
-    async fn test_set_with_string_ref_value() {
-        let mut client = setup_client().await;
-
-        let key = "set-key-with-string-reference-value";
-        let value = String::from("value");
-        let result = client.set(key, &value, None, None).await;
-
-        assert!(result.is_ok());
-
-        let result = client.get(key).await;
-
-        assert!(result.is_ok());
-
-        let get_result = result.unwrap();
-
-        assert_eq!(String::from_utf8(get_result.unwrap().data).unwrap(), value);
-    }
-
-    #[ignore = "Relies on a running memcached server"]
-    #[tokio::test]
-    async fn test_set_with_u64_value() {
-        let mut client = setup_client().await;
-
-        let key = "set-key-with-u64-value";
-        let value: u64 = 20;
-
-        println!("value: {}", value);
-        let result = client.set(key, value, None, None).await;
-
-        println!("result: {:?}", result);
-        assert!(result.is_ok());
-
-        let result = client.get(key).await;
-
-        assert!(result.is_ok());
-
-        let get_result = result.unwrap();
-
-        println!("get_result: {:?}", get_result);
-
-        println!(
-            "get_result.unwrap().data: {:?}",
-            String::from_utf8(get_result.unwrap().data).unwrap()
-        );
-    }
-
-    #[ignore = "Relies on a running memcached server"]
-    #[tokio::test]
-    async fn test_delete() {
-        let mut client = setup_client().await;
-
-        let key = "async-memcache-test-key-delete";
-
-        let value = rand::random::<u64>();
-        let result = client.set(key, value, None, None).await;
-
-        assert!(result.is_ok(), "failed to set {}, {:?}", key, result);
-
-        let result = client.get(key).await;
-
-        assert!(result.is_ok(), "failed to get {}, {:?}", key, result);
-
-        let get_result = result.unwrap();
-
-        match get_result {
-            Some(get_value) => assert_eq!(
-                String::from_utf8(get_value.data).expect("failed to parse a string"),
-                value.to_string()
-            ),
-            None => panic!("failed to get {}", key),
-        }
-
-        let result = client.delete(key).await;
-
-        assert!(result.is_ok(), "failed to delete {}, {:?}", key, result);
-    }
-
-    #[ignore = "Relies on a running memcached server"]
-    #[tokio::test]
-    async fn test_delete_no_reply() {
-        let mut client = setup_client().await;
-
-        let key = "async-memcache-test-key-delete-no-reply";
-
-        let value = format!("{}", rand::random::<u64>());
-        let result = client.set(key, value.as_str(), None, None).await;
-
-        assert!(result.is_ok(), "failed to set {}, {:?}", key, result);
-
-        let result = client.get(key).await;
-
-        assert!(result.is_ok(), "failed to get {}, {:?}", key, result);
-
-        let get_result = result.unwrap();
-
-        match get_result {
-            Some(get_value) => assert_eq!(
-                String::from_utf8(get_value.data).expect("failed to parse a string"),
-                value
-            ),
-            None => panic!("failed to get {}", key),
-        }
-
-        let result = client.delete_no_reply(key).await;
-
-        assert!(result.is_ok(), "failed to delete {}, {:?}", key, result);
-    }
-
-    #[ignore = "Relies on a running memcached server"]
-    #[tokio::test]
-    async fn test_increment_raises_error_when_key_doesnt_exist() {
-        let mut client = setup_client().await;
-
-        let key = "key-does-not-exist";
-        let amount = 1;
-
-        let result = client.increment(key, amount).await;
-
-        assert!(matches!(result, Err(Error::Protocol(Status::NotFound))));
-    }
-
-    #[ignore = "Relies on a running memcached server"]
-    #[tokio::test]
-    async fn test_increments_existing_key() {
-        let mut client = setup_client().await;
-
-        let key = "key-to-increment";
-        let value: u64 = 1;
-
-        let _ = client.set(key, value, None, None).await;
-
-        let amount = 1;
-
-        let result = client.increment(key, amount).await;
-
-        assert_eq!(Ok(2), result);
-    }
-
-    #[ignore = "Relies on a running memcached server"]
-    #[tokio::test]
-    async fn test_increment_can_overflow() {
-        let mut client = setup_client().await;
-
-        let key = "key-to-increment-overflow";
-        let value = u64::MAX; // max value for u64
-
-        let _ = client.set(key, value, None, None).await;
-
-        let amount = 1;
-
-        // First increment should overflow
-        let result = client.increment(key, amount).await;
-
-        assert_eq!(Ok(0), result);
-
-        // Subsequent increments should work as normal
-        let result = client.increment(key, amount).await;
-
-        assert_eq!(Ok(1), result);
-    }
-
-    #[ignore = "Relies on a running memcached server"]
-    #[tokio::test]
-    async fn test_increments_existing_key_with_no_reply() {
-        let mut client = setup_client().await;
-
-        let key = "key-to-increment-no-reply";
-        let value: u64 = 1;
-
-        let _ = client.set(key, value, None, None).await;
-
-        let amount = 1;
-
-        let result = client.increment_no_reply(key, amount).await;
-
-        assert_eq!(Ok(()), result);
-    }
-
-    #[ignore = "Relies on a running memcached server"]
-    #[tokio::test]
-    async fn test_decrement_raises_error_when_key_doesnt_exist() {
-        let mut client = setup_client().await;
-
-        let key = "fails-to-decrement";
-        let amount = 1;
-
-        let result = client.decrement(key, amount).await;
-
-        assert!(matches!(result, Err(Error::Protocol(Status::NotFound))));
-    }
-
-    #[ignore = "Relies on a running memcached server"]
-    #[tokio::test]
-    async fn test_decrements_existing_key() {
-        let mut client = setup_client().await;
-
-        let key = "key-to-decrement";
-        let value: u64 = 10;
-
-        let _ = client.set(key, value, None, None).await;
-
-        let amount = 1;
-
-        let result = client.decrement(key, amount).await;
-
-        assert_eq!(Ok(9), result);
-    }
-
-    #[ignore = "Relies on a running memcached server"]
-    #[tokio::test]
-    async fn test_decrement_does_not_reduce_value_below_zero() {
-        let mut client = setup_client().await;
-
-        let key = "key-to-decrement-past-zero";
-        let value: u64 = 0;
-
-        let _ = client.set(key, value, None, None).await;
-
-        let amount = 1;
-
-        let result = client.decrement(key, amount).await;
-
-        assert_eq!(Ok(0), result);
-    }
-
-    #[ignore = "Relies on a running memcached server"]
-    #[tokio::test]
-    async fn test_decrements_existing_key_with_no_reply() {
-        let mut client = setup_client().await;
-
-        let key = "key-to-decrement-no-reply";
-        let value: u64 = 1;
-
-        let _ = client.set(key, value, None, None).await;
-
-        let amount = 1;
-
-        let result = client.decrement_no_reply(key, amount).await;
-
-        assert_eq!(Ok(()), result);
     }
 }
