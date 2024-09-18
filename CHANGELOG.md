@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Implemented `set_multi` method.
+- Added `flush_all` method to the ASCII protocol
 
 ### Changed
 

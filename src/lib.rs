@@ -518,6 +518,28 @@ impl Client {
 
         Ok(entries)
     }
+
+    /// Flushes all existing items on the server
+    ///
+    /// This operation invalidates all existing items immediately. Any items with an update time
+    /// older than the time of the flush_all operation will be ignored for retrieval purposes.
+    /// This operation does not free up memory taken up by the existing items.
+
+    pub async fn flush_all(&mut self) -> Result<(), Error> {
+        self.conn.write_all(b"flush_all\r\n").await?;
+        self.conn.flush().await?;
+
+        let mut response = String::new();
+        self.conn.read_line(&mut response).await?;
+        // check if response is ok
+        if response.trim() == "OK" {
+            Ok(())
+        } else {
+            Err(Error::from(Status::Error(ErrorKind::Protocol(Some(
+                format!("Invalid response for `flush_all` command: `{response}`"),
+            )))))
+        }
+    }
 }
 
 /// Asynchronous iterator for metadump operations.
@@ -555,5 +577,368 @@ impl<'a> MetadumpIter<'a> {
             Ok(MetadumpResponse::Entry(km)) => Some(Ok(km)),
             Err(e) => Some(Err(e)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serial_test::{parallel, serial};
+
+    async fn setup_client() -> Client {
+        Client::new("tcp://127.0.0.1:11211")
+            .await
+            .expect("Failed to connect to server")
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    #[parallel]
+    async fn test_add_with_string_value() {
+        let mut client = setup_client().await;
+
+        let key = "async-memcache-test-key-add";
+
+        let result = client.delete_no_reply(key).await;
+        assert!(result.is_ok(), "failed to delete {}, {:?}", key, result);
+
+        let result = client.add(key, "value", None, None).await;
+
+        assert!(result.is_ok());
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    #[parallel]
+    async fn test_add_with_u64_value() {
+        let mut client = setup_client().await;
+
+        let key = "async-memcache-test-key-add-u64";
+        let value: u64 = 10;
+
+        let result = client.delete_no_reply(key).await;
+        assert!(result.is_ok(), "failed to delete {}, {:?}", key, result);
+
+        let result = client.add(key, value, None, None).await;
+
+        assert!(result.is_ok());
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    #[parallel]
+    async fn test_set_with_str_ref_value() {
+        let mut client = setup_client().await;
+
+        let key = "set-key-with-string-value";
+        let value = "value";
+        let result = client.set(key, value, None, None).await;
+
+        assert!(result.is_ok());
+
+        let result = client.get(key).await;
+
+        assert!(result.is_ok());
+
+        let get_result = result.unwrap();
+
+        assert_eq!(String::from_utf8(get_result.unwrap().data).unwrap(), value);
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    #[parallel]
+    async fn test_set_with_string_value() {
+        let mut client = setup_client().await;
+
+        let key = "set-key-with-string-value";
+        let value = String::from("value");
+        let result = client.set(key, &value, None, None).await;
+
+        assert!(result.is_ok());
+
+        let result = client.get(key).await;
+
+        assert!(result.is_ok());
+
+        let get_result = result.unwrap();
+
+        assert_eq!(String::from_utf8(get_result.unwrap().data).unwrap(), value);
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    #[parallel]
+    async fn test_set_with_string_ref_value() {
+        let mut client = setup_client().await;
+
+        let key = "set-key-with-string-reference-value";
+        let value = String::from("value");
+        let result = client.set(key, &value, None, None).await;
+
+        assert!(result.is_ok());
+
+        let result = client.get(key).await;
+
+        assert!(result.is_ok());
+
+        let get_result = result.unwrap();
+
+        assert_eq!(String::from_utf8(get_result.unwrap().data).unwrap(), value);
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    #[parallel]
+    async fn test_set_with_u64_value() {
+        let mut client = setup_client().await;
+
+        let key = "set-key-with-u64-value";
+        let value: u64 = 20;
+
+        println!("value: {}", value);
+        let result = client.set(key, value, None, None).await;
+
+        println!("result: {:?}", result);
+        assert!(result.is_ok());
+
+        let result = client.get(key).await;
+
+        assert!(result.is_ok());
+
+        let get_result = result.unwrap();
+
+        println!("get_result: {:?}", get_result);
+
+        println!(
+            "get_result.unwrap().data: {:?}",
+            String::from_utf8(get_result.unwrap().data).unwrap()
+        );
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    #[parallel]
+    async fn test_delete() {
+        let mut client = setup_client().await;
+
+        let key = "async-memcache-test-key-delete";
+
+        let value = rand::random::<u64>();
+        let result = client.set(key, value, None, None).await;
+
+        assert!(result.is_ok(), "failed to set {}, {:?}", key, result);
+
+        let result = client.get(key).await;
+
+        assert!(result.is_ok(), "failed to get {}, {:?}", key, result);
+
+        let get_result = result.unwrap();
+
+        match get_result {
+            Some(get_value) => assert_eq!(
+                String::from_utf8(get_value.data).expect("failed to parse a string"),
+                value.to_string()
+            ),
+            None => panic!("failed to get {}", key),
+        }
+
+        let result = client.delete(key).await;
+
+        assert!(result.is_ok(), "failed to delete {}, {:?}", key, result);
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    #[parallel]
+    async fn test_delete_no_reply() {
+        let mut client = setup_client().await;
+
+        let key = "async-memcache-test-key-delete-no-reply";
+
+        let value = format!("{}", rand::random::<u64>());
+        let result = client.set(key, value.as_str(), None, None).await;
+
+        assert!(result.is_ok(), "failed to set {}, {:?}", key, result);
+
+        let result = client.get(key).await;
+
+        assert!(result.is_ok(), "failed to get {}, {:?}", key, result);
+
+        let get_result = result.unwrap();
+
+        match get_result {
+            Some(get_value) => assert_eq!(
+                String::from_utf8(get_value.data).expect("failed to parse a string"),
+                value
+            ),
+            None => panic!("failed to get {}", key),
+        }
+
+        let result = client.delete_no_reply(key).await;
+
+        assert!(result.is_ok(), "failed to delete {}, {:?}", key, result);
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    #[parallel]
+    async fn test_increment_raises_error_when_key_doesnt_exist() {
+        let mut client = setup_client().await;
+
+        let key = "key-does-not-exist";
+        let amount = 1;
+
+        let result = client.increment(key, amount).await;
+
+        assert!(matches!(result, Err(Error::Protocol(Status::NotFound))));
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    #[parallel]
+    async fn test_increments_existing_key() {
+        let mut client = setup_client().await;
+
+        let key = "key-to-increment";
+        let value: u64 = 1;
+
+        let _ = client.set(key, value, None, None).await;
+
+        let amount = 1;
+
+        let result = client.increment(key, amount).await;
+
+        assert_eq!(Ok(2), result);
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    #[parallel]
+    async fn test_increment_can_overflow() {
+        let mut client = setup_client().await;
+
+        let key = "key-to-increment-overflow";
+        let value = u64::MAX; // max value for u64
+
+        let _ = client.set(key, value, None, None).await;
+
+        let amount = 1;
+
+        // First increment should overflow
+        let result = client.increment(key, amount).await;
+
+        assert_eq!(Ok(0), result);
+
+        // Subsequent increments should work as normal
+        let result = client.increment(key, amount).await;
+
+        assert_eq!(Ok(1), result);
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    #[parallel]
+    async fn test_increments_existing_key_with_no_reply() {
+        let mut client = setup_client().await;
+
+        let key = "key-to-increment-no-reply";
+        let value: u64 = 1;
+
+        let _ = client.set(key, value, None, None).await;
+
+        let amount = 1;
+
+        let result = client.increment_no_reply(key, amount).await;
+
+        assert_eq!(Ok(()), result);
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    #[parallel]
+    async fn test_decrement_raises_error_when_key_doesnt_exist() {
+        let mut client = setup_client().await;
+
+        let key = "fails-to-decrement";
+        let amount = 1;
+
+        let result = client.decrement(key, amount).await;
+
+        assert!(matches!(result, Err(Error::Protocol(Status::NotFound))));
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    #[parallel]
+    async fn test_decrements_existing_key() {
+        let mut client = setup_client().await;
+
+        let key = "key-to-decrement";
+        let value: u64 = 10;
+
+        let _ = client.set(key, value, None, None).await;
+
+        let amount = 1;
+
+        let result = client.decrement(key, amount).await;
+
+        assert_eq!(Ok(9), result);
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    #[parallel]
+    async fn test_decrement_does_not_reduce_value_below_zero() {
+        let mut client = setup_client().await;
+
+        let key = "key-to-decrement-past-zero";
+        let value: u64 = 0;
+
+        let _ = client.set(key, value, None, None).await;
+
+        let amount = 1;
+
+        let result = client.decrement(key, amount).await;
+
+        assert_eq!(Ok(0), result);
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    #[parallel]
+    async fn test_decrements_existing_key_with_no_reply() {
+        let mut client = setup_client().await;
+
+        let key = "key-to-decrement-no-reply";
+        let value: u64 = 1;
+
+        let _ = client.set(key, value, None, None).await;
+
+        let amount = 1;
+
+        let result = client.decrement_no_reply(key, amount).await;
+
+        assert_eq!(Ok(()), result);
+    }
+
+    #[ignore = "Relies on a running memcached server"]
+    #[tokio::test]
+    #[serial]
+    async fn test_flush_all() {
+        let mut client = setup_client().await;
+
+        let key = "flush-all-key";
+        let value: u64 = 1;
+
+        let _ = client.set(key, value, None, None).await;
+        let result = client.get(key).await;
+        assert!(result.is_ok());
+
+        let result = client.flush_all().await;
+        assert!(result.is_ok());
+
+        let result = client.get(key).await;
+        assert!(matches!(result, Ok(None)));
     }
 }
