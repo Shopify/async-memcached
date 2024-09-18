@@ -66,8 +66,8 @@ fn parse_ascii_value(buf: &[u8]) -> IResult<&[u8], Value> {
         Value {
             key: key.to_vec(),
             cas,
-            flags,
-            data: data.to_vec(),
+            flags: Some(flags),
+            data: Some(data.to_vec()),
             meta_values: None,
         },
     ))
@@ -252,13 +252,13 @@ mod tests {
                 (b"42\r\n", 4, Response::IncrDecr(42)),
                 (b"END\r\n", 5, Response::Data(None)),
                 (b"VALUE foo 42 11\r\nhello world\r\nEND\r\n", 35, Response::Data(Some(
-                    vec![Value { key: FOO_KEY.to_vec(), flags: 42, cas: None, data: HELLO_WORLD_DATA.to_vec(), meta_values: None }]
+                    vec![Value { key: FOO_KEY.to_vec(), flags: Some(42), cas: None, data: Some(HELLO_WORLD_DATA.to_vec()), meta_values: None }]
                 ))),
                 (b"VALUE foo 42 11\r\nhello world\r\nVALUE bar 43 11 15\r\nhello world\r\nEND\r\n", 68,
                     Response::Data(Some(
                         vec![
-                            Value { key: FOO_KEY.to_vec(), flags: 42, cas: None, data: HELLO_WORLD_DATA.to_vec(), meta_values: None },
-                            Value { key: BAR_KEY.to_vec(), flags: 43, cas: Some(15), data: HELLO_WORLD_DATA.to_vec(), meta_values: None },
+                            Value { key: FOO_KEY.to_vec(), flags: Some(42), cas: None, data: Some(HELLO_WORLD_DATA.to_vec()), meta_values: None },
+                            Value { key: BAR_KEY.to_vec(), flags: Some(43), cas: Some(15), data: Some(HELLO_WORLD_DATA.to_vec()), meta_values: None },
                         ]
                     ))
                 ),

@@ -22,16 +22,21 @@ pub struct Value {
     pub key: Vec<u8>,
     /// CAS identifier.
     pub cas: Option<u64>,
+    /// NOTE: This is the client bitflags, not meta flags
+    /// which is an opaque number passed by the client
     /// Flags for this key.
     /// Defaults to 0.
-    pub flags: u32,
+    pub flags: Option<u32>,
     /// Data for this key.
-    pub data: Vec<u8>,
+    pub data: Option<Vec<u8>>,
     /// optional extra Meta Flags Response Data
+    /// Meta flags are not to be confused with client bitflags, which is an opaque
+    /// number passed by the client. Meta flags change how the command operates, but
+    /// they are not stored in cache.
     pub meta_values: Option<MetaValue>,
 }
 
-// Add this new struct for meta protocol responses
+// TODO: Defaults of NONE?
 #[derive(Clone, Debug, PartialEq)]
 pub struct MetaValue {
     /// Whether the item has been accessed before (X flag)
@@ -40,6 +45,8 @@ pub struct MetaValue {
     pub last_accessed: Option<u64>,
     /// Remaining TTL in seconds, or -1 for unlimited (t flag)
     pub ttl_remaining: Option<i64>,
+    /// opaque value, consumes a token and copies back with response
+    pub opaque_token: Option<Vec<u8>>,
 }
 
 /// Status of a memcached operation.
