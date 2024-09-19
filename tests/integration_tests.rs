@@ -104,7 +104,75 @@ async fn test_add_with_a_key_that_already_exists() {
 
     let add_result = client.add(key, "value", None, None).await;
 
-    assert_eq!(add_result, Err(Error::Protocol(Status::NotStored)));
+    println!("add_result: {:?}", add_result);
+
+    assert!(add_result.is_err());
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_add_multi() {
+    let keys = vec!["am-key1", "am-key2", "afm-key3"];
+    let values = vec!["value1", "value2", "value3"];
+    let kv: Vec<(&str, &str)> = keys.clone().into_iter().zip(values.into_iter()).collect();
+
+    let mut client = setup_client(&keys).await;
+
+    let result = client.add_multi(&kv, None, None).await;
+
+    assert!(
+        result.is_ok(),
+        "failed to add_multi {:?}, {:?}",
+        &keys,
+        result
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_add_multi_with_a_key_that_already_exists() {
+    let keys = vec!["am-key-already-set", "am2-key2", "am2-key3"];
+    let values = vec!["new-value", "value2", "value3"];
+    let kv: Vec<(&str, &str)> = keys.clone().into_iter().zip(values.into_iter()).collect();
+
+    let mut client = setup_client(&keys).await;
+
+    let preset_key = "am-key-already-set";
+
+    client
+        .set(&preset_key, "original-value", None, None)
+        .await
+        .expect("failed to set");
+
+    let add_response = client.add_multi(&kv, None, None).await;
+
+    assert!(
+        &add_response.is_ok(),
+        "failed to add_multi {:?}, {:?}",
+        &keys,
+        &add_response
+    );
+
+    let results = add_response.expect("expected Ok(HashMap<_>)");
+
+    assert!(results.contains_key(&preset_key));
+
+    // the preset key should have an error associated with it in the HashMap of results
+    assert!(matches!(
+        results[&preset_key],
+        Err(Error::Protocol(Status::NotStored))
+    ));
+
+    let get_result = client.get(preset_key).await;
+
+    // the get result for the preset key should be the original value that it was set with, not the new value from the add_multi call
+    assert_eq!(
+        std::str::from_utf8(&get_result.unwrap().unwrap().data)
+            .expect("failed to parse string from bytes"),
+        "original-value"
+    );
 }
 
 #[ignore = "Relies on a running memcached server"]

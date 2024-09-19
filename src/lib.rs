@@ -13,9 +13,11 @@ pub use self::error::Error;
 
 mod parser;
 use self::parser::{
-    parse_ascii_metadump_response, parse_ascii_response, parse_ascii_stats_response, Response,
+    parse_ascii_metadump_response, parse_ascii_response, parse_ascii_stats_response,
 };
-pub use self::parser::{ErrorKind, KeyMetadata, MetadumpResponse, StatsResponse, Status, Value};
+pub use self::parser::{
+    ErrorKind, KeyMetadata, MetadumpResponse, Response, StatsResponse, Status, Value,
+};
 
 mod value_serializer;
 pub use self::value_serializer::AsMemcachedValue;
@@ -329,6 +331,50 @@ impl Client {
             Response::Status(s) => Err(s.into()),
             _ => Err(Status::Error(ErrorKind::Protocol(None)).into()),
         }
+    }
+
+    /// Attempts to add multiple keys and values through pipelined commands.
+    ///
+    /// If `ttl` or `flags` are not specified, they will default to 0. The same values for `ttl` and `flags` will be applied to each key.
+    /// Returns a result with a HashMap of keys mapped to the result of the set operation, or an error.
+    pub async fn add_multi<'a, K, V>(
+        &mut self,
+        kv: &'a [(K, V)],
+        ttl: Option<i64>,
+        flags: Option<u32>,
+    ) -> Result<FxHashMap<&'a K, Result<Response, Error>>, Error>
+    where
+        K: AsRef<[u8]> + Eq + std::hash::Hash + std::fmt::Debug,
+        V: AsMemcachedValue,
+    {
+        for (key, value) in kv {
+            let kr = key.as_ref();
+            let vr = value.as_bytes();
+
+            self.conn.write_all(b"add ").await?;
+            self.conn.write_all(kr).await?;
+
+            let flags = flags.unwrap_or(0).to_string();
+            self.conn.write_all(b" ").await?;
+            self.conn.write_all(flags.as_ref()).await?;
+
+            let ttl = ttl.unwrap_or(0).to_string();
+            self.conn.write_all(b" ").await?;
+            self.conn.write_all(ttl.as_ref()).await?;
+
+            let vlen = vr.len().to_string();
+            self.conn.write_all(b" ").await?;
+            self.conn.write_all(vlen.as_ref()).await?;
+            self.conn.write_all(b"\r\n").await?;
+
+            self.conn.write_all(vr.as_ref()).await?;
+            self.conn.write_all(b"\r\n").await?;
+        }
+        self.conn.flush().await?;
+
+        let results = self.map_set_multi_responses(kv).await?;
+
+        Ok(results)
     }
 
     /// Delete a key but don't wait for a reply.
