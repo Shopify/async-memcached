@@ -1,37 +1,8 @@
-use rand::rngs::StdRng;
-use rand::seq::SliceRandom;
-use rand::SeedableRng;
-
 use async_memcached::Client;
 use criterion::{criterion_group, criterion_main, Criterion};
-use std::sync::LazyLock;
 use tokio::runtime::Runtime;
 
-const PAYLOAD_SIZES: [(&str, usize, usize); 6] = [
-    ("p100", 1000 * 1024, 1), // Memcached's ~default maximum payload size
-    ("p99", 300 * 1024, 4),   // 300 KB
-    ("p95", 100 * 1024, 5),   // 100 KB
-    ("p90", 40 * 1024, 15),   // 40 KB
-    ("p75", 4 * 1024, 25),    // 4 KB
-    ("p50", 128, 50),         // 128 bytes
-];
-
-static RANDOMIZED_KEY_VALUE_SEED: LazyLock<Vec<(String, usize)>> = LazyLock::new(|| {
-    let mut pairs = Vec::new();
-
-    for (percentile, payload_size, count) in PAYLOAD_SIZES.iter() {
-        for i in 0..*count {
-            let key = format!("{}-key-{}", percentile, i);
-            pairs.push((key, *payload_size));
-        }
-    }
-
-    // Use a seeded RNG for consistent shuffling across runs
-    let mut rng = StdRng::seed_from_u64(1337);
-    pairs.shuffle(&mut rng);
-
-    pairs
-});
+const LARGE_PAYLOAD_SIZE: usize = 1000 * 1024; // Memcached's ~default maximum payload size
 
 async fn setup_client() -> Client {
     Client::new("tcp://127.0.0.1:11211")
@@ -39,8 +10,7 @@ async fn setup_client() -> Client {
         .expect("failed to create client")
 }
 
-// Single set benchmarks
-fn bench_set_with_strings(c: &mut Criterion) {
+fn bench_get(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
 
     rt.block_on(async {
@@ -269,6 +239,18 @@ fn bench_set_multi_loop_with_strings(c: &mut Criterion) {
 
 fn bench_set_multi_loop_with_consistent_requests(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
+    let large_payload = "a".repeat(LARGE_PAYLOAD_SIZE);
+    let keys = &["large_foo1", "large_foo2", "large_foo3"];
+
+    rt.block_on(async {
+        let mut client = setup_client().await;
+        for key in keys {
+            client
+                .set(key, large_payload.as_str(), None, None)
+                .await
+                .unwrap();
+        }
+    });
 
     c.bench_function("set_multi_loop_with_consistent_requests", |b| {
         b.to_async(&rt).iter_custom(|iters| async move {
