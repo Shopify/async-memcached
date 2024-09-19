@@ -336,7 +336,7 @@ impl Client {
     /// Attempts to add multiple keys and values through pipelined commands.
     ///
     /// If `ttl` or `flags` are not specified, they will default to 0. The same values for `ttl` and `flags` will be applied to each key.
-    /// Returns a result with a HashMap of keys mapped to the result of the set operation, or an error.
+    /// Returns a result with a HashMap of keys mapped to the result of the add operation, or an error.
     pub async fn add_multi<'a, K, V>(
         &mut self,
         kv: &'a [(K, V)],

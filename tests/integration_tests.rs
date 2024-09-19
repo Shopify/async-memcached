@@ -1,4 +1,4 @@
-use async_memcached::{Client, Error, Status};
+use async_memcached::{Client, Error, Response, Status};
 use rand::seq::IteratorRandom;
 use serial_test::{parallel, serial};
 
@@ -104,9 +104,7 @@ async fn test_add_with_a_key_that_already_exists() {
 
     let add_result = client.add(key, "value", None, None).await;
 
-    println!("add_result: {:?}", add_result);
-
-    assert!(add_result.is_err());
+    assert_eq!(add_result, Err(Error::Protocol(Status::NotStored)));
 }
 
 #[ignore = "Relies on a running memcached server"]
@@ -157,17 +155,28 @@ async fn test_add_multi_with_a_key_that_already_exists() {
 
     let results = add_response.expect("expected Ok(HashMap<_>)");
 
-    assert!(results.contains_key(&preset_key));
+    for key in &keys {
+        assert!(results.contains_key(key));
+    }
 
     // the preset key should have an error associated with it in the HashMap of results
     assert!(matches!(
         results[&preset_key],
         Err(Error::Protocol(Status::NotStored))
     ));
+    assert!(matches!(
+        results[&keys[1]].as_ref().expect("expected Response"),
+        Response::Status(Status::Stored)
+    ));
+    assert!(matches!(
+        results[&keys[2]].as_ref().expect("expected Response"),
+        Response::Status(Status::Stored)
+    ));
 
     let get_result = client.get(preset_key).await;
 
-    // the get result for the preset key should be the original value that it was set with, not the new value from the add_multi call
+    // the get result for the preset key should be the original value that it was set with
+    // not the new value from the add_multi call
     assert_eq!(
         std::str::from_utf8(&get_result.unwrap().unwrap().data)
             .expect("failed to parse string from bytes"),
