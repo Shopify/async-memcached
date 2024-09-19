@@ -44,3 +44,7 @@ path = "examples/tcp.rs"
 [[bench]]
 name = "bench"
 harness = false
+
+[[bench]]
+name = "multi_op_bench"
+harness = false
