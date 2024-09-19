@@ -229,7 +229,7 @@ async fn test_set_fails_with_value_too_large() {
 #[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
-async fn test_get_many() {
+async fn test_get_multi() {
     let keys = vec!["mg-key1", "mg-key2", "mg-key3"];
     let values = vec!["value1", "value2", "value3"];
 
@@ -240,7 +240,7 @@ async fn test_get_many() {
         assert!(result.is_ok(), "failed to set {}, {:?}", key, result);
     }
 
-    let result = client.get_many(&keys).await;
+    let result = client.get_multi(&keys).await;
 
     assert!(
         result.is_ok(),
@@ -254,7 +254,7 @@ async fn test_get_many() {
 #[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
-async fn test_get_many_with_nonexistent_key() {
+async fn test_get_multi_with_nonexistent_key() {
     let mut keys = vec!["mgne-key1", "mgne-key2", "mgne-key3"];
     let values = vec!["value1", "value2", "value3"];
 
@@ -263,7 +263,7 @@ async fn test_get_many_with_nonexistent_key() {
     let mut client = setup_client(&keys).await;
 
     for (key, value) in keys.iter().zip(values.iter()) {
-        let set_result = client.set(*key, *value, None, None).await;
+        let set_result = client.set(key, *value, None, None).await;
         assert!(
             set_result.is_ok(),
             "failed to set {}, {:?}",
@@ -272,16 +272,44 @@ async fn test_get_many_with_nonexistent_key() {
         );
     }
 
-    keys.push("thisisakeythatisntset");
+    let unset_key = "thisisakeythatisnotset";
 
-    let results = client.get_many(keys.clone()).await.unwrap();
+    keys.push(unset_key);
+
+    let results = client.get_multi(&keys).await.unwrap();
 
     assert_eq!(original_keys_length, results.len());
 
     for result in results {
-        let key_str = std::str::from_utf8(&result.key).unwrap();
-        assert!(keys.clone().contains(&key_str));
+        let key_str = std::str::from_utf8(&result.key)
+            .expect("should have been able to parse Value.key as utf8");
+        assert!(&keys.contains(&key_str));
     }
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+async fn test_get_many_aliases_get_multi_properly() {
+    let keys = vec!["mg2-key1", "mg2-key2", "mg2-key3"];
+    let values = vec!["value1", "value2", "value3"];
+
+    let mut client = setup_client(&keys).await;
+
+    for (key, value) in keys.iter().zip(values.iter()) {
+        let result = client.set(*key, *value, None, None).await;
+        assert!(result.is_ok(), "failed to set {}, {:?}", key, result);
+    }
+
+    #[allow(deprecated)] // specifically testing deprecated method
+    let result = client.get_many(&keys).await;
+
+    assert!(
+        result.is_ok(),
+        "failed to get many {:?}, {:?}",
+        keys,
+        result
+    );
+    assert_eq!(result.unwrap().len(), keys.len());
 }
 
 #[ignore = "Relies on a running memcached server"]

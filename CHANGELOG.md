@@ -12,13 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Implemented `set_multi` method.
-- Added `flush_all` method to the ASCII protocol
-- Added `delete_multi_no_reply` method to the ASCII protocol
+- Added `set_multi` method to the ASCII protocol.
+- Added `flush_all` method to the ASCII protocol.
+- Added `delete_multi_no_reply` method to the ASCII protocol.
 
 ### Changed
 
-- Outlined the process of releasing a new crate version in README.md
+- Changed the name of `get_many`.  This method has been renamed to `get_multi`.  `get_many` will persist as an alias, but it is now deprecated and will be removed in a future version.
+- Instances of `std::collections::HashMap` have been changed to `fxhash::FxHashMap` to improve performance.
+- Outlined the process of releasing a new crate version in `README.md`.
 
 ## [0.3.1] - 2024-09-09
 

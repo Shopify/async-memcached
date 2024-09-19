@@ -1,8 +1,8 @@
 //! A Tokio-based memcached client.
 #![deny(warnings, missing_docs)]
-use std::collections::HashMap;
 
 use bytes::BytesMut;
+use fxhash::FxHashMap;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 
 mod connection;
@@ -101,12 +101,12 @@ impl Client {
     pub(crate) async fn map_set_multi_responses<'a, K, V>(
         &mut self,
         kv: &'a [(K, V)],
-    ) -> Result<HashMap<&'a K, Result<Response, Error>>, Error>
+    ) -> Result<FxHashMap<&'a K, Result<Response, Error>>, Error>
     where
         K: AsRef<[u8]> + Eq + std::hash::Hash,
         V: AsMemcachedValue,
     {
-        let mut results = HashMap::with_capacity(kv.len());
+        let mut results = FxHashMap::with_capacity_and_hasher(kv.len(), Default::default());
 
         for (key, _) in kv {
             let result = match self.drive_receive(parse_ascii_response).await {
@@ -163,8 +163,7 @@ impl Client {
     /// describes the metadata and data of the key.
     ///
     /// Otherwise, [`Error`] is returned.
-    /// This will eventually be deprecated in favor of `get_multi`
-    pub async fn get_many<I, K>(&mut self, keys: I) -> Result<Vec<Value>, Error>
+    pub async fn get_multi<I, K>(&mut self, keys: I) -> Result<Vec<Value>, Error>
     where
         I: IntoIterator<Item = K>,
         K: AsRef<[u8]>,
@@ -182,6 +181,21 @@ impl Client {
             Response::Data(d) => d.ok_or(Status::NotFound.into()),
             _ => Err(Status::Error(ErrorKind::Protocol(None)).into()),
         }
+    }
+
+    /// Gets the given keys.
+    ///
+    /// Deprecated: This is now an alias for `get_multi`, and  will be removed in the future.
+    #[deprecated(
+        since = "0.4.0",
+        note = "This is now an alias for `get_multi`, and will be removed in the future."
+    )]
+    pub async fn get_many<I, K>(&mut self, keys: I) -> Result<Vec<Value>, Error>
+    where
+        I: IntoIterator<Item = K>,
+        K: AsRef<[u8]>,
+    {
+        self.get_multi(keys).await
     }
 
     /// Sets the given key.
@@ -239,7 +253,7 @@ impl Client {
         kv: &'a [(K, V)],
         ttl: Option<i64>,
         flags: Option<u32>,
-    ) -> Result<HashMap<&'a K, Result<Response, Error>>, Error>
+    ) -> Result<FxHashMap<&'a K, Result<Response, Error>>, Error>
     where
         K: AsRef<[u8]> + Eq + std::hash::Hash + std::fmt::Debug,
         V: AsMemcachedValue,
@@ -521,8 +535,8 @@ impl Client {
     /// The statistics that may be returned are detailed in the protocol specification for
     /// memcached, but all values returned by this method are returned as strings and are not
     /// further interpreted or validated for conformity.
-    pub async fn stats(&mut self) -> Result<HashMap<String, String>, Error> {
-        let mut entries = HashMap::new();
+    pub async fn stats(&mut self) -> Result<FxHashMap<String, String>, Error> {
+        let mut entries = FxHashMap::default();
 
         self.conn.write_all(b"stats\r\n").await?;
         self.conn.flush().await?;
