@@ -263,7 +263,7 @@ async fn test_get_multi_with_nonexistent_key() {
     let mut client = setup_client(&keys).await;
 
     for (key, value) in keys.iter().zip(values.iter()) {
-        let set_result = client.set(*key, *value, None, None).await;
+        let set_result = client.set(key, *value, None, None).await;
         assert!(
             set_result.is_ok(),
             "failed to set {}, {:?}",
@@ -280,15 +280,10 @@ async fn test_get_multi_with_nonexistent_key() {
 
     assert_eq!(original_keys_length, results.len());
 
-    // Hashmap should only contain keys that have a cache hit
-    assert!(!results.contains_key(unset_key.as_bytes()));
-
     for result in results {
-        if let Some(value) = result.1.expect("should have unwrapped to a Value") {
-            let key_str = std::str::from_utf8(&value.key)
-                .expect("should have been able to parse key as utf8");
-            assert!(keys.clone().contains(&key_str));
-        }
+        let key_str = std::str::from_utf8(&result.key)
+            .expect("should have been able to parse Value.key as utf8");
+        assert!(&keys.contains(&key_str));
     }
 }
 
@@ -305,7 +300,7 @@ async fn test_get_many_aliases_get_multi_properly() {
         assert!(result.is_ok(), "failed to set {}, {:?}", key, result);
     }
 
-    #[allow(deprecated)] // specifically testing deprecated functionality
+    #[allow(deprecated)] // specifically testing deprecated method
     let result = client.get_many(&keys).await;
 
     assert!(
