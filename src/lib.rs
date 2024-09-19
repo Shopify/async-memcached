@@ -13,9 +13,11 @@ pub use self::error::Error;
 
 mod parser;
 use self::parser::{
-    parse_ascii_metadump_response, parse_ascii_response, parse_ascii_stats_response, Response,
+    parse_ascii_metadump_response, parse_ascii_response, parse_ascii_stats_response,
 };
-pub use self::parser::{ErrorKind, KeyMetadata, MetadumpResponse, StatsResponse, Status, Value};
+pub use self::parser::{
+    ErrorKind, KeyMetadata, MetadumpResponse, Response, StatsResponse, Status, Value,
+};
 
 mod value_serializer;
 pub use self::value_serializer::AsMemcachedValue;
