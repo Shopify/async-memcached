@@ -105,7 +105,7 @@ mod tests {
             assert_eq!(result, Ok(None));
         }
 
-        let result = rt.block_on(async { clean_client.set_multi(kv, None, None).await });
+        let result = rt.block_on(async { clean_client.set_multi(&kv, None, None).await });
 
         assert!(result.is_ok());
     }
@@ -138,7 +138,7 @@ mod tests {
 
         let _ = toxic_proxy.with_down(|| {
             rt.block_on(async {
-                let result = toxic_client.set_multi(kv, None, None).await;
+                let result = toxic_client.set_multi(&kv, None, None).await;
                 assert_eq!(
                     result,
                     Err(async_memcached::Error::Io(
@@ -199,7 +199,7 @@ mod tests {
                 rt.block_on(async {
                     let kv: Vec<(&str, &str)> =
                         keys.clone().into_iter().zip(values.clone()).collect();
-                    let result = toxic_client.set_multi(kv.clone(), None, None).await;
+                    let result = toxic_client.set_multi(&kv, None, None).await;
 
                     assert_eq!(
                         result,
@@ -280,7 +280,7 @@ mod tests {
                     let kv: Vec<(&str, &str)> =
                         keys.clone().into_iter().zip(values.clone()).collect();
 
-                    let set_result = toxic_client.set_multi(kv.clone(), None, None).await;
+                    let set_result = toxic_client.set_multi(&kv, None, None).await;
 
                     assert_eq!(
                         set_result,
