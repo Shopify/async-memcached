@@ -18,7 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Changed the function signature of `get_many`.  This method has been renamed to `get_multi` and now returns `Result<FxHashMap<Vec<u8>, Result<Option<Value>, Error>>, Error>` instead of `Result<Vec<Value>, Error>`.  The `get_many` alias, but it is now deprecated and will be removed in a future version.
+- Changed the name of `get_many`.  This method has been renamed to `get_multi`.  `get_many` will persist as an alias, but it is now deprecated and will be removed in a future version.
+- Instances of `std::collections::HashMap` have been changed to `fxhash::FxHashMap` to improve performance.
 - Outlined the process of releasing a new crate version in `README.md`.
 
 ## [0.3.1] - 2024-09-09
