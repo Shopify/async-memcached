@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+## [0.4.0] - 2024-09-20
+
 ### Added
 
 - Added `set_multi` method to the ASCII protocol.
@@ -19,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Changed the name of `get_many`.  This method has been renamed to `get_multi`.  `get_many` will persist as an alias, but it is now deprecated and will be removed in a future version.
+- Changed the name of `get_many`.  This method has been renamed to `get_multi`.  `get_many` will persist as an alias, but it is now deprecated and will be removed in a future release.
 - Instances of `std::collections::HashMap` have been changed to `fxhash::FxHashMap` to improve performance.
 - Outlined the process of releasing a new crate version in `README.md`.
 
