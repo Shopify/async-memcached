@@ -17,6 +17,12 @@ impl private::AsMemcachedValue for &[u8] {
     }
 }
 
+impl private::AsMemcachedValue for bytes::Bytes {
+    fn as_bytes(&self) -> std::borrow::Cow<'_, [u8]> {
+        std::borrow::Cow::Borrowed(self.as_ref())
+    }
+}
+
 impl private::AsMemcachedValue for &str {
     fn as_bytes(&self) -> std::borrow::Cow<'_, [u8]> {
         std::borrow::Cow::Borrowed(str::as_bytes(self))
