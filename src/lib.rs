@@ -365,8 +365,9 @@ impl Client {
     }
 
     /// Delete multiple keys
-    pub async fn delete_multi_no_reply<K>(&mut self, keys: &[K]) -> Result<(), Error>
+    pub async fn delete_multi_no_reply<I, K>(&mut self, keys: I) -> Result<(), Error>
     where
+        I: IntoIterator<Item = K>,
         K: AsRef<[u8]>,
     {
         for key in keys {
