@@ -101,7 +101,7 @@ impl Client {
     pub(crate) async fn map_set_multi_responses<'a, K, V>(
         &mut self,
         kv: &'a [(K, V)],
-    ) -> Result<FxHashMap<&'a K, Result<Response, Error>>, Error>
+    ) -> Result<FxHashMap<&'a K, Result<(), Error>>, Error>
     where
         K: AsRef<[u8]> + Eq + std::hash::Hash,
         V: AsMemcachedValue,
@@ -110,7 +110,7 @@ impl Client {
 
         for (key, _) in kv {
             let result = match self.drive_receive(parse_ascii_response).await {
-                Ok(Response::Status(Status::Stored)) => Ok(Response::Status(Status::Stored)),
+                Ok(Response::Status(Status::Stored)) => Ok(()),
                 Ok(Response::Status(s)) => Err(s.into()),
                 Ok(_) => Err(Status::Error(ErrorKind::Protocol(None)).into()),
                 Err(e) => return Err(e),
@@ -253,7 +253,7 @@ impl Client {
         kv: &'a [(K, V)],
         ttl: Option<i64>,
         flags: Option<u32>,
-    ) -> Result<FxHashMap<&'a K, Result<Response, Error>>, Error>
+    ) -> Result<FxHashMap<&'a K, Result<(), Error>>, Error>
     where
         K: AsRef<[u8]> + Eq + std::hash::Hash + std::fmt::Debug,
         V: AsMemcachedValue,
@@ -329,6 +329,50 @@ impl Client {
             Response::Status(s) => Err(s.into()),
             _ => Err(Status::Error(ErrorKind::Protocol(None)).into()),
         }
+    }
+
+    /// Attempts to add multiple keys and values through pipelined commands.
+    ///
+    /// If `ttl` or `flags` are not specified, they will default to 0. The same values for `ttl` and `flags` will be applied to each key.
+    /// Returns a result with a HashMap of keys mapped to the result of the add operation, or an error.
+    pub async fn add_multi<'a, K, V>(
+        &mut self,
+        kv: &'a [(K, V)],
+        ttl: Option<i64>,
+        flags: Option<u32>,
+    ) -> Result<FxHashMap<&'a K, Result<(), Error>>, Error>
+    where
+        K: AsRef<[u8]> + Eq + std::hash::Hash + std::fmt::Debug,
+        V: AsMemcachedValue,
+    {
+        for (key, value) in kv {
+            let kr = key.as_ref();
+            let vr = value.as_bytes();
+
+            self.conn.write_all(b"add ").await?;
+            self.conn.write_all(kr).await?;
+
+            let flags = flags.unwrap_or(0).to_string();
+            self.conn.write_all(b" ").await?;
+            self.conn.write_all(flags.as_ref()).await?;
+
+            let ttl = ttl.unwrap_or(0).to_string();
+            self.conn.write_all(b" ").await?;
+            self.conn.write_all(ttl.as_ref()).await?;
+
+            let vlen = vr.len().to_string();
+            self.conn.write_all(b" ").await?;
+            self.conn.write_all(vlen.as_ref()).await?;
+            self.conn.write_all(b"\r\n").await?;
+
+            self.conn.write_all(vr.as_ref()).await?;
+            self.conn.write_all(b"\r\n").await?;
+        }
+        self.conn.flush().await?;
+
+        let results = self.map_set_multi_responses(kv).await?;
+
+        Ok(results)
     }
 
     /// Delete a key but don't wait for a reply.

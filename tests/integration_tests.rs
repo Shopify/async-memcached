@@ -110,6 +110,78 @@ async fn test_add_with_a_key_that_already_exists() {
 #[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
+async fn test_add_multi() {
+    let keys = vec!["am-key1", "am-key2", "afm-key3"];
+    let values = vec!["value1", "value2", "value3"];
+    let kv: Vec<(&str, &str)> = keys.clone().into_iter().zip(values.into_iter()).collect();
+
+    let mut client = setup_client(&keys).await;
+
+    let result = client.add_multi(&kv, None, None).await;
+
+    assert!(
+        result.is_ok(),
+        "failed to add_multi {:?}, {:?}",
+        &keys,
+        result
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_add_multi_with_a_key_that_already_exists() {
+    let unset_key_0 = "am2-key1";
+    let preset_key_1 = "am2-key-already-set";
+    let unset_key_2 = "am2-key3";
+    let keys = vec![unset_key_0, preset_key_1, unset_key_2];
+    let values = vec!["original-value", "new_value", "value3"];
+    let kv: Vec<(&str, &str)> = keys.clone().into_iter().zip(values.into_iter()).collect();
+
+    let mut client = setup_client(&keys).await;
+
+    client
+        .set(&preset_key_1, "original-value", None, None)
+        .await
+        .expect("failed to set");
+
+    let add_response = client.add_multi(&kv, None, None).await;
+
+    assert!(
+        &add_response.is_ok(),
+        "failed to add_multi {:?}, {:?}",
+        &keys,
+        &add_response
+    );
+
+    let results = add_response.expect("expected Ok(HashMap<_>)");
+
+    for key in &keys {
+        assert!(results.contains_key(key));
+    }
+
+    // the preset key should have an error associated with it in the HashMap of results, the unset keys should not
+    assert!(results[&unset_key_0].is_ok());
+    assert!(matches!(
+        results[&preset_key_1],
+        Err(Error::Protocol(Status::NotStored))
+    ));
+    assert!(results[&unset_key_2].is_ok());
+
+    let get_result = client.get(preset_key_1).await;
+
+    // the get result for the preset key should be the original value that it was set with
+    // not the new value from the add_multi call
+    assert_eq!(
+        std::str::from_utf8(&get_result.unwrap().unwrap().data)
+            .expect("failed to parse string from bytes"),
+        "original-value"
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
 async fn test_set_with_string_value() {
     let key = "set-key-with-str-value";
 
