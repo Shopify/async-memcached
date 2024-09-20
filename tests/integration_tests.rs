@@ -131,16 +131,17 @@ async fn test_add_multi() {
 #[tokio::test]
 #[parallel]
 async fn test_add_multi_with_a_key_that_already_exists() {
-    let keys = vec!["am-key-already-set", "am2-key2", "am2-key3"];
-    let values = vec!["new-value", "value2", "value3"];
+    let unset_key_0 = "am2-key1";
+    let preset_key_1 = "am2-key-already-set";
+    let unset_key_2 = "am2-key3";
+    let keys = vec![unset_key_0, preset_key_1, unset_key_2];
+    let values = vec!["original-value", "new_value", "value3"];
     let kv: Vec<(&str, &str)> = keys.clone().into_iter().zip(values.into_iter()).collect();
 
     let mut client = setup_client(&keys).await;
 
-    let preset_key = "am-key-already-set";
-
     client
-        .set(&preset_key, "original-value", None, None)
+        .set(&preset_key_1, "original-value", None, None)
         .await
         .expect("failed to set");
 
@@ -159,15 +160,15 @@ async fn test_add_multi_with_a_key_that_already_exists() {
         assert!(results.contains_key(key));
     }
 
-    // the preset key should have an error associated with it in the HashMap of results
+    // the preset key should have an error associated with it in the HashMap of results, the unset keys should not
+    assert!(results[&unset_key_0].is_ok());
     assert!(matches!(
-        results[&preset_key],
+        results[&preset_key_1],
         Err(Error::Protocol(Status::NotStored))
     ));
-    assert!(results[&keys[1]].is_ok());
-    assert!(results[&keys[2]].is_ok());
+    assert!(results[&unset_key_2].is_ok());
 
-    let get_result = client.get(preset_key).await;
+    let get_result = client.get(preset_key_1).await;
 
     // the get result for the preset key should be the original value that it was set with
     // not the new value from the add_multi call
