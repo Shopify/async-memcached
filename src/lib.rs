@@ -13,11 +13,9 @@ pub use self::error::Error;
 
 mod parser;
 use self::parser::{
-    parse_ascii_metadump_response, parse_ascii_response, parse_ascii_stats_response,
+    parse_ascii_metadump_response, parse_ascii_response, parse_ascii_stats_response, Response,
 };
-pub use self::parser::{
-    ErrorKind, KeyMetadata, MetadumpResponse, Response, StatsResponse, Status, Value,
-};
+pub use self::parser::{ErrorKind, KeyMetadata, MetadumpResponse, StatsResponse, Status, Value};
 
 mod value_serializer;
 pub use self::value_serializer::AsMemcachedValue;
@@ -103,7 +101,7 @@ impl Client {
     pub(crate) async fn map_set_multi_responses<'a, K, V>(
         &mut self,
         kv: &'a [(K, V)],
-    ) -> Result<FxHashMap<&'a K, Result<Response, Error>>, Error>
+    ) -> Result<FxHashMap<&'a K, Result<(), Error>>, Error>
     where
         K: AsRef<[u8]> + Eq + std::hash::Hash,
         V: AsMemcachedValue,
@@ -112,7 +110,7 @@ impl Client {
 
         for (key, _) in kv {
             let result = match self.drive_receive(parse_ascii_response).await {
-                Ok(Response::Status(Status::Stored)) => Ok(Response::Status(Status::Stored)),
+                Ok(Response::Status(Status::Stored)) => Ok(()),
                 Ok(Response::Status(s)) => Err(s.into()),
                 Ok(_) => Err(Status::Error(ErrorKind::Protocol(None)).into()),
                 Err(e) => return Err(e),
@@ -255,7 +253,7 @@ impl Client {
         kv: &'a [(K, V)],
         ttl: Option<i64>,
         flags: Option<u32>,
-    ) -> Result<FxHashMap<&'a K, Result<Response, Error>>, Error>
+    ) -> Result<FxHashMap<&'a K, Result<(), Error>>, Error>
     where
         K: AsRef<[u8]> + Eq + std::hash::Hash + std::fmt::Debug,
         V: AsMemcachedValue,
@@ -342,7 +340,7 @@ impl Client {
         kv: &'a [(K, V)],
         ttl: Option<i64>,
         flags: Option<u32>,
-    ) -> Result<FxHashMap<&'a K, Result<Response, Error>>, Error>
+    ) -> Result<FxHashMap<&'a K, Result<(), Error>>, Error>
     where
         K: AsRef<[u8]> + Eq + std::hash::Hash + std::fmt::Debug,
         V: AsMemcachedValue,

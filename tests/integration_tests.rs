@@ -1,4 +1,4 @@
-use async_memcached::{Client, Error, Response, Status};
+use async_memcached::{Client, Error, Status};
 use rand::seq::IteratorRandom;
 use serial_test::{parallel, serial};
 
@@ -164,14 +164,8 @@ async fn test_add_multi_with_a_key_that_already_exists() {
         results[&preset_key],
         Err(Error::Protocol(Status::NotStored))
     ));
-    assert!(matches!(
-        results[&keys[1]].as_ref().expect("expected Response"),
-        Response::Status(Status::Stored)
-    ));
-    assert!(matches!(
-        results[&keys[2]].as_ref().expect("expected Response"),
-        Response::Status(Status::Stored)
-    ));
+    assert!(results[&keys[1]].is_ok());
+    assert!(results[&keys[2]].is_ok());
 
     let get_result = client.get(preset_key).await;
 
