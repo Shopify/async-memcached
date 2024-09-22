@@ -900,7 +900,7 @@ async fn test_gat_with_cached_key() {
 
     assert!(
         get_result.is_ok(),
-        "failed to get {}, {:?}",
+        "failed to gat {}, {:?}",
         key,
         get_result
     );
