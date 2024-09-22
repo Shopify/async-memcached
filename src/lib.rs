@@ -615,6 +615,44 @@ impl Client {
             )))))
         }
     }
+
+    /// Get data with cas and update the expiration time of an existing data by key
+    ///
+    /// If the key is found, `Some(Value)` is returned, describing the metadata and data of the key.
+    ///
+    /// Otherwise, [`Error`] is returned.
+    pub async fn gats<K>(&mut self, exptime: i32, key: K) -> Result<Option<Value>, Error>
+    where
+        K: AsRef<[u8]>,
+    {
+        self.conn
+            .write_all(
+                &[
+                    b"gats ",
+                    format!("{exptime} ").as_bytes(),
+                    key.as_ref(),
+                    b"\r\n",
+                ]
+                .concat(),
+            )
+            .await?;
+        self.conn.flush().await?;
+
+        match self.get_read_write_response().await? {
+            Response::Status(Status::NotFound) => Ok(None),
+            Response::Status(s) => Err(s.into()),
+            Response::Data(d) => d
+                .map(|mut items| {
+                    if items.len() != 1 {
+                        Err(Status::Error(ErrorKind::Protocol(None)).into())
+                    } else {
+                        Ok(items.remove(0))
+                    }
+                })
+                .transpose(),
+            _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),
+        }
+    }
 }
 
 /// Asynchronous iterator for metadump operations.

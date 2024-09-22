@@ -866,3 +866,37 @@ async fn test_flush_all() {
     let result = client.get(key).await;
     assert!(matches!(result, Ok(None)));
 }
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_gats_with_nonexistent_key() {
+    let key = "nonexistent-key";
+
+    let mut client = setup_client(&[key]).await;
+
+    let get_result = client.gats(0, key).await;
+
+    assert!(matches!(get_result, Ok(None)), "key should not be found");
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_gats_with_cached_key() {
+    let key = "key-that-exists";
+    let value = "value-that-exists";
+
+    let mut client = setup_client(&[key]).await;
+
+    let _ = client.set(key, value, None, None).await;
+
+    let get_result = client.gats(0, key).await;
+
+    assert!(
+        get_result.is_ok(),
+        "failed to gats {}, {:?}",
+        key,
+        get_result
+    );
+}
