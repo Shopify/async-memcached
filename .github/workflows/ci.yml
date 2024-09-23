@@ -35,7 +35,7 @@ jobs:
           - 11211:11211
     steps:
       - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
-      - name: Run parser and connectiontests
+      - name: Run parser and connection tests
         run: cargo test --all-features
       - name: Run integration tests
         run: cargo test -- --test-threads=1 --ignored
