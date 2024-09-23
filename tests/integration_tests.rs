@@ -66,7 +66,7 @@ async fn test_get_with_nonexistent_key() {
 #[tokio::test]
 #[parallel]
 async fn test_add_with_string_value() {
-    let key = "async-memcache-test-key-add";
+    let key = "async-memcache-test-key-add-string";
 
     let mut client = setup_client(&[key]).await;
 
@@ -93,7 +93,7 @@ async fn test_add_with_u64_value() {
 #[tokio::test]
 #[parallel]
 async fn test_add_with_a_key_that_already_exists() {
-    let key = "async-memcache-test-key-add";
+    let key = "async-memcache-test-key-add-exists";
 
     let mut client = setup_client(&[key]).await;
 
@@ -361,8 +361,9 @@ async fn test_get_multi_with_nonexistent_key() {
 
 #[ignore = "Relies on a running memcached server"]
 #[tokio::test]
+#[parallel]
 async fn test_get_many_aliases_get_multi_properly() {
-    let keys = vec!["mg2-key1", "mg2-key2", "mg2-key3"];
+    let keys = vec!["get-many-key1", "get-many-key2", "get-many-key3"];
     let values = vec!["value1", "value2", "value3"];
 
     let mut client = setup_client(&keys).await;
