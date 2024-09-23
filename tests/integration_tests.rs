@@ -870,7 +870,7 @@ async fn test_flush_all() {
 #[tokio::test]
 #[parallel]
 async fn test_gat_with_nonexistent_key() {
-    let key = "nonexistent-key";
+    let key = "test_gat_with_nonexistent_key";
 
     let mut client = setup_client(&[key]).await;
 
@@ -883,7 +883,7 @@ async fn test_gat_with_nonexistent_key() {
 #[tokio::test]
 #[parallel]
 async fn test_gat_with_cached_key() {
-    let key = "key-that-exists";
+    let key = "test_gat_with_cached_key";
     let value = "value-that-exists";
 
     let mut client = setup_client(&[key]).await;
