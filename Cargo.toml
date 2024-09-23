@@ -29,6 +29,7 @@ tokio = { version = "1.26", features = ["full"] }
 rand = "0.8"
 criterion = { version = "0.5.1", features = ["async_tokio"] }
 serial_test = "3.1.1"
+iai-callgrind = "0.13.4"
 
 [features]
 default = []
