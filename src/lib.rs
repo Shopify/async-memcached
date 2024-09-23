@@ -136,9 +136,9 @@ impl Client {
     ///
     /// Otherwise, [`Error`] is returned.
     pub async fn get<K: AsRef<[u8]>>(&mut self, key: K) -> Result<Option<Value>, Error> {
-        self.conn.write_all(b"get ").await?;
-        self.conn.write_all(key.as_ref()).await?;
-        self.conn.write_all(b"\r\n").await?;
+        self.conn
+            .write_all(&[b"get ", key.as_ref(), b"\r\n"].concat())
+            .await?;
         self.conn.flush().await?;
 
         match self.get_read_write_response().await? {
