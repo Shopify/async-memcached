@@ -22,7 +22,6 @@ async fn setup_client(keys: &[&str]) -> Client {
     client
 }
 
-#[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
 async fn test_get_with_cached_key() {
@@ -49,7 +48,6 @@ async fn test_get_with_cached_key() {
     );
 }
 
-#[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
 async fn test_get_with_nonexistent_key() {
@@ -62,7 +60,6 @@ async fn test_get_with_nonexistent_key() {
     assert!(matches!(get_result, Ok(None)), "key should not be found");
 }
 
-#[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
 async fn test_add_with_string_value() {
@@ -75,7 +72,6 @@ async fn test_add_with_string_value() {
     assert!(result.is_ok(), "failed to add {}, {:?}", key, result);
 }
 
-#[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
 async fn test_add_with_u64_value() {
@@ -89,7 +85,6 @@ async fn test_add_with_u64_value() {
     assert!(result.is_ok(), "failed to add {}, {:?}", key, result);
 }
 
-#[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
 async fn test_add_with_a_key_that_already_exists() {
@@ -107,7 +102,6 @@ async fn test_add_with_a_key_that_already_exists() {
     assert_eq!(add_result, Err(Error::Protocol(Status::NotStored)));
 }
 
-#[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
 async fn test_add_multi() {
@@ -127,7 +121,6 @@ async fn test_add_multi() {
     );
 }
 
-#[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
 async fn test_add_multi_with_a_key_that_already_exists() {
@@ -179,7 +172,6 @@ async fn test_add_multi_with_a_key_that_already_exists() {
     );
 }
 
-#[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
 async fn test_set_with_string_value() {
@@ -213,7 +205,6 @@ async fn test_set_with_string_value() {
     );
 }
 
-#[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
 async fn test_set_with_string_ref_value() {
@@ -245,7 +236,6 @@ async fn test_set_with_string_ref_value() {
     );
 }
 
-#[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
 async fn test_set_with_u64_value() {
@@ -273,7 +263,6 @@ async fn test_set_with_u64_value() {
     );
 }
 
-#[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
 async fn test_set_fails_with_value_too_large() {
@@ -298,7 +287,6 @@ async fn test_set_fails_with_value_too_large() {
     assert!(matches!(get_result, Ok(None)));
 }
 
-#[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
 async fn test_get_multi() {
@@ -323,7 +311,6 @@ async fn test_get_multi() {
     assert_eq!(result.unwrap().len(), keys.len());
 }
 
-#[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
 async fn test_get_multi_with_nonexistent_key() {
@@ -359,10 +346,9 @@ async fn test_get_multi_with_nonexistent_key() {
     }
 }
 
-#[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 async fn test_get_many_aliases_get_multi_properly() {
-    let keys = vec!["mg2-key1", "mg2-key2", "mg2-key3"];
+    let keys = vec!["get-many-key1", "get-many-key2", "get-many-key3"];
     let values = vec!["value1", "value2", "value3"];
 
     let mut client = setup_client(&keys).await;
@@ -384,7 +370,6 @@ async fn test_get_many_aliases_get_multi_properly() {
     assert_eq!(result.unwrap().len(), keys.len());
 }
 
-#[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
 async fn test_delete() {
@@ -426,7 +411,6 @@ async fn test_delete() {
     assert!(result.is_ok(), "failed to delete {}, {:?}", key, result);
 }
 
-#[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
 async fn test_delete_no_reply() {
@@ -473,7 +457,6 @@ async fn test_delete_no_reply() {
     );
 }
 
-#[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
 async fn test_delete_multi_no_reply() {
@@ -494,7 +477,6 @@ async fn test_delete_multi_no_reply() {
     );
 }
 
-#[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
 async fn test_set_multi_with_string_values() {
@@ -521,7 +503,6 @@ async fn test_set_multi_with_string_values() {
     ));
 }
 
-#[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
 async fn test_set_multi_with_string_values_that_exceed_max_size() {
@@ -634,7 +615,6 @@ async fn test_set_multi_with_string_values_that_exceed_max_size() {
     }
 }
 
-#[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
 async fn test_set_multi_with_large_string_values() {
@@ -656,7 +636,6 @@ async fn test_set_multi_with_large_string_values() {
     assert!(get_result.is_ok());
 }
 
-#[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
 async fn test_increment_raises_error_when_key_doesnt_exist() {
@@ -671,7 +650,6 @@ async fn test_increment_raises_error_when_key_doesnt_exist() {
     assert!(matches!(result, Err(Error::Protocol(Status::NotFound))));
 }
 
-#[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
 async fn test_increments_existing_key() {
@@ -690,7 +668,6 @@ async fn test_increments_existing_key() {
     assert_eq!(Ok(2), result);
 }
 
-#[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
 async fn test_increment_on_non_numeric_value() {
@@ -714,7 +691,6 @@ async fn test_increment_on_non_numeric_value() {
     ));
 }
 
-#[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
 async fn test_increment_can_overflow() {
@@ -739,7 +715,6 @@ async fn test_increment_can_overflow() {
     assert_eq!(Ok(1), result);
 }
 
-#[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
 async fn test_increments_existing_key_with_no_reply() {
@@ -766,7 +741,6 @@ async fn test_increments_existing_key_with_no_reply() {
     );
 }
 
-#[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
 async fn test_decrement_raises_error_when_key_doesnt_exist() {
@@ -781,7 +755,6 @@ async fn test_decrement_raises_error_when_key_doesnt_exist() {
     assert!(matches!(result, Err(Error::Protocol(Status::NotFound))));
 }
 
-#[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
 async fn test_decrements_existing_key() {
@@ -800,7 +773,6 @@ async fn test_decrements_existing_key() {
     assert_eq!(Ok(9), result);
 }
 
-#[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
 async fn test_decrement_does_not_reduce_value_below_zero() {
@@ -819,7 +791,6 @@ async fn test_decrement_does_not_reduce_value_below_zero() {
     assert_eq!(Ok(0), result);
 }
 
-#[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
 async fn test_decrements_existing_key_with_no_reply() {
@@ -846,7 +817,6 @@ async fn test_decrements_existing_key_with_no_reply() {
     );
 }
 
-#[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[serial]
 async fn test_flush_all() {
