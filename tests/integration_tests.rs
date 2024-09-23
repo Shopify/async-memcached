@@ -896,12 +896,19 @@ async fn test_gat_with_cached_key() {
         set_result
     );
 
-    let get_result = client.gat(0, key).await;
+    let get_result = client.gat(-1, key).await;
 
     assert!(
         get_result.is_ok(),
         "failed to gat {}, {:?}",
         key,
         get_result
+    );
+
+    let expired_result = client.get(key).await;
+
+    assert!(
+        matches!(expired_result, Ok(None)),
+        "the key should be expired"
     );
 }
