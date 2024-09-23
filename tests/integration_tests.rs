@@ -884,19 +884,38 @@ async fn test_gats_with_nonexistent_key() {
 #[tokio::test]
 #[parallel]
 async fn test_gats_with_cached_key() {
-    let key = "key-that-exists";
+    let key = "test_gats_with_cached_key";
     let value = "value-that-exists";
 
     let mut client = setup_client(&[key]).await;
 
-    let _ = client.set(key, value, None, None).await;
+    let set_result = client.set(key, value, None, None).await;
 
-    let get_result = client.gats(0, key).await;
+    assert!(
+        set_result.is_ok(),
+        "failed to set {}, {:?}",
+        key,
+        set_result
+    );
+
+    let get_result = client.gats(-1, key).await;
 
     assert!(
         get_result.is_ok(),
         "failed to gats {}, {:?}",
         key,
         get_result
+    );
+
+    assert!(
+        get_result.unwrap().unwrap().cas.is_some(),
+        "after gats, result should be with cas"
+    );
+
+    let expired_result = client.get(key).await;
+
+    assert!(
+        matches!(expired_result, Ok(None)),
+        "the key should be expired"
     );
 }
