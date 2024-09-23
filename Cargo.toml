@@ -30,6 +30,7 @@ rand = "0.8"
 criterion = { version = "0.5.1", features = ["async_tokio"] }
 serial_test = "3.1.1"
 iai-callgrind = "0.13.4"
+once_cell = "1.19.0"
 
 [features]
 default = []
@@ -43,4 +44,8 @@ path = "examples/tcp.rs"
 
 [[bench]]
 name = "bench"
+harness = false
+
+[[bench]]
+name = "callgrind_bench"
 harness = false
