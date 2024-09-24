@@ -14,7 +14,7 @@ async fn setup_client(keys: &[&str]) -> Client {
 
     for key in keys {
         client
-            .delete_no_reply(key)
+            .delete(key, true)
             .await
             .expect("Failed to delete key");
     }
@@ -422,7 +422,7 @@ async fn test_delete() {
         None => panic!("failed to get {}", key),
     }
 
-    let result = client.delete(key).await;
+    let result = client.delete(key, false).await;
 
     assert!(result.is_ok(), "failed to delete {}, {:?}", key, result);
 }
@@ -464,7 +464,7 @@ async fn test_delete_no_reply() {
         None => panic!("failed to get {}", key),
     }
 
-    let delete_result = client.delete_no_reply(key).await;
+    let delete_result = client.delete(key, true).await;
 
     assert!(
         delete_result.is_ok(),

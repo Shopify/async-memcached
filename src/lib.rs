@@ -375,36 +375,32 @@ impl Client {
         Ok(results)
     }
 
-    /// Delete a key but don't wait for a reply.
-    pub async fn delete_no_reply<K>(&mut self, key: K) -> Result<(), Error>
+    /// Delete a key
+    pub async fn delete<K>(&mut self, key: K, noreply: bool) -> Result<(), Error>
     where
         K: AsRef<[u8]>,
     {
-        let kr = key.as_ref();
+        match noreply {
+            true => {
+                self.conn
+                    .write_all(&[b"delete ", key.as_ref(), b" noreply\r\n"].concat())
+                    .await?;
+                self.conn.flush().await?;
 
-        self.conn
-            .write_all(&[b"delete ", kr, b" noreply\r\n"].concat())
-            .await?;
-        self.conn.flush().await?;
-        Ok(())
-    }
+                Ok(())
+            }
+            false => {
+                self.conn
+                    .write_all(&[b"delete ", key.as_ref(), b"\r\n"].concat())
+                    .await?;
+                self.conn.flush().await?;
 
-    /// Delete a key and wait for a reply
-    pub async fn delete<K>(&mut self, key: K) -> Result<(), Error>
-    where
-        K: AsRef<[u8]>,
-    {
-        let kr = key.as_ref();
-
-        self.conn
-            .write_all(&[b"delete ", kr, b"\r\n"].concat())
-            .await?;
-        self.conn.flush().await?;
-
-        match self.get_read_write_response().await? {
-            Response::Status(Status::Deleted) => Ok(()),
-            Response::Status(s) => Err(s.into()),
-            _ => Err(Status::Error(ErrorKind::Protocol(None)).into()),
+                match self.get_read_write_response().await? {
+                    Response::Status(Status::Deleted) => Ok(()),
+                    Response::Status(s) => Err(s.into()),
+                    _ => Err(Status::Error(ErrorKind::Protocol(None)).into()),
+                }
+            }
         }
     }
 

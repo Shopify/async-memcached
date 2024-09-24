@@ -41,12 +41,12 @@ async fn main() {
         ),
     }
 
-    match client.delete("foo").await {
+    match client.delete("foo", false).await {
         Ok(()) => println!("deleted 'foo' successfully"),
         Err(status) => println!("got status during 'foo' delete: {:?}", status),
     }
 
-    match client.delete_no_reply("foo").await {
+    match client.delete("foo", true).await {
         Ok(()) => println!("deleted_no_reply 'foo' successfully"),
         Err(status) => println!("got status during 'foo' deleted_no_reply: {:?}", status),
     }
