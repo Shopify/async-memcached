@@ -7,13 +7,13 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use std::sync::LazyLock;
 use tokio::runtime::Runtime;
 
-const PAYLOAD_SIZES: [(&str, usize, usize); 6] = [
-    ("p100", 1000 * 1024, 1), // Memcached's ~default maximum payload size
-    ("p99", 300 * 1024, 4),   // 300 KB
-    ("p95", 100 * 1024, 5),   // 100 KB
-    ("p90", 40 * 1024, 15),   // 40 KB
-    ("p75", 4 * 1024, 25),    // 4 KB
-    ("p50", 128, 50),         // 128 bytes
+const PAYLOAD_SIZES: [(&str, usize, usize); 6] = [  // (percentile, size_in_bytes, count_in_randomized_set)
+    ("p100", 1000 * 1024, 1),                       // Memcached's ~default maximum payload size
+    ("p99", 300 * 1024, 4),                         // 300 KB
+    ("p95", 100 * 1024, 5),                         // 100 KB
+    ("p90", 40 * 1024, 15),                         // 40 KB
+    ("p75", 4 * 1024, 25),                          // 4 KB
+    ("p50", 128, 50),                               // 128 bytes
 ];
 
 static RANDOMIZED_KEY_VALUE_SEED: LazyLock<Vec<(String, usize)>> = LazyLock::new(|| {
