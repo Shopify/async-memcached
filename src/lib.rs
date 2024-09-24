@@ -619,7 +619,7 @@ impl Client {
     /// If the key is found, `Some(Value)` is returned, describing the metadata and data of the key.
     ///
     /// Otherwise, [`Error`] is returned.
-    pub async fn gat<K>(&mut self, exptime: i32, key: K) -> Result<Option<Value>, Error>
+    pub async fn gat<K>(&mut self, key: K, ttl: Option<i64>) -> Result<Option<Value>, Error>
     where
         K: AsRef<[u8]>,
     {
@@ -627,7 +627,8 @@ impl Client {
             .write_all(
                 &[
                     b"gat ",
-                    format!("{exptime} ").as_bytes(),
+                    ttl.unwrap_or(0).to_string().as_bytes(),
+                    b" ",
                     key.as_ref(),
                     b"\r\n",
                 ]
