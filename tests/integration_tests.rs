@@ -866,3 +866,62 @@ async fn test_flush_all() {
     let result = client.get(key).await;
     assert!(matches!(result, Ok(None)));
 }
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_gat_multi_with_nonexistent_key() {
+    let keys = vec![
+        "test_gat_multi_with_nonexistent_key1",
+        "test_gat_multi_with_nonexistent_key2",
+    ];
+
+    let mut client = setup_client(&keys).await;
+
+    let get_result = client.gat_multi(keys, None).await;
+
+    assert!(get_result.is_err(), "keys should not be found");
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_gat_multi_with_existent_key() {
+    let mut keys = vec![
+        "test_gat_multi_with_existent_key1",
+        "test_gat_multi_with_existent_key2",
+    ];
+    let values = vec!["value1", "value2"];
+
+    let original_keys_length = keys.len();
+
+    let mut client = setup_client(&keys).await;
+
+    for (key, value) in keys.iter().zip(values.iter()) {
+        let set_result = client.set(key, *value, None, None).await;
+        assert!(
+            set_result.is_ok(),
+            "failed to set {}, {:?}",
+            key,
+            set_result
+        );
+    }
+
+    let unset_key = "thisisakeythatisnotset";
+
+    keys.push(unset_key);
+
+    let results = client.gat_multi(&keys, Some(-1)).await.unwrap();
+
+    assert_eq!(original_keys_length, results.len());
+
+    for result in results {
+        let key_str = std::str::from_utf8(&result.key)
+            .expect("should have been able to parse Value.key as utf8");
+        assert!(&keys.contains(&key_str));
+    }
+
+    let get_result = client.get_multi(keys).await;
+
+    assert!(get_result.is_err(), "keys should not be found");
+}
