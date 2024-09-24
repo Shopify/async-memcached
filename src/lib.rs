@@ -615,6 +615,35 @@ impl Client {
             )))))
         }
     }
+
+    /// Multi get data and update the expiration time of an existing data by keys
+    ///
+    /// If the key is found, `Some(Value)` is returned, describing the metadata and data of the key.
+    ///
+    /// Otherwise, [`Error`] is returned.
+    pub async fn gat_multi<I, K>(&mut self, keys: I, ttl: Option<i64>) -> Result<Vec<Value>, Error>
+    where
+        I: IntoIterator<Item = K>,
+        K: AsRef<[u8]>,
+    {
+        let mut bf = Vec::new();
+        bf.extend(b"gat ");
+        bf.extend(ttl.unwrap_or(0).to_string().as_bytes());
+        for key in keys {
+            bf.extend(b" ");
+            bf.extend(key.as_ref());
+        }
+        bf.extend(b"\r\n");
+
+        self.conn.write_all(&bf).await?;
+        self.conn.flush().await?;
+
+        match self.get_read_write_response().await? {
+            Response::Status(s) => Err(s.into()),
+            Response::Data(d) => d.ok_or(Status::NotFound.into()),
+            _ => Err(Status::Error(ErrorKind::Protocol(None)).into()),
+        }
+    }
 }
 
 /// Asynchronous iterator for metadump operations.
