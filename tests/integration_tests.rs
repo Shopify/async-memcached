@@ -875,7 +875,7 @@ async fn test_gats_with_nonexistent_key() {
 
     let mut client = setup_client(&[key]).await;
 
-    let get_result = client.gats(0, key).await;
+    let get_result = client.gats(key, None).await;
 
     assert!(matches!(get_result, Ok(None)), "key should not be found");
 }
@@ -898,7 +898,7 @@ async fn test_gats_with_cached_key() {
         set_result
     );
 
-    let get_result = client.gats(-1, key).await;
+    let get_result = client.gats(key, Some(-1)).await;
 
     assert!(
         get_result.is_ok(),
