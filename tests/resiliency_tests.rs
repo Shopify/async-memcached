@@ -35,7 +35,6 @@ fn create_proxies_and_configs() -> (Vec<ProxyDrop>, String) {
             Some(v) => v.into_string().unwrap(),
             None => "http://127.0.0.1:8474".to_string(),
         };
-
         toxiproxy_url = toxiproxy_url.strip_prefix("http://").unwrap().to_string();
 
         // Create toxiproxy client and populate proxies
@@ -50,7 +49,7 @@ fn create_proxies_and_configs() -> (Vec<ProxyDrop>, String) {
         TOXI_ADDR.get_or_init(|| toxi_addr);
     });
 
-    let local_url = match std::env::var_os("NODE_LOCAL_CACHE") {
+    let local_url = match std::env::var_os("MEMCACHED_ADDR") {
         Some(v) => v.into_string().unwrap(),
         None => "127.0.0.1:11211".to_string(), // use IPV4 so that it resolves to a single Server
     };
@@ -127,12 +126,26 @@ mod tests {
         let values = vec!["value1", "value2", "value3"];
         let kv: Vec<(&str, &str)> = keys.clone().into_iter().zip(values).collect();
 
+        let mut clean_client = rt.block_on(async {
+            async_memcached::Client::new("tcp://127.0.0.1:11211".to_string())
+                .await
+                .unwrap()
+        });
+
+        println!("toxic_local_url in test 1: {}", toxic_local_addr);
         let mut toxic_client =
             rt.block_on(async { async_memcached::Client::new(toxic_local_url).await.unwrap() });
 
+        let response = rt.block_on(async { clean_client.version().await });
+        println!("test 1 version response from clean client: {:?}", response);
+        assert!(response.is_ok());
+        let response = rt.block_on(async { toxic_client.version().await });
+        println!("test 1 version response from toxic client: {:?}", response);
+        assert!(response.is_ok());
+
         for key in &keys {
-            let _ = rt.block_on(async { toxic_client.delete(key).await });
-            let result = rt.block_on(async { toxic_client.get(key).await });
+            let _ = rt.block_on(async { clean_client.delete(key).await });
+            let result = rt.block_on(async { clean_client.get(key).await });
             assert_eq!(result, Ok(None));
         }
 
@@ -179,12 +192,13 @@ mod tests {
                 .unwrap()
         });
 
+        println!("toxic_local_url in test 2: {}", toxic_local_addr);
         let mut toxic_client =
             rt.block_on(async { async_memcached::Client::new(toxic_local_url).await.unwrap() });
 
         for key in &keys {
-            let _ = rt.block_on(async { toxic_client.delete(key).await });
-            let result = rt.block_on(async { toxic_client.get(key).await });
+            let _ = rt.block_on(async { clean_client.delete(key).await });
+            let result = rt.block_on(async { clean_client.get(key).await });
             assert_eq!(result, Ok(None));
         }
 
@@ -192,6 +206,13 @@ mod tests {
         // In this case, the server can only cache values for the keys with complete commands.
 
         let byte_limit = multiset_command.len() - 10; // First two commands should be intact, last one cut off
+
+        let response = rt.block_on(async { clean_client.version().await });
+        println!("test 2 version response from clean client: {:?}", response);
+        assert!(response.is_ok());
+        let response = rt.block_on(async { toxic_client.version().await });
+        println!("test 2 version response from toxic client: {:?}", response);
+        assert!(response.is_ok());
 
         let _ = toxic_proxy
             .with_limit_data("upstream".into(), byte_limit as u32, 1.0)
@@ -260,12 +281,20 @@ mod tests {
                 .unwrap()
         });
 
+        println!("toxic_local_url in test 3: {}", toxic_local_addr);
         let mut toxic_client =
             rt.block_on(async { async_memcached::Client::new(toxic_local_url).await.unwrap() });
 
+        let response = rt.block_on(async { clean_client.version().await });
+        println!("test 3 version response from clean client: {:?}", response);
+        assert!(response.is_ok());
+        let response = rt.block_on(async { toxic_client.version().await });
+        println!("test 3 version response from toxic client: {:?}", response);
+        assert!(response.is_ok());
+
         for key in &keys {
-            let _ = rt.block_on(async { toxic_client.delete(key).await });
-            let result = rt.block_on(async { toxic_client.get(key).await });
+            let _ = rt.block_on(async { clean_client.delete(key).await });
+            let result = rt.block_on(async { clean_client.get(key).await });
             assert_eq!(result, Ok(None));
         }
 

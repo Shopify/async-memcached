@@ -8,6 +8,8 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  TOXIPROXY_URL: http://0.0.0.0:8474
+  MEMCACHED_ADDR: 127.0.0.1:11211
 
 jobs:
   lint:
@@ -33,12 +35,26 @@ jobs:
         image: memcached:latest
         ports:
           - 11211:11211
+      # toxiproxy:
+      #   image: ghcr.io/shopify/toxiproxy:latest
+      #   ports:
+      #     - 8474:8474
+      #     - 40000:11211
+      #     - 40001:11211
+      #     - 40002:11211
     steps:
       - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+      - name: Try running toxiproxy directly in main container
+        run: |
+          wget -qO toxiproxy_2.9.0.deb https://github.com/Shopify/toxiproxy/releases/download/v2.9.0/toxiproxy_2.9.0_linux_amd64.deb
+          sudo dpkg -i toxiproxy_2.9.0.deb
+          toxiproxy-server &
       - name: Run parser and connection tests
         run: cargo test --all-features
       - name: Run integration tests
         run: cargo test --test integration_tests -- --test-threads=1 --ignored
+      - name: Run resiliency tests
+        run: cargo test --test resiliency_tests -- --test-threads=1 --ignored
   build:
     runs-on: ubuntu-latest
     steps:
