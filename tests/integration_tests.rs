@@ -866,3 +866,23 @@ async fn test_flush_all() {
     let result = client.get(key).await;
     assert!(matches!(result, Ok(None)));
 }
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[serial]
+async fn test_flush_all_noreply() {
+    let key = "test_flush_all_noreply";
+    let value: u64 = 1;
+
+    let mut client = setup_client(&[key]).await;
+
+    let _ = client.set(key, value, None, None).await;
+    let result = client.get(key).await;
+    assert!(result.is_ok());
+
+    let result = client.flush_all_noreply(None).await;
+    assert!(result.is_ok());
+
+    let result = client.get(key).await;
+    assert_eq!(result, Ok(None));
+}

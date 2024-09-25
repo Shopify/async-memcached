@@ -615,6 +615,24 @@ impl Client {
             )))))
         }
     }
+
+    /// Flushes all existing items with no reply from server
+    ///
+    /// This operation invalidates all existing items immediately. Any items with an update time
+    /// older than the time of the flush_all operation will be ignored for retrieval purposes.
+    /// This operation does not free up memory taken up by the existing items.
+    pub async fn flush_all_noreply(&mut self, ttl: Option<i64>) -> Result<(), Error> {
+        let exptime = match ttl {
+            None => String::new(),
+            Some(t) => format!(" {t}"),
+        };
+        self.conn
+            .write_all(&[b"flush_all", exptime.as_bytes(), b" noreply\r\n"].concat())
+            .await?;
+        self.conn.flush().await?;
+
+        Ok(())
+    }
 }
 
 /// Asynchronous iterator for metadump operations.
