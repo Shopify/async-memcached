@@ -291,6 +291,12 @@ impl Client {
     }
 
     /// Add a key. If the value exists, Err(Protocol(NotStored)) is returned.
+    ///
+    /// # Examples
+    ///
+    ///```
+    ///let stored = client.add("key", "value", Some(1), Some(2))
+    ///```
     pub async fn add<K, V>(
         &mut self,
         key: K,
