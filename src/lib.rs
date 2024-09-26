@@ -20,6 +20,8 @@ pub use self::parser::{ErrorKind, KeyMetadata, MetadumpResponse, StatsResponse, 
 mod value_serializer;
 pub use self::value_serializer::AsMemcachedValue;
 
+const MAX_KEY_LENGTH: usize = 250;
+
 /// High-level memcached client.
 ///
 /// [`Client`] is mapped one-to-one with a given connection to a memcached server, and provides a
@@ -109,6 +111,17 @@ impl Client {
         let mut results = FxHashMap::with_capacity_and_hasher(kv.len(), Default::default());
 
         for (key, _) in kv {
+            let kr = key.as_ref();
+            if kr.len() > MAX_KEY_LENGTH {
+                results.insert(
+                    key,
+                    Err(Error::Protocol(Status::Error(ErrorKind::Client(
+                        "Key exceeds maximum length of 250 bytes".to_string(),
+                    )))),
+                );
+                continue;
+            }
+
             let result = match self.drive_receive(parse_ascii_response).await {
                 Ok(Response::Status(Status::Stored)) => Ok(()),
                 Ok(Response::Status(s)) => Err(s.into()),
@@ -170,7 +183,6 @@ impl Client {
     {
         self.conn.write_all(b"get").await?;
         for key in keys {
-            const MAX_KEY_LENGTH: usize = 250;
             if key.as_ref().len() > MAX_KEY_LENGTH {
                 continue;
             }
@@ -264,12 +276,15 @@ impl Client {
         V: AsMemcachedValue,
     {
         for (key, value) in kv {
+            let kr = key.as_ref();
+            if kr.len() > MAX_KEY_LENGTH {
+                continue;
+            }
+
             let vr = value.as_bytes();
 
             self.conn.write_all(b"set ").await?;
-            self.conn
-                .write_all(Self::validate_key_length(key.as_ref())?)
-                .await?;
+            self.conn.write_all(kr).await?;
 
             let flags = flags.unwrap_or(0).to_string();
             self.conn.write_all(b" ").await?;
@@ -635,7 +650,7 @@ impl Client {
     }
 
     fn validate_key_length(kr: &[u8]) -> Result<&[u8], Error> {
-        if kr.len() > 250 {
+        if kr.len() > MAX_KEY_LENGTH {
             return Err(Error::from(Status::Error(ErrorKind::Client(format!(
                 "Key '{}' is too long",
                 String::from_utf8_lossy(kr)

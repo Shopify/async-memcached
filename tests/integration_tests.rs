@@ -647,7 +647,7 @@ async fn test_set_multi_with_string_values() {
 #[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
-async fn test_set_multi_fails_if_any_key_is_too_large() {
+async fn test_set_multi_inserts_client_error_for_key_too_large() {
     let large_key = "e".repeat(MAX_KEY_LENGTH + 1);
 
     let keys = vec!["short-key-1", &large_key, "short-key-3"];
@@ -659,10 +659,19 @@ async fn test_set_multi_fails_if_any_key_is_too_large() {
 
     let set_multi_result = client.set_multi(&kv, None, None).await;
 
-    assert!(matches!(
-        set_multi_result,
-        Err(Error::Protocol(Status::Error(ErrorKind::Client(_))))
-    ));
+    assert!(set_multi_result.is_ok());
+
+    let result_map = set_multi_result.unwrap();
+
+    assert_eq!(keys.len(), result_map.len());
+
+    assert!(result_map[&keys[0]].is_ok(), "Key {} should be Ok", keys[0]);
+    assert!(
+        result_map[&large_key.as_str()].is_err(),
+        "Key {} should have an error",
+        large_key
+    );
+    assert!(result_map[&keys[2]].is_ok(), "Key {} should be Ok", keys[2]);
 }
 
 #[ignore = "Relies on a running memcached server"]
