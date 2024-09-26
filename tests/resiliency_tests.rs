@@ -1,3 +1,5 @@
+use async_memcached::Client;
+
 use toxiproxy_rust::{
     client::Client as ToxiproxyClient,
     proxy::{Proxy, ProxyPack},
@@ -29,16 +31,24 @@ impl Drop for ProxyDrop {
     }
 }
 
-fn create_proxies_and_configs() -> (Vec<ProxyDrop>, String) {
+fn create_proxy_and_config() -> (ProxyDrop, String) {
     TOXIPROXY_INIT.call_once(|| {
-        let mut toxiproxy_url = match std::env::var_os("TOXIPROXY_URL") {
+        let mut toxiproxy_host = match std::env::var_os("TOXIPROXY_HOST") {
             Some(v) => v.into_string().unwrap(),
-            None => "http://127.0.0.1:8474".to_string(),
+            None => "http://127.0.0.1".to_string(),
         };
-        toxiproxy_url = toxiproxy_url.strip_prefix("http://").unwrap().to_string();
+        toxiproxy_host = toxiproxy_host.strip_prefix("http://").unwrap().to_string();
+
+        let toxiproxy_port = match std::env::var_os("TOXIPROXY_PORT") {
+            Some(v) => v.into_string().unwrap(),
+            None => "8474".to_string(),
+        };
+
+        let toxiproxy_url = format!("{}:{}", toxiproxy_host, toxiproxy_port);
 
         // Create toxiproxy client and populate proxies
         let toxi_addr = toxiproxy_url.to_socket_addrs().unwrap().next().unwrap();
+
         let toxiproxy_client = ToxiproxyClient::new(toxi_addr);
         toxiproxy_client
             .all()
@@ -49,31 +59,76 @@ fn create_proxies_and_configs() -> (Vec<ProxyDrop>, String) {
         TOXI_ADDR.get_or_init(|| toxi_addr);
     });
 
-    let local_url = match std::env::var_os("MEMCACHED_ADDR") {
+    let local_host = match std::env::var_os("MEMCACHED_HOST") {
         Some(v) => v.into_string().unwrap(),
-        None => "127.0.0.1:11211".to_string(), // use IPV4 so that it resolves to a single Server
+        None => "127.0.0.1".to_string(), // use IPV4 so that it resolves to a single Server
     };
+
+    let local_memcached_port = match std::env::var_os("MEMCACHED_PORT") {
+        Some(v) => v.into_string().unwrap(),
+        None => "11211".to_string(),
+    };
+
+    let local_url = format!("{}:{}", local_host, local_memcached_port);
+
     let local_port = PROXY_PORT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
     let toxi_addr = TOXI_ADDR.get().unwrap();
     let toxic_local_addr = format!("{}:{}", toxi_addr.ip(), local_port);
 
-    let proxies = vec![ProxyPack::new(
+    let proxy = ProxyPack::new(
         format!("local-memcached-{}", local_port),
         toxic_local_addr.clone(),
         local_url.clone(),
-    )];
+    );
 
     let toxiproxy_client = ToxiproxyClient::new(toxi_addr);
     assert!(toxiproxy_client.is_running());
 
-    let proxies = toxiproxy_client.populate(proxies).unwrap();
-    let proxies = proxies
+    let proxy = toxiproxy_client.populate(vec![proxy]).unwrap();
+    let proxy = proxy
         .into_iter()
         .map(|proxy| ProxyDrop { proxy })
-        .collect();
+        .next()
+        .unwrap();
 
-    (proxies, toxic_local_addr)
+    (proxy, toxic_local_addr)
+    // (proxies, toxic_local_addr)
+}
+
+async fn setup_clean_client() -> Client {
+    async_memcached::Client::new(format!(
+        "tcp://{}:{}",
+        std::env::var_os("MEMCACHED_HOST")
+            .unwrap_or_else(|| "127.0.0.1".to_string().into())
+            .into_string()
+            .unwrap(),
+        std::env::var_os("MEMCACHED_PORT")
+            .unwrap_or_else(|| "11211".to_string().into())
+            .into_string()
+            .unwrap()
+    ))
+    .await
+    .unwrap()
+}
+
+async fn setup_toxic_client(toxic_local_url: String) -> Client {
+    async_memcached::Client::new(toxic_local_url).await.unwrap()
+}
+
+fn setup_runtime() -> tokio::runtime::Runtime {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+}
+
+async fn clear_keys(client: &mut Client, keys: &[&str]) {
+    for key in keys {
+        let _ = client.delete(key).await;
+        let result = client.get(key).await;
+        assert_eq!(result, Ok(None));
+    }
 }
 
 #[cfg(test)]
@@ -83,26 +138,15 @@ mod tests {
     #[ignore = "Relies on a running memcached server and toxiproxy service"]
     #[test]
     fn test_set_multi_succeeds_with_clean_client() {
-        let rt = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .unwrap();
+        let rt = setup_runtime();
 
         let keys = vec!["clean-key1", "clean-key2", "clean-key3"];
         let values = vec!["value1", "value2", "value3"];
         let kv: Vec<(&str, &str)> = keys.clone().into_iter().zip(values).collect();
 
-        let mut clean_client = rt.block_on(async {
-            async_memcached::Client::new("tcp://127.0.0.1:11211".to_string())
-                .await
-                .unwrap()
-        });
+        let mut clean_client = rt.block_on(setup_clean_client());
 
-        for key in &keys {
-            let _ = rt.block_on(async { clean_client.delete(key).await });
-            let result = rt.block_on(async { clean_client.get(key).await });
-            assert_eq!(result, Ok(None));
-        }
+        rt.block_on(clear_keys(&mut clean_client, &keys));
 
         let result = rt.block_on(async { clean_client.set_multi(&kv, None, None).await });
 
@@ -112,34 +156,19 @@ mod tests {
     #[ignore = "Relies on a running memcached server and toxiproxy service"]
     #[test]
     fn test_set_multi_errors_with_toxic_client_via_with_down() {
-        let rt = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .unwrap();
+        let rt = setup_runtime();
 
-        let (proxies, toxic_local_addr) = create_proxies_and_configs();
+        let (toxic_proxy, toxic_local_addr) = create_proxy_and_config();
 
         let toxic_local_url = "tcp://".to_string() + &toxic_local_addr;
-        let toxic_proxy = &proxies[0];
 
         let keys = vec!["with-down-key1", "with-down-key2", "with-down-key3"];
         let values = vec!["value1", "value2", "value3"];
         let kv: Vec<(&str, &str)> = keys.clone().into_iter().zip(values).collect();
 
-        let mut clean_client = rt.block_on(async {
-            async_memcached::Client::new("tcp://127.0.0.1:11211".to_string())
-                .await
-                .unwrap()
-        });
+        let mut toxic_client = rt.block_on(setup_toxic_client(toxic_local_url));
 
-        let mut toxic_client =
-            rt.block_on(async { async_memcached::Client::new(toxic_local_url).await.unwrap() });
-
-        for key in &keys {
-            let _ = rt.block_on(async { clean_client.delete(key).await });
-            let result = rt.block_on(async { clean_client.get(key).await });
-            assert_eq!(result, Ok(None));
-        }
+        rt.block_on(clear_keys(&mut toxic_client, &keys));
 
         let _ = toxic_proxy.with_down(|| {
             rt.block_on(async {
@@ -157,15 +186,11 @@ mod tests {
     #[ignore = "Relies on a running memcached server and toxiproxy service"]
     #[test]
     fn test_set_multi_errors_on_upstream_with_toxic_client_via_limit_data() {
-        let rt = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .unwrap();
+        let rt = setup_runtime();
 
-        let (proxies, toxic_local_addr) = create_proxies_and_configs();
+        let (toxic_proxy, toxic_local_addr) = create_proxy_and_config();
 
         let toxic_local_url = "tcp://".to_string() + &toxic_local_addr;
-        let toxic_proxy = &proxies[0];
 
         let keys = vec!["upstream-key1", "upstream-key2", "upstream-key3"];
         let values = vec!["value1", "value2", "value3"];
@@ -178,20 +203,11 @@ mod tests {
                     acc
                 });
 
-        let mut clean_client = rt.block_on(async {
-            async_memcached::Client::new("tcp://127.0.0.1:11211".to_string())
-                .await
-                .unwrap()
-        });
+        let mut clean_client = rt.block_on(setup_clean_client());
 
-        let mut toxic_client =
-            rt.block_on(async { async_memcached::Client::new(toxic_local_url).await.unwrap() });
+        let mut toxic_client = rt.block_on(setup_toxic_client(toxic_local_url));
 
-        for key in &keys {
-            let _ = rt.block_on(async { clean_client.delete(key).await });
-            let result = rt.block_on(async { clean_client.get(key).await });
-            assert_eq!(result, Ok(None));
-        }
+        rt.block_on(clear_keys(&mut clean_client, &keys));
 
         // Simulate a network error happening when the client makes a request to the server.  Only part of the request is received by the server.
         // In this case, the server can only cache values for the keys with complete commands.
@@ -247,32 +263,20 @@ mod tests {
     #[ignore = "Relies on a running memcached server and toxiproxy service"]
     #[test]
     fn test_set_multi_errors_on_downstream_with_toxic_client_via_limit_data() {
-        let rt = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .unwrap();
+        let rt = setup_runtime();
 
-        let (proxies, toxic_local_addr) = create_proxies_and_configs();
+        let (toxic_proxy, toxic_local_addr) = create_proxy_and_config();
 
         let toxic_local_url = "tcp://".to_string() + &toxic_local_addr;
-        let toxic_proxy = &proxies[0];
+
         let keys = vec!["downstream-key1", "downstream-key2", "downstream-key3"];
         let values = vec!["value1", "value2", "value3"];
 
-        let mut clean_client = rt.block_on(async {
-            async_memcached::Client::new("tcp://127.0.0.1:11211".to_string())
-                .await
-                .unwrap()
-        });
+        let mut clean_client = rt.block_on(setup_clean_client());
 
-        let mut toxic_client =
-            rt.block_on(async { async_memcached::Client::new(toxic_local_url).await.unwrap() });
+        let mut toxic_client = rt.block_on(setup_toxic_client(toxic_local_url));
 
-        for key in &keys {
-            let _ = rt.block_on(async { clean_client.delete(key).await });
-            let result = rt.block_on(async { clean_client.get(key).await });
-            assert_eq!(result, Ok(None));
-        }
+        rt.block_on(clear_keys(&mut clean_client, &keys));
 
         // Simulate a network error happening when the server responds back to the client.  A complete response is received for the first key but then
         // the connection is closed before the other responses are received.  Regardless, the server should still cache all the data.
