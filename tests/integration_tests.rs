@@ -169,20 +169,31 @@ async fn test_add_multi() {
 #[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
-async fn test_add_multi_fails_with_any_key_too_long() {
-    let key_too_long = "f".repeat(MAX_KEY_LENGTH + 1);
-    let keys = vec!["am-key1", &key_too_long, "afm-key3"];
+async fn test_add_multi_inserts_client_error_for_key_too_large() {
+    let large_key = "e".repeat(MAX_KEY_LENGTH + 1);
+
+    let keys = vec!["short-key-1", &large_key, "short-key-3"];
     let values = vec!["value1", "value2", "value3"];
+
     let kv: Vec<(&str, &str)> = keys.clone().into_iter().zip(values.into_iter()).collect();
 
     let mut client = setup_client(&keys).await;
 
     let add_multi_result = client.add_multi(&kv, None, None).await;
 
-    assert!(matches!(
-        add_multi_result,
-        Err(Error::Protocol(Status::Error(ErrorKind::Client(_))))
-    ));
+    assert!(add_multi_result.is_ok());
+
+    let result_map = add_multi_result.unwrap();
+
+    assert_eq!(keys.len(), result_map.len());
+
+    assert!(result_map[&keys[0]].is_ok(), "Key {} should be Ok", keys[0]);
+    assert!(
+        result_map[&large_key.as_str()].is_err(),
+        "Key {} should have an error",
+        large_key
+    );
+    assert!(result_map[&keys[2]].is_ok(), "Key {} should be Ok", keys[2]);
 }
 
 #[ignore = "Relies on a running memcached server"]

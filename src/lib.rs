@@ -368,12 +368,15 @@ impl Client {
         V: AsMemcachedValue,
     {
         for (key, value) in kv {
+            let kr = key.as_ref();
+            if kr.len() > MAX_KEY_LENGTH {
+                continue;
+            }
+
             let vr = value.as_bytes();
 
             self.conn.write_all(b"add ").await?;
-            self.conn
-                .write_all(Self::validate_key_length(key.as_ref())?)
-                .await?;
+            self.conn.write_all(kr).await?;
 
             let flags = flags.unwrap_or(0).to_string();
             self.conn.write_all(b" ").await?;
