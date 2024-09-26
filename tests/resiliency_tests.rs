@@ -37,7 +37,9 @@ fn create_proxy_and_config() -> (ProxyDrop, String) {
             Some(v) => v.into_string().unwrap(),
             None => "http://127.0.0.1".to_string(),
         };
-        toxiproxy_host = toxiproxy_host.strip_prefix("http://").unwrap().to_string();
+        if let Some(stripped) = toxiproxy_host.strip_prefix("http://") {
+            toxiproxy_host = stripped.to_string();
+        }
 
         let toxiproxy_port = match std::env::var_os("TOXIPROXY_PORT") {
             Some(v) => v.into_string().unwrap(),
@@ -59,10 +61,13 @@ fn create_proxy_and_config() -> (ProxyDrop, String) {
         TOXI_ADDR.get_or_init(|| toxi_addr);
     });
 
-    let local_host = match std::env::var_os("MEMCACHED_HOST") {
+    let mut local_host = match std::env::var_os("MEMCACHED_HOST") {
         Some(v) => v.into_string().unwrap(),
-        None => "127.0.0.1".to_string(), // use IPV4 so that it resolves to a single Server
+        None => "http://127.0.0.1".to_string(), // use IPV4 so that it resolves to a single Server
     };
+    if let Some(stripped) = local_host.strip_prefix("http://") {
+        local_host = stripped.to_string();
+    }
 
     let local_memcached_port = match std::env::var_os("MEMCACHED_PORT") {
         Some(v) => v.into_string().unwrap(),
@@ -93,27 +98,29 @@ fn create_proxy_and_config() -> (ProxyDrop, String) {
         .unwrap();
 
     (proxy, toxic_local_addr)
-    // (proxies, toxic_local_addr)
 }
 
 async fn setup_clean_client() -> Client {
-    async_memcached::Client::new(format!(
-        "tcp://{}:{}",
-        std::env::var_os("MEMCACHED_HOST")
-            .unwrap_or_else(|| "127.0.0.1".to_string().into())
-            .into_string()
-            .unwrap(),
-        std::env::var_os("MEMCACHED_PORT")
-            .unwrap_or_else(|| "11211".to_string().into())
-            .into_string()
-            .unwrap()
-    ))
-    .await
-    .unwrap()
+    let mut local_host = match std::env::var_os("MEMCACHED_HOST") {
+        Some(v) => v.into_string().unwrap(),
+        None => "http://127.0.0.1".to_string(),
+    };
+    if let Some(stripped) = local_host.strip_prefix("http://") {
+        local_host = stripped.to_string();
+    }
+
+    let local_memcached_port = match std::env::var_os("MEMCACHED_PORT") {
+        Some(v) => v.into_string().unwrap(),
+        None => "11211".to_string(),
+    };
+
+    Client::new(format!("tcp://{}:{}", local_host, local_memcached_port,))
+        .await
+        .unwrap()
 }
 
-async fn setup_toxic_client(toxic_local_url: String) -> Client {
-    async_memcached::Client::new(toxic_local_url).await.unwrap()
+async fn setup_toxic_client(toxic_local_url: &String) -> Client {
+    Client::new(toxic_local_url).await.unwrap()
 }
 
 fn setup_runtime() -> tokio::runtime::Runtime {
@@ -129,6 +136,19 @@ async fn clear_keys(client: &mut Client, keys: &[&str]) {
         let result = client.get(key).await;
         assert_eq!(result, Ok(None));
     }
+}
+
+fn setup_runtime_and_clients(
+    toxic_local_url: &String,
+    keys: &Vec<&str>,
+) -> (tokio::runtime::Runtime, Client, Client) {
+    let rt = setup_runtime();
+    let mut clean_client = rt.block_on(setup_clean_client());
+    let toxic_client = rt.block_on(setup_toxic_client(toxic_local_url));
+
+    rt.block_on(clear_keys(&mut clean_client, &keys));
+
+    (rt, clean_client, toxic_client)
 }
 
 #[cfg(test)]
@@ -156,19 +176,15 @@ mod tests {
     #[ignore = "Relies on a running memcached server and toxiproxy service"]
     #[test]
     fn test_set_multi_errors_with_toxic_client_via_with_down() {
-        let rt = setup_runtime();
-
-        let (toxic_proxy, toxic_local_addr) = create_proxy_and_config();
-
-        let toxic_local_url = "tcp://".to_string() + &toxic_local_addr;
-
         let keys = vec!["with-down-key1", "with-down-key2", "with-down-key3"];
         let values = vec!["value1", "value2", "value3"];
+
+        let (toxic_proxy, toxic_local_addr) = create_proxy_and_config();
+        let toxic_local_url = "tcp://".to_string() + &toxic_local_addr;
+
+        let (rt, _, mut toxic_client) = setup_runtime_and_clients(&toxic_local_url, &keys);
+
         let kv: Vec<(&str, &str)> = keys.clone().into_iter().zip(values).collect();
-
-        let mut toxic_client = rt.block_on(setup_toxic_client(toxic_local_url));
-
-        rt.block_on(clear_keys(&mut toxic_client, &keys));
 
         let _ = toxic_proxy.with_down(|| {
             rt.block_on(async {
@@ -186,14 +202,14 @@ mod tests {
     #[ignore = "Relies on a running memcached server and toxiproxy service"]
     #[test]
     fn test_set_multi_errors_on_upstream_with_toxic_client_via_limit_data() {
-        let rt = setup_runtime();
-
-        let (toxic_proxy, toxic_local_addr) = create_proxy_and_config();
-
-        let toxic_local_url = "tcp://".to_string() + &toxic_local_addr;
-
         let keys = vec!["upstream-key1", "upstream-key2", "upstream-key3"];
         let values = vec!["value1", "value2", "value3"];
+
+        let (toxic_proxy, toxic_local_addr) = create_proxy_and_config();
+        let toxic_local_url = "tcp://".to_string() + &toxic_local_addr;
+
+        let (rt, mut clean_client, mut toxic_client) =
+            setup_runtime_and_clients(&toxic_local_url, &keys);
 
         let multiset_command =
             keys.iter()
@@ -202,12 +218,6 @@ mod tests {
                     acc.push_str(&format!("set {} 0 0 {}\r\n{}\r\n", key, value.len(), value));
                     acc
                 });
-
-        let mut clean_client = rt.block_on(setup_clean_client());
-
-        let mut toxic_client = rt.block_on(setup_toxic_client(toxic_local_url));
-
-        rt.block_on(clear_keys(&mut clean_client, &keys));
 
         // Simulate a network error happening when the client makes a request to the server.  Only part of the request is received by the server.
         // In this case, the server can only cache values for the keys with complete commands.
@@ -263,20 +273,14 @@ mod tests {
     #[ignore = "Relies on a running memcached server and toxiproxy service"]
     #[test]
     fn test_set_multi_errors_on_downstream_with_toxic_client_via_limit_data() {
-        let rt = setup_runtime();
-
-        let (toxic_proxy, toxic_local_addr) = create_proxy_and_config();
-
-        let toxic_local_url = "tcp://".to_string() + &toxic_local_addr;
-
         let keys = vec!["downstream-key1", "downstream-key2", "downstream-key3"];
         let values = vec!["value1", "value2", "value3"];
 
-        let mut clean_client = rt.block_on(setup_clean_client());
+        let (toxic_proxy, toxic_local_addr) = create_proxy_and_config();
+        let toxic_local_url = "tcp://".to_string() + &toxic_local_addr;
 
-        let mut toxic_client = rt.block_on(setup_toxic_client(toxic_local_url));
-
-        rt.block_on(clear_keys(&mut clean_client, &keys));
+        let (rt, mut clean_client, mut toxic_client) =
+            setup_runtime_and_clients(&toxic_local_url, &keys);
 
         // Simulate a network error happening when the server responds back to the client.  A complete response is received for the first key but then
         // the connection is closed before the other responses are received.  Regardless, the server should still cache all the data.
