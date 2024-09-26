@@ -168,12 +168,12 @@ impl Client {
         I: IntoIterator<Item = K>,
         K: AsRef<[u8]>,
     {
-        self.conn.write_all(b"get ").await?;
+        self.conn.write_all(b"get").await?;
         for key in keys {
+            self.conn.write_all(b" ").await?;
             self.conn
                 .write_all(Self::validate_key_length(key.as_ref())?)
                 .await?;
-            self.conn.write_all(b" ").await?;
         }
         self.conn.write_all(b"\r\n").await?;
         self.conn.flush().await?;
