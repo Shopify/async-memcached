@@ -30,21 +30,6 @@ fn bench_get(c: &mut Criterion) {
     });
 }
 
-fn bench_set_with_string(c: &mut Criterion) {
-    let rt = Runtime::new().unwrap();
-
-    c.bench_function("set_small_with_string", |b| {
-        b.to_async(&rt).iter_custom(|iters| async move {
-            let mut client = setup_client().await;
-            let start = std::time::Instant::now();
-            for _ in 0..iters {
-                let _ = client.set("foo", "bar", None, None).await;
-            }
-            start.elapsed()
-        });
-    });
-}
-
 fn bench_add_with_string(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
 
@@ -54,6 +39,29 @@ fn bench_add_with_string(c: &mut Criterion) {
             let start = std::time::Instant::now();
             for _ in 0..iters {
                 let _ = client.add("foo", "bar", None, None).await;
+            }
+            start.elapsed()
+        });
+    });
+}
+
+fn bench_get_multi(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+    let keys = &["foo", "bar", "baz"];
+
+    rt.block_on(async {
+        let mut client = setup_client().await;
+        for key in keys {
+            client.set(key, "zzz", None, None).await.unwrap();
+        }
+    });
+
+    c.bench_function("get_multi_small", |b| {
+        b.to_async(&rt).iter_custom(|iters| async move {
+            let mut client = setup_client().await;
+            let start = std::time::Instant::now();
+            for _ in 0..iters {
+                let _ = client.get_multi(keys).await;
             }
             start.elapsed()
         });
@@ -72,29 +80,6 @@ fn bench_add_with_large_string(c: &mut Criterion) {
                 let _ = client
                     .add("large_foo", large_payload.as_str(), None, None)
                     .await;
-            }
-            start.elapsed()
-        });
-    });
-}
-
-fn bench_get_many(c: &mut Criterion) {
-    let rt = Runtime::new().unwrap();
-    let keys = &["foo", "bar", "baz"];
-
-    rt.block_on(async {
-        let mut client = setup_client().await;
-        for key in keys {
-            client.set(key, "zzz", None, None).await.unwrap();
-        }
-    });
-
-    c.bench_function("get_many_small", |b| {
-        b.to_async(&rt).iter_custom(|iters| async move {
-            let mut client = setup_client().await;
-            let start = std::time::Instant::now();
-            for _ in 0..iters {
-                let _ = client.get_many(keys).await;
             }
             start.elapsed()
         });
@@ -145,7 +130,7 @@ fn bench_get_many_large(c: &mut Criterion) {
             let mut client = setup_client().await;
             let start = std::time::Instant::now();
             for _ in 0..iters {
-                let _ = client.get_many(keys).await;
+                let _ = client.get_multi(keys).await;
             }
             start.elapsed()
         });
@@ -238,7 +223,7 @@ fn bench_decrement_no_reply(c: &mut Criterion) {
 criterion_group!(
     benches,
     bench_get,
-    bench_get_many,
+    bench_get_multi,
     bench_get_large,
     bench_get_many_large,
     bench_add_with_string,
