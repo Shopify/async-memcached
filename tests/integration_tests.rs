@@ -449,7 +449,7 @@ async fn test_get_multi_with_nonexistent_key() {
 #[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
-async fn test_get_multi_with_key_too_long() {
+async fn test_get_multi_skips_key_too_long() {
     let mut keys = vec!["mgktl-key1", "mgktl-key2", "mgktl-key3"];
     let values = vec!["value1", "value2", "value3"];
 
@@ -470,11 +470,15 @@ async fn test_get_multi_with_key_too_long() {
 
     let get_multi_results = client.get_multi(&keys).await;
 
-    assert!(get_multi_results.is_err());
-    assert!(matches!(
-        get_multi_results,
-        Err(Error::Protocol(Status::Error(ErrorKind::Client(_))))
-    ));
+    let get_multi_results = get_multi_results.expect("Should have yielded Vec<Value>");
+
+    for item in get_multi_results {
+        assert!(keys.contains(
+            &String::from_utf8(item.key)
+                .expect("Should have been able to parse key as utf8")
+                .as_str()
+        ));
+    }
 }
 
 #[ignore = "Relies on a running memcached server"]

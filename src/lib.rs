@@ -170,10 +170,12 @@ impl Client {
     {
         self.conn.write_all(b"get").await?;
         for key in keys {
+            const MAX_KEY_LENGTH: usize = 250;
+            if key.as_ref().len() > MAX_KEY_LENGTH {
+                continue;
+            }
             self.conn.write_all(b" ").await?;
-            self.conn
-                .write_all(Self::validate_key_length(key.as_ref())?)
-                .await?;
+            self.conn.write_all(key.as_ref()).await?;
         }
         self.conn.write_all(b"\r\n").await?;
         self.conn.flush().await?;
