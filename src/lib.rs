@@ -136,8 +136,12 @@ impl Client {
     ///
     /// Otherwise, [`Error`] is returned.
     pub async fn get<K: AsRef<[u8]>>(&mut self, key: K) -> Result<Option<Value>, Error> {
+        let mut kr = key.as_ref();
+
+        kr = Self::validate_key_length(kr)?;
+
         self.conn
-            .write_all(&[b"get ", key.as_ref(), b"\r\n"].concat())
+            .write_all(&[b"get ", kr, b"\r\n"].concat())
             .await?;
         self.conn.flush().await?;
 
@@ -612,6 +616,15 @@ impl Client {
                 format!("Invalid response for `flush_all` command: `{response}`"),
             )))))
         }
+    }
+
+    fn validate_key_length(kr: &[u8]) -> Result<&[u8], Error> {
+        if kr.len() > 250 {
+            return Err(Error::from(Status::Error(ErrorKind::Client(format!(
+                "Key '{}' is too long", String::from_utf8_lossy(kr)
+            )))));
+        }
+        Ok(kr)
     }
 }
 

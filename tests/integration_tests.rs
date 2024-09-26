@@ -1,4 +1,4 @@
-use async_memcached::{Client, Error, Status};
+use async_memcached::{Client, Error, Status, ErrorKind};
 use rand::seq::IteratorRandom;
 use serial_test::{parallel, serial};
 
@@ -60,6 +60,20 @@ async fn test_get_with_nonexistent_key() {
     let get_result = client.get(key).await;
 
     assert!(matches!(get_result, Ok(None)), "key should not be found");
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_get_with_key_too_long() {
+    let key = "a".repeat(251);
+
+    let mut client = setup_client(&[&key]).await;
+
+    let get_result = client.get(key).await;
+
+    assert!(get_result.is_err());
+    assert!(matches!(get_result, Err(Error::Protocol(Status::Error(ErrorKind::Client(_))))));
 }
 
 #[ignore = "Relies on a running memcached server"]
