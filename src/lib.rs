@@ -215,7 +215,7 @@ impl Client {
         K: AsRef<[u8]>,
         V: AsMemcachedValue,
     {
-        let kr = key.as_ref();
+        let kr = Self::validate_key_length(key.as_ref())?;
         let vr = value.as_bytes();
 
         self.conn.write_all(b"set ").await?;
@@ -261,7 +261,7 @@ impl Client {
         V: AsMemcachedValue,
     {
         for (key, value) in kv {
-            let kr = key.as_ref();
+            let kr = Self::validate_key_length(key.as_ref())?;
             let vr = value.as_bytes();
 
             self.conn.write_all(b"set ").await?;
@@ -302,7 +302,7 @@ impl Client {
         K: AsRef<[u8]>,
         V: AsMemcachedValue,
     {
-        let kr = key.as_ref();
+        let kr = Self::validate_key_length(key.as_ref())?;
         let vr = value.as_bytes();
 
         self.conn.write_all(b"add ").await?;
@@ -348,7 +348,7 @@ impl Client {
         V: AsMemcachedValue,
     {
         for (key, value) in kv {
-            let kr = key.as_ref();
+            let kr = Self::validate_key_length(key.as_ref())?;
             let vr = value.as_bytes();
 
             self.conn.write_all(b"add ").await?;
@@ -382,7 +382,7 @@ impl Client {
     where
         K: AsRef<[u8]>,
     {
-        let kr = key.as_ref();
+        let kr = Self::validate_key_length(key.as_ref())?;
 
         self.conn
             .write_all(&[b"delete ", kr, b" noreply\r\n"].concat())
@@ -396,7 +396,7 @@ impl Client {
     where
         K: AsRef<[u8]>,
     {
-        let kr = key.as_ref();
+        let kr = Self::validate_key_length(key.as_ref())?;
 
         self.conn
             .write_all(&[b"delete ", kr, b"\r\n"].concat())
@@ -417,7 +417,9 @@ impl Client {
     {
         for key in keys {
             self.conn.write_all(b"delete ").await?;
-            self.conn.write_all(key.as_ref()).await?;
+            self.conn
+                .write_all(Self::validate_key_length(key.as_ref())?)
+                .await?;
             self.conn.write_all(b" noreply\r\n").await?;
         }
         self.conn.flush().await?;
@@ -437,7 +439,7 @@ impl Client {
             .write_all(
                 &[
                     b"incr ",
-                    key.as_ref(),
+                    Self::validate_key_length(key.as_ref())?,
                     b" ",
                     amount.to_string().as_bytes(),
                     b"\r\n",
@@ -465,7 +467,7 @@ impl Client {
             .write_all(
                 &[
                     b"incr ",
-                    key.as_ref(),
+                    Self::validate_key_length(key.as_ref())?,
                     b" ",
                     amount.to_string().as_bytes(),
                     b" noreply\r\n",
@@ -490,7 +492,7 @@ impl Client {
             .write_all(
                 &[
                     b"decr ",
-                    key.as_ref(),
+                    Self::validate_key_length(key.as_ref())?,
                     b" ",
                     amount.to_string().as_bytes(),
                     b"\r\n",
@@ -518,7 +520,7 @@ impl Client {
             .write_all(
                 &[
                     b"decr ",
-                    key.as_ref(),
+                    Self::validate_key_length(key.as_ref())?,
                     b" ",
                     amount.to_string().as_bytes(),
                     b" noreply\r\n",

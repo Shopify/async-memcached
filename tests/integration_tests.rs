@@ -13,6 +13,10 @@ async fn setup_client(keys: &[&str]) -> Client {
         .expect("Failed to connect to server");
 
     for key in keys {
+        if key.len() > 250 {
+            continue; // skip keys that are too long because they'll fail
+        }
+
         client
             .delete_no_reply(key)
             .await
