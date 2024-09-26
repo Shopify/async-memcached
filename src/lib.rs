@@ -136,10 +136,8 @@ impl Client {
     ///
     /// Otherwise, [`Error`] is returned.
     pub async fn get<K: AsRef<[u8]>>(&mut self, key: K) -> Result<Option<Value>, Error> {
-        let kr = Self::validate_key_length(key.as_ref())?;
-
         self.conn
-            .write_all(&[b"get ", kr, b"\r\n"].concat())
+            .write_all(&[b"get ", Self::validate_key_length(key.as_ref())?, b"\r\n"].concat())
             .await?;
         self.conn.flush().await?;
 
@@ -172,7 +170,9 @@ impl Client {
     {
         self.conn.write_all(b"get ").await?;
         for key in keys {
-            self.conn.write_all(key.as_ref()).await?;
+            self.conn
+                .write_all(Self::validate_key_length(key.as_ref())?)
+                .await?;
             self.conn.write_all(b" ").await?;
         }
         self.conn.write_all(b"\r\n").await?;
@@ -215,11 +215,12 @@ impl Client {
         K: AsRef<[u8]>,
         V: AsMemcachedValue,
     {
-        let kr = Self::validate_key_length(key.as_ref())?;
         let vr = value.as_bytes();
 
         self.conn.write_all(b"set ").await?;
-        self.conn.write_all(kr).await?;
+        self.conn
+            .write_all(Self::validate_key_length(key.as_ref())?)
+            .await?;
 
         let flags = flags.unwrap_or(0).to_string();
         self.conn.write_all(b" ").await?;
@@ -261,11 +262,12 @@ impl Client {
         V: AsMemcachedValue,
     {
         for (key, value) in kv {
-            let kr = Self::validate_key_length(key.as_ref())?;
             let vr = value.as_bytes();
 
             self.conn.write_all(b"set ").await?;
-            self.conn.write_all(kr).await?;
+            self.conn
+                .write_all(Self::validate_key_length(key.as_ref())?)
+                .await?;
 
             let flags = flags.unwrap_or(0).to_string();
             self.conn.write_all(b" ").await?;
@@ -302,11 +304,12 @@ impl Client {
         K: AsRef<[u8]>,
         V: AsMemcachedValue,
     {
-        let kr = Self::validate_key_length(key.as_ref())?;
         let vr = value.as_bytes();
 
         self.conn.write_all(b"add ").await?;
-        self.conn.write_all(kr).await?;
+        self.conn
+            .write_all(Self::validate_key_length(key.as_ref())?)
+            .await?;
 
         let flags = flags.unwrap_or(0).to_string();
         self.conn.write_all(b" ").await?;
@@ -348,11 +351,12 @@ impl Client {
         V: AsMemcachedValue,
     {
         for (key, value) in kv {
-            let kr = Self::validate_key_length(key.as_ref())?;
             let vr = value.as_bytes();
 
             self.conn.write_all(b"add ").await?;
-            self.conn.write_all(kr).await?;
+            self.conn
+                .write_all(Self::validate_key_length(key.as_ref())?)
+                .await?;
 
             let flags = flags.unwrap_or(0).to_string();
             self.conn.write_all(b" ").await?;
@@ -382,10 +386,15 @@ impl Client {
     where
         K: AsRef<[u8]>,
     {
-        let kr = Self::validate_key_length(key.as_ref())?;
-
         self.conn
-            .write_all(&[b"delete ", kr, b" noreply\r\n"].concat())
+            .write_all(
+                &[
+                    b"delete ",
+                    Self::validate_key_length(key.as_ref())?,
+                    b" noreply\r\n",
+                ]
+                .concat(),
+            )
             .await?;
         self.conn.flush().await?;
         Ok(())
@@ -396,10 +405,15 @@ impl Client {
     where
         K: AsRef<[u8]>,
     {
-        let kr = Self::validate_key_length(key.as_ref())?;
-
         self.conn
-            .write_all(&[b"delete ", kr, b"\r\n"].concat())
+            .write_all(
+                &[
+                    b"delete ",
+                    Self::validate_key_length(key.as_ref())?,
+                    b"\r\n",
+                ]
+                .concat(),
+            )
             .await?;
         self.conn.flush().await?;
 
