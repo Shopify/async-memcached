@@ -1,4 +1,4 @@
-use async_memcached::{Client, Error, Status, ErrorKind};
+use async_memcached::{Client, Error, ErrorKind, Status};
 use rand::seq::IteratorRandom;
 use serial_test::{parallel, serial};
 
@@ -65,7 +65,7 @@ async fn test_get_with_nonexistent_key() {
 #[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
-async fn test_get_with_key_too_long() {
+async fn test_get_fails_with_key_too_long() {
     let key = "a".repeat(251);
 
     let mut client = setup_client(&[&key]).await;
@@ -73,7 +73,10 @@ async fn test_get_with_key_too_long() {
     let get_result = client.get(key).await;
 
     assert!(get_result.is_err());
-    assert!(matches!(get_result, Err(Error::Protocol(Status::Error(ErrorKind::Client(_))))));
+    assert!(matches!(
+        get_result,
+        Err(Error::Protocol(Status::Error(ErrorKind::Client(_))))
+    ));
 }
 
 #[ignore = "Relies on a running memcached server"]
@@ -371,6 +374,37 @@ async fn test_get_multi_with_nonexistent_key() {
             .expect("should have been able to parse Value.key as utf8");
         assert!(&keys.contains(&key_str));
     }
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_get_multi_with_key_too_long() {
+    let mut keys = vec!["mgktl-key1", "mgktl-key2", "mgktl-key3"];
+    let values = vec!["value1", "value2", "value3"];
+
+    let mut client = setup_client(&keys).await;
+
+    for (key, value) in keys.iter().zip(values.iter()) {
+        let set_result = client.set(key, *value, None, None).await;
+        assert!(
+            set_result.is_ok(),
+            "failed to set {}, {:?}",
+            key,
+            set_result
+        );
+    }
+
+    let key_too_long = "a".repeat(251);
+    keys = vec!["mgktl-key1", &key_too_long, "mgktl-key3"];
+
+    let get_multi_results = client.get_multi(&keys).await;
+
+    assert!(get_multi_results.is_err());
+    assert!(matches!(
+        get_multi_results,
+        Err(Error::Protocol(Status::Error(ErrorKind::Client(_))))
+    ));
 }
 
 #[ignore = "Relies on a running memcached server"]
