@@ -168,14 +168,12 @@ impl Client {
         I: IntoIterator<Item = K>,
         K: AsRef<[u8]>,
     {
-        let mut bf = Vec::new();
-        bf.extend(b"get");
+        self.conn.write_all(b"get ").await?;
         for key in keys {
-            bf.extend(b" ");
-            bf.extend(key.as_ref());
+            self.conn.write_all(key.as_ref()).await?;
+            self.conn.write_all(b" ").await?;
         }
-        bf.extend(b"\r\n");
-        self.conn.write_all(&bf).await?;
+        self.conn.write_all(b"\r\n").await?;
         self.conn.flush().await?;
 
         match self.get_read_write_response().await? {
