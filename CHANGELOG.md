@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+- Added `Toxiproxy` resiliency testing.
+
 ## [0.4.0] - 2024-09-20
 
 ### Added
