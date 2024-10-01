@@ -38,7 +38,7 @@ $ memcached -vv
 $ cargo run --package async-memcached --example basic
 ```
 
-### Unix
+### Unix Domain Socket
 Run a memcached server (with optional very verbose flag) that accepts a UDS connection and execute the UNIX examples:
 ```bash
 $ memcached -vv -s /tmp/memcached.sock
