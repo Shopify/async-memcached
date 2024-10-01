@@ -1,4 +1,5 @@
 use async_memcached::{Client, Error, ErrorKind, Status};
+use fxhash::FxHashMap;
 use rand::seq::IteratorRandom;
 use serial_test::{parallel, serial};
 
@@ -242,7 +243,7 @@ async fn test_add_multi_with_a_key_that_already_exists() {
     // the get result for the preset key should be the original value that it was set with
     // not the new value from the add_multi call
     assert_eq!(
-        std::str::from_utf8(&get_result.unwrap().unwrap().data)
+        std::str::from_utf8(&get_result.unwrap().unwrap().data.unwrap())
             .expect("failed to parse string from bytes"),
         "original-value"
     );
@@ -276,6 +277,7 @@ async fn test_set_with_string_value() {
                 .expect("should have unwrapped a Result")
                 .expect("should have unwrapped an Option")
                 .data
+                .unwrap()
         )
         .expect("failed to parse String from bytes"),
         value
@@ -308,6 +310,7 @@ async fn test_set_with_string_ref_value() {
                 .expect("should have unwrapped a Result")
                 .expect("should have unwrapped an Option")
                 .data
+                .unwrap()
         )
         .expect("failed to parse String from bytes"),
         value
@@ -337,6 +340,7 @@ async fn test_set_with_u64_value() {
                 .expect("should have unwrapped a Result")
                 .expect("should have unwrapped an Option")
                 .data
+                .unwrap()
         )
         .expect("couldn't parse data from bytes to integer")
     );
@@ -549,7 +553,7 @@ async fn test_delete() {
 
     match get_result {
         Some(get_value) => assert_eq!(
-            String::from_utf8(get_value.data).expect("failed to parse a string"),
+            String::from_utf8(get_value.data.unwrap()).expect("failed to parse a string"),
             value.to_string()
         ),
         None => panic!("failed to get {}", key),
@@ -591,7 +595,7 @@ async fn test_delete_no_reply() {
 
     match get_result {
         Some(get_value) => assert_eq!(
-            String::from_utf8(get_value.data).expect("failed to parse a string"),
+            String::from_utf8(get_value.data.unwrap()).expect("failed to parse a string"),
             value
         ),
         None => panic!("failed to get {}", key),
@@ -649,6 +653,7 @@ async fn test_set_multi_with_string_values() {
                 .expect("should have unwrapped a Result")
                 .expect("should have unwrapped an Option")
                 .data
+                .unwrap()
         )
         .expect("failed to parse string from bytes"),
         "value2"
@@ -746,7 +751,7 @@ async fn test_set_multi_with_string_values_that_exceed_max_size() {
     // Check a small value to make sure it was cached properly - key0 is never chosen to be a large value
     let small_result = client.get("multi-key0").await;
     assert!(matches!(
-        std::str::from_utf8(&small_result.unwrap().unwrap().data)
+        std::str::from_utf8(&small_result.unwrap().unwrap().data.unwrap())
             .expect("failed to parse string from bytes"),
         "value0"
     ));
@@ -772,7 +777,7 @@ async fn test_set_multi_with_string_values_that_exceed_max_size() {
             );
             let get_result = client.get(key.as_str()).await.unwrap().unwrap();
             assert_eq!(
-                std::str::from_utf8(&get_result.data).unwrap(),
+                std::str::from_utf8(&get_result.data.unwrap()).unwrap(),
                 format!("value{}", i),
                 "Mismatch for key {}",
                 key
@@ -925,7 +930,7 @@ async fn test_increments_existing_key_with_no_reply() {
 
     assert_eq!(
         value + amount,
-        btoi::btoi::<u64>(&result.unwrap().unwrap().data)
+        btoi::btoi::<u64>(&result.unwrap().unwrap().data.unwrap())
             .expect("couldn't parse data from bytes to integer")
     );
 }
@@ -1005,7 +1010,7 @@ async fn test_decrements_existing_key_with_no_reply() {
 
     assert_eq!(
         value - amount,
-        btoi::btoi::<u64>(&result.unwrap().unwrap().data)
+        btoi::btoi::<u64>(&result.unwrap().unwrap().data.unwrap())
             .expect("couldn't parse data from bytes to integer")
     );
 }
@@ -1026,7 +1031,10 @@ async fn test_meta_get_with_all_flags() {
     // Perform a get to ensure the item has been hit
     let result = client.get(key).await.unwrap();
     let result_value = result.unwrap();
-    assert_eq!(String::from_utf8(result_value.data).unwrap(), value);
+    assert_eq!(
+        String::from_utf8(result_value.data.unwrap()).unwrap(),
+        value
+    );
 
     let flags = ['h', 'l', 't'];
     let result = client.meta_get(key, &flags).await.unwrap();
@@ -1034,7 +1042,10 @@ async fn test_meta_get_with_all_flags() {
     assert!(result.is_some());
     let result_meta_value = result.unwrap();
 
-    assert_eq!(String::from_utf8(result_meta_value.data).unwrap(), value);
+    assert_eq!(
+        String::from_utf8(result_meta_value.data.unwrap()).unwrap(),
+        value
+    );
 
     let meta_flag_values = result_meta_value.meta_values.unwrap();
     assert!(meta_flag_values.hit_before.unwrap());
@@ -1052,6 +1063,117 @@ async fn test_meta_get_not_found() {
 
     let result = client.meta_get(key, &flags).await.unwrap();
     assert_eq!(result, None);
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+async fn test_meta_set() {
+    let key = "meta-set-test-key";
+    let value = "test-value";
+    let ttl = Some(3600); // 1 hour
+
+    let mut client = setup_client(&[key]).await;
+
+    let mut meta_flags: FxHashMap<&[char], String> = FxHashMap::default();
+    meta_flags.insert(&['F'][..], "42".to_string()); // Set flags to 0
+
+    // Set the key using meta_set
+    let result = client.meta_set(key, value, ttl, meta_flags).await;
+    assert!(
+        result.is_ok(),
+        "Failed to set key using meta_set: {:?}",
+        result
+    );
+
+    // Retrieve the key using meta_get to verify
+    let get_flags = ['h', 'l', 't'];
+    let get_result = client.meta_get(key, &get_flags).await.unwrap();
+
+    assert!(get_result.is_some(), "Key not found after meta_set");
+    let result_value = get_result.unwrap();
+
+    // Verify the value
+    assert_eq!(
+        String::from_utf8(result_value.data.unwrap()).unwrap(),
+        value,
+        "Retrieved value does not match set value"
+    );
+
+    // Clean up
+    let _ = client.delete(key).await;
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+async fn test_meta_set_opaque_token() {
+    let key = "meta-set-opaque-token-test-key";
+    let value = "test-value";
+    let ttl = Some(3600); // 1 hour
+
+    let mut client = setup_client(&[key]).await;
+
+    // Clean up
+    let _ = client.delete(key).await;
+
+    let mut meta_flags: FxHashMap<&[char], String> = FxHashMap::default();
+    meta_flags.insert(&['M'][..], "E".to_string()); // Set mode to "add if not exists"
+    meta_flags.insert(&['F'][..], "42".to_string()); // Set flags to 0
+    meta_flags.insert(&['O'][..], "opaque-token".to_string()); // Set opaque token
+
+    // Set the key using meta_set
+    let result = client.meta_set(key, value, ttl, meta_flags).await;
+    assert!(
+        result.is_ok(),
+        "Failed to set key using meta_set: {:?}",
+        result
+    );
+
+    // Retrieve the key using meta_get to verify
+    let get_flags = ['h', 'l', 't'];
+    let get_result = client.meta_get(key, &get_flags).await.unwrap();
+
+    assert!(get_result.is_some(), "Key not found after meta_set");
+    let result_value = get_result.unwrap();
+
+    // Verify the value
+    assert_eq!(
+        String::from_utf8(result_value.data.unwrap()).unwrap(),
+        value,
+        "Retrieved value does not match set value"
+    );
+
+    // Clean up
+    let _ = client.delete(key).await;
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+async fn test_meta_set_not_stored() {
+    let key = "meta-set-add-if-not-exists-test-key";
+    let value = "test-value";
+    let ttl = Some(3600); // 1 hour
+
+    let mut client = setup_client(&[key]).await;
+
+    let mut meta_flags: FxHashMap<&[char], String> = FxHashMap::default();
+    meta_flags.insert(&['M'][..], "E".to_string()); // Set mode to "add if not exists"
+    meta_flags.insert(&['F'][..], "42".to_string()); // Set flags to 42
+
+    // Set the key using meta_set
+    let result = client.meta_set(key, value, ttl, meta_flags.clone()).await;
+    assert!(
+        result.is_ok(),
+        "Failed to set key using meta_set: {:?}",
+        result
+    );
+
+    // Set the key using meta_set again, this should fail with Status::NotStored
+    let result = client.meta_set(key, value, ttl, meta_flags.clone()).await;
+    let result = result.unwrap_err();
+    assert_eq!(Error::Protocol(Status::NotStored), result);
+
+    // Clean up
+    let _ = client.delete(key).await;
 }
 
 #[ignore = "Relies on a running memcached server"]
