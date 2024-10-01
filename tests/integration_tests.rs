@@ -849,6 +849,50 @@ async fn test_decrements_existing_key_with_no_reply() {
 
 #[ignore = "Relies on a running memcached server"]
 #[tokio::test]
+#[parallel]
+async fn test_meta_get_with_all_flags() {
+    let key = "meta-get-test-key-with-all-flags";
+    let value = "test-value";
+    let ttl = 3600; // 1 hour
+
+    let mut client = setup_client(&[key]).await;
+
+    // Set the key with a TTL
+    client.set(key, value, Some(ttl), None).await.unwrap();
+
+    // Perform a get to ensure the item has been hit
+    let result = client.get(key).await.unwrap();
+    let result_value = result.unwrap();
+    assert_eq!(String::from_utf8(result_value.data).unwrap(), value);
+
+    let flags = ['h', 'l', 't'];
+    let result = client.meta_get(key, &flags).await.unwrap();
+
+    assert!(result.is_some());
+    let result_meta_value = result.unwrap();
+
+    assert_eq!(String::from_utf8(result_meta_value.data).unwrap(), value);
+
+    let meta_flag_values = result_meta_value.meta_values.unwrap();
+    assert!(meta_flag_values.hit_before.unwrap());
+    assert_eq!(meta_flag_values.last_accessed.unwrap(), 0);
+    assert!(meta_flag_values.ttl_remaining.unwrap() > 0);
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_get_not_found() {
+    let key = "meta-get-test-key-not-found";
+    let flags = ['h', 'l', 't'];
+    let mut client = setup_client(&[key]).await;
+
+    let result = client.meta_get(key, &flags).await.unwrap();
+    assert_eq!(result, None);
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
 #[serial]
 async fn test_flush_all() {
     let key = "flush-all-key";
