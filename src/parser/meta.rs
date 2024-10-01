@@ -1,4 +1,3 @@
-use core::str;
 use std::convert::TryInto;
 
 use nom::{
