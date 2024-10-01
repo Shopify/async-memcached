@@ -22,6 +22,7 @@ async fn main() {
     }
 
     let keys = &["foo", "bar"];
+
     match client.get_multi(keys).await {
         Ok(values) => println!("got values: {:?}", values),
         Err(status) => println!("got status during get_many: {:?}", status),
@@ -40,6 +41,35 @@ async fn main() {
         ),
     }
 
+    let kv = vec![("multi_key1", "bar"), ("multi_key2", "bar")];
+
+    match client.add_multi(&kv, None, None).await {
+        Ok(_) => println!("added 'multi_key1' and 'multi_key2' successfully"),
+        Err(status) => println!("got status during add_multi: {:?}", status),
+    }
+
+    match client.set_multi(&kv, None, None).await {
+        Ok(_) => println!("set_multi 'multi_key1' and 'multi_key2' successfully"),
+        Err(status) => println!("got status during set_multi: {:?}", status),
+    }
+
+    match client.add_multi(&kv, None, None).await {
+        Ok(results) => match results.get(&"multi_key1") {
+            Some(result) => match result {
+                Ok(_) => panic!("should not be able to add 'multi_key1' again"),
+                Err(status) => println!(
+                    "got status during 'multi_key1' add: {:?}, as expected",
+                    status
+                ),
+            },
+            None => panic!("Something else went wrong with add_multi"),
+        },
+        Err(status) => println!(
+            "duplicate add of 'multi_key1' or 'multi_key2' fails as expected with: {:?}",
+            status
+        ),
+    }
+
     match client.delete("foo").await {
         Ok(()) => println!("deleted 'foo' successfully"),
         Err(status) => println!("got status during 'foo' delete: {:?}", status),
@@ -48,6 +78,65 @@ async fn main() {
     match client.delete_no_reply("add_key").await {
         Ok(()) => println!("deleted_no_reply 'add_key' successfully"),
         Err(status) => println!("got status during 'add_key' deleted_no_reply: {:?}", status),
+    }
+
+    let amount = 1;
+    let increment_key = "increment_key";
+
+    client
+        .set(increment_key, "0", None, None)
+        .await
+        .expect(format!("failed to set {}", increment_key).as_str());
+
+    match client.increment(increment_key, amount).await {
+        Ok(value) => println!(
+            "incremented {} by {} successfully, to {}",
+            increment_key, amount, value
+        ),
+        Err(status) => println!(
+            "got status during increment on key {}: {:?}",
+            increment_key, status
+        ),
+    }
+
+    match client.increment_no_reply(increment_key, amount).await {
+        Ok(()) => println!(
+            "incremented_no_reply {} by {} successfully",
+            increment_key, amount
+        ),
+        Err(status) => println!(
+            "got status during increment_no_reply on {}: {:?}",
+            increment_key, status
+        ),
+    }
+
+    let decrement_key = "decrement_key";
+
+    client
+        .set(decrement_key, "10", None, None)
+        .await
+        .expect(format!("failed to set {}", decrement_key).as_str());
+
+    match client.decrement(decrement_key, amount).await {
+        Ok(value) => println!(
+            "decremented {} by {} successfully, to {}",
+            decrement_key, amount, value
+        ),
+        Err(status) => println!(
+            "got status during decrement on {}: {:?}",
+            decrement_key, status
+        ),
+    }
+
+    match client.decrement_no_reply(decrement_key, amount).await {
+        Ok(()) => println!(
+            "decremented_no_reply {} by {} successfully",
+            decrement_key, amount
+        ),
+        Err(status) => println!(
+            "got status during decrement_no_reply on {}: {:?}",
+            decrement_key, status
+        ),
     }
 
     match client.version().await {
@@ -62,4 +151,11 @@ async fn main() {
         }
         Err(e) => println!("error while getting stats: {:?}", e),
     }
+
+    match client.flush_all().await {
+        Ok(_) => println!("flushed all successfully"),
+        Err(status) => println!("got status during flush_all: {:?}", status),
+    }
+
+    println!("✅ All examples completed successfully.");
 }

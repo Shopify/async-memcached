@@ -7,46 +7,51 @@ async-memcache is an async [memcached](https://memcached.org/) client implementa
 ## Testing
 
 The default test suite does not require `memcached` to be running. It will ignore tests that require `memcached` to be running.
-```
-cargo test
+```bash
+$ cargo test
 ```
 
 For the full test suite, you need to have `memcached` installed and running.
 
-```
-cargo test && cargo test -- --ignored
+```bash
+$ memcached -p 11211 -t 10 -c 10000 -m 1024
+$ cargo test && cargo test -- --ignored
 ```
 
 ## Benchmark
 
 To run the benchmark, you need to have `memcached` installed and running.
 
-```
-memcached -p 11211 -t 10 -c 10000 -m 1024
-cargo bench
+```bash
+$ memcached -p 11211 -t 10 -c 10000 -m 1024
+$ cargo bench
 ```
 
 ## Examples
 
-You can run the examples with `cargo run --example <example-name>`. Example require `memcached` running.
+You can run the examples with `cargo run --example <example-name>`. Examples require a running `memcached` server.
 
-TCP:
-```
-cargo run --package async-memcached --example basic
+### TCP
+Run a memcached server (with optional very verbose flag) that accepts a TCP connection and execute the basic examples:
+```bash
+$ memcached -vv
+$ cargo run --package async-memcached --example basic
 ```
 
-Unix:
-```
-memcached -p 11211 -t 10 -c 10000 -m 1024
-memcached -vv -s /tmp/memcached.sock
-cargo run --package async-memcached --example unix
+### Unix
+Run a memcached server (with optional very verbose flag) that accepts a UDS connection and execute the UNIX examples:
+```bash
+$ memcached -vv -s /tmp/memcached.sock
+$ cargo run --package async-memcached --example unix
 ```
 
 ## Profiling
 
 Install `samply` with `cargo install samply`.
 
-`samply record cargo run --package async-memcached --example unix`
+```bash
+$ samply record cargo run --package async-memcached --example unix
+```
 
 ## Features
 
