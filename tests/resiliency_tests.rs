@@ -1,4 +1,4 @@
-use async_memcached::Client;
+use async_memcached::{Client, AsciiProtocol};
 
 use toxiproxy_rust::{
     client::Client as ToxiproxyClient,
@@ -199,124 +199,126 @@ mod tests {
         });
     }
 
-    // #[ignore = "Relies on a running memcached server and toxiproxy service"]
-    // #[test]
-    // fn test_set_multi_errors_on_upstream_with_toxic_client_via_limit_data() {
-    //     let keys = vec!["upstream-key1", "upstream-key2", "upstream-key3"];
-    //     let values = vec!["value1", "value2", "value3"];
+    #[ignore = "Relies on a running memcached server and toxiproxy service"]
+    #[test]
+    fn test_set_multi_errors_on_upstream_with_toxic_client_via_limit_data() {
+        let keys = vec!["upstream-key1", "upstream-key2", "upstream-key3"];
+        let values = vec!["value1", "value2", "value3"];
 
-    //     let (toxic_proxy, toxic_local_addr) = create_proxy_and_config();
-    //     let toxic_local_url = "tcp://".to_string() + &toxic_local_addr;
+        let (toxic_proxy, toxic_local_addr) = create_proxy_and_config();
+        let toxic_local_url = "tcp://".to_string() + &toxic_local_addr;
 
-    //     let (rt, mut clean_client, mut toxic_client) =
-    //         setup_runtime_and_clients(&toxic_local_url, &keys);
+        let (rt, mut clean_client, mut toxic_client) =
+            setup_runtime_and_clients(&toxic_local_url, &keys);
 
-    //     let multiset_command =
-    //         keys.iter()
-    //             .zip(values.iter())
-    //             .fold(String::new(), |mut acc, (key, value)| {
-    //                 acc.push_str(&format!("set {} 0 0 {}\r\n{}\r\n", key, value.len(), value));
-    //                 acc
-    //             });
+        let multiset_command =
+            keys.iter()
+                .zip(values.iter())
+                .fold(String::new(), |mut acc, (key, value)| {
+                    acc.push_str(&format!("set {} 0 0 {}\r\n{}\r\n", key, value.len(), value));
+                    acc
+                });
 
-    //     // Simulate a network error happening when the client makes a request to the server.  Only part of the request is received by the server.
-    //     // In this case, the server can only cache values for the keys with complete commands.
+        // Simulate a network error happening when the client makes a request to the server.  Only part of the request is received by the server.
+        // In this case, the server can only cache values for the keys with complete commands.
 
-    //     let byte_limit = multiset_command.len() - 10; // First two commands should be intact, last one cut off
+        let byte_limit = multiset_command.len() - 10; // First two commands should be intact, last one cut off
 
-    //     let _ = toxic_proxy
-    //         .with_limit_data("upstream".into(), byte_limit as u32, 1.0)
-    //         .apply(|| {
-    //             rt.block_on(async {
-    //                 let kv: Vec<(&str, &str)> =
-    //                     keys.clone().into_iter().zip(values.clone()).collect();
-    //                 let result = toxic_client.set_multi(&kv, None, None).await;
+        let _ = toxic_proxy
+            .with_limit_data("upstream".into(), byte_limit as u32, 1.0)
+            .apply(|| {
+                rt.block_on(async {
+                    let kv: Vec<(&str, &str)> =
+                        keys.clone().into_iter().zip(values.clone()).collect();
+                    let result = toxic_client.set_multi(&kv, None, None).await;
 
-    //                 assert_eq!(
-    //                     result,
-    //                     Err(async_memcached::Error::Io(
-    //                         std::io::ErrorKind::UnexpectedEof.into()
-    //                     ))
-    //                 );
-    //             });
-    //         });
+                    assert_eq!(
+                        result,
+                        Err(async_memcached::Error::Io(
+                            std::io::ErrorKind::UnexpectedEof.into()
+                        ))
+                    );
+                });
+            });
 
-    //     // Use a clean client to check that the first two keys were stored and last was not
-    //     let get_result = rt.block_on(async { clean_client.get("upstream-key1").await });
-    //     assert!(matches!(
-    //         std::str::from_utf8(
-    //             &get_result
-    //                 .expect("should have unwrapped a Result")
-    //                 .expect("should have unwrapped an Option")
-    //                 .data.unwrap()
-    //         )
-    //         .expect("failed to parse string from bytes"),
-    //         "value1"
-    //     ));
+        // Use a clean client to check that the first two keys were stored and last was not
+        let get_result = rt.block_on(async { clean_client.get("upstream-key1").await });
 
-    //     let get_result = rt.block_on(async { clean_client.get("upstream-key2").await });
-    //     assert!(matches!(
-    //         std::str::from_utf8(
-    //             &get_result
-    //                 .expect("should have unwrapped a Result")
-    //                 .expect("should have unwrapped an Option")
-    //                 .data.unwrap()
-    //         )
-    //         .expect("failed to parse string from bytes"),
-    //         "value2"
-    //     ));
+        println!("get_result: {:?}", get_result);
+        assert!(matches!(
+            std::str::from_utf8(
+                &get_result
+                    .expect("should have unwrapped a Result")
+                    .expect("should have unwrapped an Option")
+                    .data.unwrap()
+            )
+            .expect("failed to parse string from bytes"),
+            "value1"
+        ));
 
-    //     let get_result = rt.block_on(async { clean_client.get("upstream-key3").await });
-    //     assert_eq!(get_result, Ok(None));
-    // }
+        let get_result = rt.block_on(async { clean_client.get("upstream-key2").await });
+        assert!(matches!(
+            std::str::from_utf8(
+                &get_result
+                    .expect("should have unwrapped a Result")
+                    .expect("should have unwrapped an Option")
+                    .data.unwrap()
+            )
+            .expect("failed to parse string from bytes"),
+            "value2"
+        ));
 
-    // #[ignore = "Relies on a running memcached server and toxiproxy service"]
-    // #[test]
-    // fn test_set_multi_errors_on_downstream_with_toxic_client_via_limit_data() {
-    //     let keys = vec!["downstream-key1", "downstream-key2", "downstream-key3"];
-    //     let values = vec!["value1", "value2", "value3"];
+        let get_result = rt.block_on(async { clean_client.get("upstream-key3").await });
+        assert_eq!(get_result, Ok(None));
+    }
 
-    //     let (toxic_proxy, toxic_local_addr) = create_proxy_and_config();
-    //     let toxic_local_url = "tcp://".to_string() + &toxic_local_addr;
+    #[ignore = "Relies on a running memcached server and toxiproxy service"]
+    #[test]
+    fn test_set_multi_errors_on_downstream_with_toxic_client_via_limit_data() {
+        let keys = vec!["downstream-key1", "downstream-key2", "downstream-key3"];
+        let values = vec!["value1", "value2", "value3"];
 
-    //     let (rt, mut clean_client, mut toxic_client) =
-    //         setup_runtime_and_clients(&toxic_local_url, &keys);
+        let (toxic_proxy, toxic_local_addr) = create_proxy_and_config();
+        let toxic_local_url = "tcp://".to_string() + &toxic_local_addr;
 
-    //     // Simulate a network error happening when the server responds back to the client.  A complete response is received for the first key but then
-    //     // the connection is closed before the other responses are received.  Regardless, the server should still cache all the data.
-    //     let byte_limit = "STORED\r\n".as_bytes().len() + 1;
+        let (rt, mut clean_client, mut toxic_client) =
+            setup_runtime_and_clients(&toxic_local_url, &keys);
 
-    //     let _ = toxic_proxy
-    //         .with_limit_data("downstream".into(), byte_limit as u32, 1.0)
-    //         .apply(|| {
-    //             rt.block_on(async {
-    //                 let kv: Vec<(&str, &str)> =
-    //                     keys.clone().into_iter().zip(values.clone()).collect();
+        // Simulate a network error happening when the server responds back to the client.  A complete response is received for the first key but then
+        // the connection is closed before the other responses are received.  Regardless, the server should still cache all the data.
+        let byte_limit = "STORED\r\n".as_bytes().len() + 1;
 
-    //                 let set_result = toxic_client.set_multi(&kv, None, None).await;
+        let _ = toxic_proxy
+            .with_limit_data("downstream".into(), byte_limit as u32, 1.0)
+            .apply(|| {
+                rt.block_on(async {
+                    let kv: Vec<(&str, &str)> =
+                        keys.clone().into_iter().zip(values.clone()).collect();
 
-    //                 assert_eq!(
-    //                     set_result,
-    //                     Err(async_memcached::Error::Io(
-    //                         std::io::ErrorKind::UnexpectedEof.into()
-    //                     ))
-    //                 );
-    //             });
-    //         });
+                    let set_result = toxic_client.set_multi(&kv, None, None).await;
 
-    //     // Use a clean client to check that all values were cached by the server despite the interrupted server response.
-    //     for (key, _expected_value) in keys.iter().zip(values.iter()) {
-    //         let get_result = rt.block_on(async { clean_client.get(key).await });
-    //         assert!(matches!(
-    //             std::str::from_utf8(
-    //                 &get_result
-    //                     .expect("should have unwrapped a Result")
-    //                     .expect("should have unwrapped an Option")
-    //                     .data.unwrap()
-    //             )
-    //             .expect("failed to parse string from bytes"),
-    //             _expected_value
-    //         ));
-    //     }
-    // }
+                    assert_eq!(
+                        set_result,
+                        Err(async_memcached::Error::Io(
+                            std::io::ErrorKind::UnexpectedEof.into()
+                        ))
+                    );
+                });
+            });
+
+        // Use a clean client to check that all values were cached by the server despite the interrupted server response.
+        for (key, _expected_value) in keys.iter().zip(values.iter()) {
+            let get_result = rt.block_on(async { clean_client.get(key).await });
+            assert!(matches!(
+                std::str::from_utf8(
+                    &get_result
+                        .expect("should have unwrapped a Result")
+                        .expect("should have unwrapped an Option")
+                        .data.unwrap()
+                )
+                .expect("failed to parse string from bytes"),
+                _expected_value
+            ));
+        }
+    }
 }

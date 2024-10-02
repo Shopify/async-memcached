@@ -1,4 +1,4 @@
-use async_memcached::{Client, Error, Status};
+use async_memcached::{Client, Error, Status, AsciiProtocol, MetaProtocol};
 use fxhash::FxHashMap;
 use rand::seq::IteratorRandom;
 use serial_test::{parallel, serial};
@@ -874,10 +874,9 @@ async fn test_meta_get_with_all_flags() {
 
     assert_eq!(String::from_utf8(result_meta_value.data.unwrap()).unwrap(), value);
 
-    let meta_flag_values = result_meta_value.meta_values.unwrap();
-    assert!(meta_flag_values.hit_before.unwrap());
-    assert_eq!(meta_flag_values.last_accessed.unwrap(), 0);
-    assert!(meta_flag_values.ttl_remaining.unwrap() > 0);
+    assert!(result_meta_value.hit_before.unwrap());
+    assert_eq!(result_meta_value.last_accessed.unwrap(), 0);
+    assert!(result_meta_value.ttl_remaining.unwrap() > 0);
 }
 
 #[ignore = "Relies on a running memcached server"]
