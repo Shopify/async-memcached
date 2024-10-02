@@ -11,7 +11,7 @@ use std::str::Utf8Error;
 
 use super::{
     is_key_char, parse_bool, parse_i64, parse_incrdecr, parse_u32, parse_u64, ErrorKind,
-    KeyMetadata, MetadumpResponse, Response, StatsResponse, Status, Value,
+    KeyMetadata, MetadumpResponse, Response, StatsResponse, Status, Value, MemcachedValue,
 };
 
 pub fn parse_ascii_status(buf: &[u8]) -> IResult<&[u8], Response> {
@@ -68,7 +68,6 @@ fn parse_ascii_value(buf: &[u8]) -> IResult<&[u8], Value> {
             cas,
             flags: Some(flags),
             data: Some(data.to_vec()),
-            meta_values: None,
         },
     ))
 }
@@ -79,8 +78,8 @@ fn parse_ascii_data(buf: &[u8]) -> IResult<&[u8], Response> {
             parse_ascii_value,
             || None,
             |xs, x| {
-                let mut xs: Vec<Value> = xs.unwrap_or_default();
-                xs.push(x);
+                let mut xs: Vec<MemcachedValue> = xs.unwrap_or_default();
+                xs.push(MemcachedValue::Value(x));
                 Some(xs)
             },
         ),
@@ -223,6 +222,8 @@ pub fn parse_ascii_stats_response(buf: &[u8]) -> Result<Option<(usize, StatsResp
 
 #[cfg(test)]
 mod tests {
+    use crate::MemcachedValue;
+
     use super::{
         parse_ascii_metadump_response, parse_ascii_response, parse_ascii_stats_response, parse_u32,
         ErrorKind, KeyMetadata, MetadumpResponse, Response, StatsResponse, Status, Value,
@@ -252,13 +253,13 @@ mod tests {
                 (b"42\r\n", 4, Response::IncrDecr(42)),
                 (b"END\r\n", 5, Response::Data(None)),
                 (b"VALUE foo 42 11\r\nhello world\r\nEND\r\n", 35, Response::Data(Some(
-                    vec![Value { key: FOO_KEY.to_vec(), flags: Some(42), cas: None, data: Some(HELLO_WORLD_DATA.to_vec()), meta_values: None }]
+                    vec![MemcachedValue::Value(Value { key: FOO_KEY.to_vec(), flags: Some(42), cas: None, data: Some(HELLO_WORLD_DATA.to_vec())})]
                 ))),
                 (b"VALUE foo 42 11\r\nhello world\r\nVALUE bar 43 11 15\r\nhello world\r\nEND\r\n", 68,
                     Response::Data(Some(
                         vec![
-                            Value { key: FOO_KEY.to_vec(), flags: Some(42), cas: None, data: Some(HELLO_WORLD_DATA.to_vec()), meta_values: None },
-                            Value { key: BAR_KEY.to_vec(), flags: Some(43), cas: Some(15), data: Some(HELLO_WORLD_DATA.to_vec()), meta_values: None },
+                            MemcachedValue::Value(Value { key: FOO_KEY.to_vec(), flags: Some(42), cas: None, data: Some(HELLO_WORLD_DATA.to_vec())}),
+                            MemcachedValue::Value(Value { key: BAR_KEY.to_vec(), flags: Some(43), cas: Some(15), data: Some(HELLO_WORLD_DATA.to_vec())}),
                         ]
                     ))
                 ),

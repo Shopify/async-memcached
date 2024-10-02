@@ -16,7 +16,7 @@ use self::parser::{
     parse_ascii_metadump_response, parse_ascii_response, parse_ascii_stats_response,
     parse_meta_response, Response,
 };
-pub use self::parser::{ErrorKind, KeyMetadata, MetadumpResponse, StatsResponse, Status, Value};
+pub use self::parser::{ErrorKind, KeyMetadata, MetadumpResponse, StatsResponse, Status, MetaValue, Value, MemcachedValue};
 
 mod value_serializer;
 pub use self::value_serializer::AsMemcachedValue;
@@ -136,7 +136,7 @@ impl Client {
     /// If the key is found, `Some(Value)` is returned, describing the metadata and data of the key.
     ///
     /// Otherwise, [`Error`] is returned.
-    pub async fn get<K: AsRef<[u8]>>(&mut self, key: K) -> Result<Option<Value>, Error> {
+    pub async fn get<K: AsRef<[u8]>>(&mut self, key: K) -> Result<Option<MemcachedValue>, Error> {
         self.conn
             .write_all(&[b"get ", key.as_ref(), b"\r\n"].concat())
             .await?;
@@ -172,7 +172,7 @@ impl Client {
         &mut self,
         key: K,
         meta_flags: &[char],
-    ) -> Result<Option<Value>, Error> {
+    ) -> Result<Option<MetaValue>, Error> {
         let mut command = Vec::with_capacity(64);
         command.extend_from_slice(b"mg ");
         command.extend_from_slice(key.as_ref());
@@ -197,9 +197,14 @@ impl Client {
                     if items.len() != 1 {
                         Err(Status::Error(ErrorKind::Protocol(None)).into())
                     } else {
-                        let mut item = items.remove(0);
-                        item.key = key.as_ref().to_vec();
-                        Ok(item)
+                        let item = items.remove(0);
+                        match item {
+                            MemcachedValue::MetaValue(mut item) => {
+                                item.key = Some(key.as_ref().to_vec());
+                                Ok(item)
+                            }
+                            _ => panic!("Expected MemcachedValue::MetaValue, got something else"),
+                        }
                     }
                 })
                 .transpose(),
@@ -213,7 +218,7 @@ impl Client {
     /// describes the metadata and data of the key.
     ///
     /// Otherwise, [`Error`] is returned.
-    pub async fn get_multi<I, K>(&mut self, keys: I) -> Result<Vec<Value>, Error>
+    pub async fn get_multi<I, K>(&mut self, keys: I) -> Result<Vec<MemcachedValue>, Error>
     where
         I: IntoIterator<Item = K>,
         K: AsRef<[u8]>,
@@ -240,7 +245,7 @@ impl Client {
         since = "0.4.0",
         note = "This is now an alias for `get_multi`, and will be removed in the future."
     )]
-    pub async fn get_many<I, K>(&mut self, keys: I) -> Result<Vec<Value>, Error>
+    pub async fn get_many<I, K>(&mut self, keys: I) -> Result<Vec<MemcachedValue>, Error>
     where
         I: IntoIterator<Item = K>,
         K: AsRef<[u8]>,
@@ -403,7 +408,7 @@ impl Client {
         value: V,
         ttl: Option<i64>,
         meta_flags: FxHashMap<&[char], String>,
-    ) -> Result<Option<Value>, Error>
+    ) -> Result<Option<MetaValue>, Error>
     where
         K: AsRef<[u8]>,
         V: AsMemcachedValue,
@@ -447,9 +452,14 @@ impl Client {
                     if items.len() != 1 {
                         Err(Status::Error(ErrorKind::Protocol(None)).into())
                     } else {
-                        let mut item = items.remove(0);
-                        item.key = key.as_ref().to_vec();
-                        Ok(item)
+                        let item = items.remove(0);
+                        match item {
+                            MemcachedValue::MetaValue(mut item) => {
+                                item.key = Some(key.as_ref().to_vec());
+                                Ok(item)
+                            }
+                            _ => panic!("Expected MemcachedValue::MetaValue, got something else"),
+                        }
                     }
                 })
                 .transpose(),

@@ -13,7 +13,7 @@ use nom::{
     IResult,
 };
 
-use super::{parse_u32, ErrorKind, MetaValue, Response, Status, Value};
+use super::{parse_u32, ErrorKind, MetaValue, Response, Status, MemcachedValue};
 
 pub fn parse_meta_status(buf: &[u8]) -> IResult<&[u8], Response> {
     terminated(
@@ -67,23 +67,11 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
             // TODO: dont' call if there are no flags
             let (input, meta_values_array) = parse_meta_tag_values_as_slice(input)?;
 
-            let mut meta_values = MetaValue {
-                hit_before: None,
-                last_accessed: None,
-                ttl_remaining: None,
-                opaque_token: None,
-            };
-            let mut value = Value {
-                key: b"key".to_vec(),
-                cas: None,
-                flags: None,
-                data: None,
-                meta_values: None,
-            };
+            let mut value = MetaValue::default();
 
             for (flag, meta_value) in meta_values_array {
                 match flag {
-                    b'O' => meta_values.opaque_token = Some(meta_value.to_vec()),
+                    b'O' => value.opaque_token = Some(meta_value.to_vec()),
                     b'c' => {
                         value.cas =
                             Some(u64::from_be_bytes(meta_value.try_into().unwrap_or([0; 8])));
@@ -92,9 +80,8 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
                 }
             }
 
-            value.meta_values = Some(meta_values);
             let (input, _) = tag("\r\n")(input)?;
-            Ok((input, Response::Data(Some(vec![value]))))
+            Ok((input, Response::Data(Some(vec![MemcachedValue::MetaValue(value)]))))
         }
         _ => Err(nom::Err::Error(nom::error::Error::new(
             input,
@@ -132,12 +119,7 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
             let (input, _) = crlf(input)?;
             let (input, data) = take_until_size(input, size)?;
 
-            let mut meta_values = MetaValue {
-                hit_before: None,
-                last_accessed: None,
-                ttl_remaining: None,
-                opaque_token: None,
-            };
+            let mut meta_values = MetaValue::default();
             for (flag, value) in meta_values_array {
                 match flag {
                     b'h' => meta_values.hit_before = Some(value != 0),
@@ -150,13 +132,16 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
             // TODO: hmmm we don't have the key in the response anymore, should we return none and the caller maps it back?
             // or we need to pass the key into the parser...
             // slowly this is pointing towards a different value type all together for meta
-            let value = Value {
-                key: b"key".to_vec(),
+            let value = MemcachedValue::MetaValue(MetaValue {
+                key: Some(b"key".to_vec()),
                 cas: None,
-                flags: Some(0),
+                meta_flags: Some(0),
                 data: Some(data),
-                meta_values: Some(meta_values),
-            };
+                hit_before: meta_values.hit_before,
+                last_accessed: meta_values.last_accessed,
+                ttl_remaining: meta_values.ttl_remaining,
+                opaque_token: meta_values.opaque_token,
+            });
 
             Ok((input, Response::Data(Some(vec![value]))))
         }
@@ -319,17 +304,20 @@ mod tests {
             Response::Data(Some(values)) => {
                 assert_eq!(values.len(), 1);
                 let value = &values[0];
-                assert_eq!(
-                    str::from_utf8(value.data.as_ref().unwrap()).unwrap(),
-                    "test-value"
-                );
-                assert_eq!(value.flags, Some(0));
-                assert_eq!(value.cas, None);
 
-                let meta_values = value.meta_values.as_ref().unwrap();
-                assert_eq!(meta_values.hit_before, Some(true));
-                assert_eq!(meta_values.last_accessed, Some(56));
-                assert_eq!(meta_values.ttl_remaining, Some(2179));
+                match value {
+                    MemcachedValue::MetaValue(meta_value) => {
+                        assert_eq!(
+                            str::from_utf8(meta_value.data.as_ref().unwrap()).unwrap(),
+                            "test-value"
+                        );
+                        assert_eq!(meta_value.cas, None);
+                        assert_eq!(meta_value.hit_before, Some(true));
+                        assert_eq!(meta_value.last_accessed, Some(56));
+                        assert_eq!(meta_value.ttl_remaining, Some(2179));
+                    }
+                    _ => panic!("Expected MemcachedValue::MetaValue, got something else"),
+                }
             }
             _ => panic!("Expected Response::Data, got something else"),
         }
@@ -346,17 +334,20 @@ mod tests {
             Response::Data(Some(values)) => {
                 assert_eq!(values.len(), 1);
                 let value = &values[0];
-                assert_eq!(
-                    str::from_utf8(value.data.as_ref().unwrap()).unwrap(),
-                    "test-value"
-                );
-                assert_eq!(value.flags, Some(0));
-                assert_eq!(value.cas, None);
 
-                let meta_values = value.meta_values.as_ref().unwrap();
-                assert_eq!(meta_values.hit_before, Some(true));
-                assert_eq!(meta_values.last_accessed, Some(56));
-                assert_eq!(meta_values.ttl_remaining, Some(2179));
+                match value {
+                    MemcachedValue::MetaValue(meta_value) => {
+                        assert_eq!(
+                            str::from_utf8(meta_value.data.as_ref().unwrap()).unwrap(),
+                            "test-value"
+                        );
+                        assert_eq!(meta_value.cas, None);
+                        assert_eq!(meta_value.hit_before, Some(true));
+                        assert_eq!(meta_value.last_accessed, Some(56));
+                        assert_eq!(meta_value.ttl_remaining, Some(2179));
+                    }
+                    _ => panic!("Expected MemcachedValue::MetaValue, got something else"),
+                }
             }
             _ => panic!("Expected Response::Data, got something else"),
         }
@@ -373,17 +364,20 @@ mod tests {
             Response::Data(Some(values)) => {
                 assert_eq!(values.len(), 1);
                 let value = &values[0];
-                assert_eq!(
-                    str::from_utf8(value.data.as_ref().unwrap()).unwrap(),
-                    "test-value"
-                );
-                assert_eq!(value.flags, Some(0));
-                assert_eq!(value.cas, None);
 
-                let meta_values = value.meta_values.as_ref().unwrap();
-                assert_eq!(meta_values.hit_before, Some(true));
-                assert_eq!(meta_values.last_accessed, Some(56));
-                assert_eq!(meta_values.ttl_remaining, Some(2179));
+                match value {
+                    MemcachedValue::MetaValue(meta_value) => {
+                        assert_eq!(
+                            str::from_utf8(meta_value.data.as_ref().unwrap()).unwrap(),
+                            "test-value"
+                        );
+                        assert_eq!(meta_value.cas, None);
+                        assert_eq!(meta_value.hit_before, Some(true));
+                        assert_eq!(meta_value.last_accessed, Some(56));
+                        assert_eq!(meta_value.ttl_remaining, Some(2179));
+                    }
+                    _ => panic!("Expected MemcachedValue::MetaValue, got something else"),
+                }
             }
             _ => panic!("Expected Response::Data, got something else"),
         }
@@ -420,17 +414,20 @@ mod tests {
             Response::Data(Some(values)) => {
                 assert_eq!(values.len(), 1);
                 let value = &values[0];
-                assert_eq!(
-                    str::from_utf8(value.data.as_ref().unwrap()).unwrap(),
-                    "test-\r\nvalue"
-                );
-                assert_eq!(value.flags, Some(0));
-                assert_eq!(value.cas, None);
 
-                let meta_values = value.meta_values.as_ref().unwrap();
-                assert_eq!(meta_values.hit_before, Some(true));
-                assert_eq!(meta_values.last_accessed, Some(56));
-                assert_eq!(meta_values.ttl_remaining, Some(2179));
+                match value {
+                    MemcachedValue::MetaValue(meta_value) => {
+                        assert_eq!(
+                            str::from_utf8(meta_value.data.as_ref().unwrap()).unwrap(),
+                            "test-\r\nvalue"
+                        );
+                        assert_eq!(meta_value.cas, None);
+                        assert_eq!(meta_value.hit_before, Some(true));
+                        assert_eq!(meta_value.last_accessed, Some(56));
+                        assert_eq!(meta_value.ttl_remaining, Some(2179));
+                    }
+                    _ => panic!("Expected MemcachedValue::MetaValue, got something else"),
+                }
             }
             _ => panic!("Expected Response::Data, got something else"),
         }
