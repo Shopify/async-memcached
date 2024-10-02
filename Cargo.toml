@@ -23,6 +23,7 @@ async-stream = "0.3"
 url = "2.5.2"
 toxiproxy_rust = "0.1.6"
 fxhash = "0.2.1"
+async-trait = "0.1.83"
 
 [dev-dependencies]
 lazy_static = "1.4"
