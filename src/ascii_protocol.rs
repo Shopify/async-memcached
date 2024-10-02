@@ -1,4 +1,4 @@
-use super::{Client, Error, MemcachedValue, Response, Status};
+use super::{Client, Error, Response, Value, Status};
 use super::{ErrorKind, AsMemcachedValue};
 // use async_trait;
 use fxhash::FxHashMap;
@@ -11,14 +11,14 @@ pub trait AsciiProtocol {
     /// If the key is found, `Some(MemcachedValue)` is returned, describing the metadata and data of the key.
     ///
     /// Otherwise, [`Error`] is returned.
-    async fn get<K: AsRef<[u8]>>(&mut self, key: K) -> Result<Option<MemcachedValue>, Error>;
+    async fn get<K: AsRef<[u8]>>(&mut self, key: K) -> Result<Option<Value>, Error>;
 
     /// Gets multiple keys.
     ///
     /// If any of the keys are found, a vector of [`MemcachedValue`] will be returned.
     ///
     /// Otherwise, [`Error`] is returned.
-    async fn get_multi<I, K>(&mut self, keys: I) -> Result<Vec<MemcachedValue>, Error>
+    async fn get_multi<I, K>(&mut self, keys: I) -> Result<Vec<Value>, Error>
     where
         I: IntoIterator<Item = K>,
         K: AsRef<[u8]>;
@@ -30,7 +30,7 @@ pub trait AsciiProtocol {
         since = "0.4.0",
         note = "This is now an alias for `get_multi`, and will be removed in the future."
     )]
-    async fn get_many<I, K>(&mut self, keys: I) -> Result<Vec<MemcachedValue>, Error>
+    async fn get_many<I, K>(&mut self, keys: I) -> Result<Vec<Value>, Error>
     where
         I: IntoIterator<Item = K>,
         K: AsRef<[u8]>;
@@ -137,7 +137,7 @@ pub trait AsciiProtocol {
 }
 
 impl AsciiProtocol for Client {
-    async fn get<K: AsRef<[u8]>>(&mut self, key: K) -> Result<Option<MemcachedValue>, Error> {
+    async fn get<K: AsRef<[u8]>>(&mut self, key: K) -> Result<Option<Value>, Error> {
         self.conn
             .write_all(&[b"get ", key.as_ref(), b"\r\n"].concat())
             .await?;
@@ -159,7 +159,7 @@ impl AsciiProtocol for Client {
         }
     }
 
-    async fn get_multi<I, K>(&mut self, keys: I) -> Result<Vec<MemcachedValue>, Error>
+    async fn get_multi<I, K>(&mut self, keys: I) -> Result<Vec<Value>, Error>
     where
         I: IntoIterator<Item = K>,
         K: AsRef<[u8]>,
@@ -179,7 +179,7 @@ impl AsciiProtocol for Client {
         }
     }
 
-    async fn get_many<I, K>(&mut self, keys: I) -> Result<Vec<MemcachedValue>, Error>
+    async fn get_many<I, K>(&mut self, keys: I) -> Result<Vec<Value>, Error>
     where
         I: IntoIterator<Item = K>,
         K: AsRef<[u8]>,

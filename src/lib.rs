@@ -6,6 +6,7 @@ use fxhash::FxHashMap;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 
 mod ascii_protocol;
+use self::ascii_protocol::AsciiProtocol;
 
 mod connection;
 use self::connection::Connection;
@@ -14,12 +15,13 @@ mod error;
 pub use self::error::Error;
 
 mod meta_protocol;
+use self::meta_protocol::MetaProtocol;
 
 mod parser;
 use self::parser::{
     parse_ascii_metadump_response, parse_ascii_response, parse_ascii_stats_response, Response,
 };
-pub use self::parser::{ErrorKind, KeyMetadata, MetadumpResponse, StatsResponse, Status, MetaValue, Value, MemcachedValue};
+pub use self::parser::{ErrorKind, KeyMetadata, MetadumpResponse, StatsResponse, Status, MetaValue, Value, MetaResponse};
 
 mod value_serializer;
 pub use self::value_serializer::AsMemcachedValue;
@@ -134,36 +136,6 @@ impl Client {
         self.drive_receive(parse_ascii_stats_response).await
     }
 
-    /// Gets the given key with additional metadata.
-    ///
-    /// If the key is found, `Some(Value)` is returned, describing the metadata and data of the key.
-    ///
-    /// Otherwise, `None` is returned.
-    ///
-    /// Supported meta flags:
-    /// - h: return whether item has been hit before as a 0 or 1
-    /// - l: return time since item was last accessed in seconds
-    /// - t: return item TTL remaining in seconds (-1 for unlimited)
-
-
-    /// Sets the given key.
-    ///
-    /// If `ttl` they will default to 0.  If the value is set
-    /// successfully, `Some(Value)` is returned, otherwise [`Error`] is returned.
-    /// NOTE: That the data is some Value is sparsely populated, containing only requested data by meta_flags
-    /// The meta set command a generic command for storing data to memcached. Based
-    /// on the flags supplied, it can replace all storage commands (see token M) as
-    /// well as adds new options.
-    //
-    // ms <key> <datalen> <flags>*\r\n
-    //
-    // - <key> means one key string.
-    // - <datalen> is the length of the payload data.
-    //
-    // - <flags> are a set of single character codes ended with a space or newline.
-    //   flags may have strings after the initial character.
-
-
     /// Gets the version of the server.
     ///
     /// If the version is retrieved successfully, `String` is returned containing the version
@@ -231,7 +203,6 @@ impl Client {
     /// This operation invalidates all existing items immediately. Any items with an update time
     /// older than the time of the flush_all operation will be ignored for retrieval purposes.
     /// This operation does not free up memory taken up by the existing items.
-
     pub async fn flush_all(&mut self) -> Result<(), Error> {
         self.conn.write_all(b"flush_all\r\n").await?;
         self.conn.flush().await?;
@@ -246,6 +217,115 @@ impl Client {
                 format!("Invalid response for `flush_all` command: `{response}`"),
             )))))
         }
+    }
+}
+
+impl ascii_protocol::AsciiProtocol for Client {
+    async fn get<K: AsRef<[u8]>>(&mut self, key: K) -> Result<Option<Value>, Error> {
+        // Implementation moved to ascii_protocol.rs
+        ascii_protocol::AsciiProtocol::get(self, key).await
+    }
+
+    async fn get_multi<I, K>(&mut self, keys: I) -> Result<Vec<Value>, Error>
+    where
+        I: IntoIterator<Item = K>,
+        K: AsRef<[u8]>,
+    {
+        ascii_protocol::AsciiProtocol::get_multi(self, keys).await
+    }
+
+    async fn set<K, V>(
+        &mut self,
+        key: K,
+        value: V,
+        ttl: Option<i64>,
+        flags: Option<u32>,
+    ) -> Result<(), Error>
+    where
+        K: AsRef<[u8]>,
+        V: AsMemcachedValue,
+    {
+        ascii_protocol::AsciiProtocol::set(self, key, value, ttl, flags).await
+    }
+
+    async fn add<K, V>(
+        &mut self,
+        key: K,
+        value: V,
+        ttl: Option<i64>,
+        flags: Option<u32>,
+    ) -> Result<(), Error>
+    where
+        K: AsRef<[u8]>,
+        V: AsMemcachedValue,
+    {
+        ascii_protocol::AsciiProtocol::add(self, key, value, ttl, flags).await
+    }
+
+    async fn delete_no_reply<K>(&mut self, key: K) -> Result<(), Error>
+    where
+        K: AsRef<[u8]>,
+    {
+        ascii_protocol::AsciiProtocol::delete_no_reply(self, key).await
+    }
+
+    async fn delete<K>(&mut self, key: K) -> Result<(), Error>
+    where
+        K: AsRef<[u8]>,
+    {
+        ascii_protocol::AsciiProtocol::delete(self, key).await
+    }
+
+    async fn increment<K>(&mut self, key: K, amount: u64) -> Result<u64, Error>
+    where
+        K: AsRef<[u8]>,
+    {
+        ascii_protocol::AsciiProtocol::increment(self, key, amount).await
+    }
+
+    async fn increment_no_reply<K>(&mut self, key: K, amount: u64) -> Result<(), Error>
+    where
+        K: AsRef<[u8]>,
+    {
+        ascii_protocol::AsciiProtocol::increment_no_reply(self, key, amount).await
+    }
+
+    async fn decrement<K>(&mut self, key: K, amount: u64) -> Result<u64, Error>
+    where
+        K: AsRef<[u8]>,
+    {
+        ascii_protocol::AsciiProtocol::decrement(self, key, amount).await
+    }
+
+    async fn decrement_no_reply<K>(&mut self, key: K, amount: u64) -> Result<(), Error>
+    where
+        K: AsRef<[u8]>,
+    {
+        ascii_protocol::AsciiProtocol::decrement_no_reply(self, key, amount).await
+    }
+}
+
+impl meta_protocol::MetaProtocol for Client {
+    async fn meta_get<K: AsRef<[u8]>>(
+        &mut self,
+        key: K,
+        meta_flags: &[char],
+    ) -> MetaResult<Option<MetaValue>, Error> {
+        meta_protocol::MetaProtocol::meta_get(self, key, meta_flags).await
+    }
+
+    async fn meta_set<K, V>(
+        &mut self,
+        key: K,
+        value: V,
+        ttl: Option<i64>,
+        meta_flags: FxHashMap<&[char], String>,
+    ) -> MetaResult<(), Error>
+    where
+        K: AsRef<[u8]>,
+        V: AsMemcachedValue,
+    {
+        meta_protocol::MetaProtocol::meta_set(self, key, value, ttl, meta_flags).await
     }
 }
 

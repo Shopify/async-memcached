@@ -1,5 +1,7 @@
-use super::{Client, Error, MemcachedValue, Response, Status, MetaValue};
+use super::{Client, Error, MetaValue, Status};
 use super::{ErrorKind, AsMemcachedValue};
+
+use crate::parser::MetaResponse;
 // use async_trait;
 use fxhash::FxHashMap;
 use tokio::io::AsyncWriteExt;
@@ -74,25 +76,20 @@ impl MetaProtocol for Client {
         self.conn.flush().await?;
 
         match self.drive_receive(parse_meta_response).await? {
-            Response::Status(Status::NotFound) => Ok(None),
-            Response::Status(s) => Err(s.into()),
-            Response::Data(d) => d
+            MetaResponse::Status(Status::NotFound) => Ok(None),
+            MetaResponse::Status(s) => Err(s.into()),
+            MetaResponse::Data(d) => d
                 .map(|mut items| {
                     if items.len() != 1 {
                         Err(Status::Error(ErrorKind::Protocol(None)).into())
                     } else {
-                        let item = items.remove(0);
-                        match item {
-                            MemcachedValue::MetaValue(mut item) => {
-                                item.key = Some(key.as_ref().to_vec());
-                                Ok(item)
-                            }
-                            _ => panic!("Expected MemcachedValue::MetaValue, got something else"),
-                        }
+                        let mut item = items.remove(0);
+                        item.key = Some(key.as_ref().to_vec());
+                        Ok(item)
                     }
                 })
                 .transpose(),
-            _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),
+            // _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),
         }
     }
 
@@ -140,24 +137,19 @@ impl MetaProtocol for Client {
         self.conn.flush().await?;
 
         match self.drive_receive(parse_meta_response).await? {
-            Response::Status(s) => Err(s.into()),
-            Response::Data(d) => d
+            MetaResponse::Status(s) => Err(s.into()),
+            MetaResponse::Data(d) => d
                 .map(|mut items| {
                     if items.len() != 1 {
                         Err(Status::Error(ErrorKind::Protocol(None)).into())
                     } else {
-                        let item = items.remove(0);
-                        match item {
-                            MemcachedValue::MetaValue(mut item) => {
-                                item.key = Some(key.as_ref().to_vec());
-                                Ok(item)
-                            }
-                            _ => panic!("Expected MemcachedValue::MetaValue, got something else"),
-                        }
+                        let mut item = items.remove(0);
+                        item.key = Some(key.as_ref().to_vec());
+                        Ok(item)
                     }
                 })
                 .transpose(),
-            _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),
+            // _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),
         }
     }
 }
