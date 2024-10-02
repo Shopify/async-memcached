@@ -1,6 +1,7 @@
 use super::{Client, Error, Response, Value, Status};
 use super::{ErrorKind, AsMemcachedValue};
-// use async_trait;
+
+use std::future::Future;
 use fxhash::FxHashMap;
 use tokio::io::AsyncWriteExt;
 
@@ -11,14 +12,14 @@ pub trait AsciiProtocol {
     /// If the key is found, `Some(MemcachedValue)` is returned, describing the metadata and data of the key.
     ///
     /// Otherwise, [`Error`] is returned.
-    async fn get<K: AsRef<[u8]>>(&mut self, key: K) -> Result<Option<Value>, Error>;
+    fn get<K: AsRef<[u8]>>(&mut self, key: K) -> impl Future<Output = Result<Option<Value>, Error>>;
 
     /// Gets multiple keys.
     ///
     /// If any of the keys are found, a vector of [`MemcachedValue`] will be returned.
     ///
     /// Otherwise, [`Error`] is returned.
-    async fn get_multi<I, K>(&mut self, keys: I) -> Result<Vec<Value>, Error>
+    fn get_multi<I, K>(&mut self, keys: I) -> impl Future<Output = Result<Vec<Value>, Error>>
     where
         I: IntoIterator<Item = K>,
         K: AsRef<[u8]>;
@@ -30,7 +31,7 @@ pub trait AsciiProtocol {
         since = "0.4.0",
         note = "This is now an alias for `get_multi`, and will be removed in the future."
     )]
-    async fn get_many<I, K>(&mut self, keys: I) -> Result<Vec<Value>, Error>
+    fn get_many<I, K>(&mut self, keys: I) -> impl Future<Output = Result<Vec<Value>, Error>>
     where
         I: IntoIterator<Item = K>,
         K: AsRef<[u8]>;
@@ -39,13 +40,13 @@ pub trait AsciiProtocol {
     ///
     /// If `ttl` or `flags` are not specified, they will default to 0. If the value is set
     /// successfully, `()` is returned, otherwise [`Error`] is returned.
-    async fn set<K, V>(
+    fn set<K, V>(
         &mut self,
         key: K,
         value: V,
         ttl: Option<i64>,
         flags: Option<u32>,
-    ) -> Result<(), Error>
+    ) -> impl Future<Output = Result<(), Error>>
     where
         K: AsRef<[u8]>,
         V: AsMemcachedValue;
@@ -54,24 +55,24 @@ pub trait AsciiProtocol {
     ///
     /// If `ttl` or `flags` are not specified, they will default to 0. The same values for `ttl` and `flags` will be applied to each key.
     /// Returns a result with a HashMap of keys mapped to the result of the set operation, or an error.
-    async fn set_multi<'a, K, V>(
+    fn set_multi<'a, K, V>(
         &mut self,
         kv: &'a [(K, V)],
         ttl: Option<i64>,
         flags: Option<u32>,
-    ) -> Result<FxHashMap<&'a K, Result<(), Error>>, Error>
+    ) -> impl Future<Output = Result<FxHashMap<&'a K, Result<(), Error>>, Error>>
     where
         K: AsRef<[u8]> + Eq + std::hash::Hash + std::fmt::Debug,
         V: AsMemcachedValue;
 
     /// Add a key. If the value exists, Err(Protocol(NotStored)) is returned.
-    async fn add<K, V>(
+    fn add<K, V>(
         &mut self,
         key: K,
         value: V,
         ttl: Option<i64>,
         flags: Option<u32>,
-    ) -> Result<(), Error>
+    ) -> impl Future<Output = Result<(), Error>>
     where
         K: AsRef<[u8]>,
         V: AsMemcachedValue;
@@ -80,28 +81,28 @@ pub trait AsciiProtocol {
     ///
     /// If `ttl` or `flags` are not specified, they will default to 0. The same values for `ttl` and `flags` will be applied to each key.
     /// Returns a result with a HashMap of keys mapped to the result of the add operation, or an error.
-    async fn add_multi<'a, K, V>(
+    fn add_multi<'a, K, V>(
         &mut self,
         kv: &'a [(K, V)],
         ttl: Option<i64>,
         flags: Option<u32>,
-    ) -> Result<FxHashMap<&'a K, Result<(), Error>>, Error>
+    ) -> impl Future<Output = Result<FxHashMap<&'a K, Result<(), Error>>, Error>>
     where
         K: AsRef<[u8]> + Eq + std::hash::Hash + std::fmt::Debug,
         V: AsMemcachedValue;
 
     /// Delete multiple keys
-    async fn delete_multi_no_reply<K>(&mut self, keys: &[K]) -> Result<(), Error>
+    fn delete_multi_no_reply<K>(&mut self, keys: &[K]) -> impl Future<Output = Result<(), Error>>
     where
         K: AsRef<[u8]>;
 
     /// Delete a key but don't wait for a reply.
-    async fn delete_no_reply<K>(&mut self, key: K) -> Result<(), Error>
+    fn delete_no_reply<K>(&mut self, key: K) -> impl Future<Output = Result<(), Error>>
     where
         K: AsRef<[u8]>;
 
     /// Delete a key and wait for a reply.
-    async fn delete<K>(&mut self, key: K) -> Result<(), Error>
+    fn delete<K>(&mut self, key: K) -> impl Future<Output = Result<(), Error>>
     where
         K: AsRef<[u8]>;
 
@@ -109,14 +110,14 @@ pub trait AsciiProtocol {
     /// Can overflow from the max value of u64 (18446744073709551615) -> 0.
     /// If the key does not exist, the server will return a KeyNotFound error.
     /// If the key exists but the value is non-numeric, the server will return a ClientError.
-    async fn increment<K>(&mut self, key: K, amount: u64) -> Result<u64, Error>
+    fn increment<K>(&mut self, key: K, amount: u64) -> impl Future<Output = Result<u64, Error>>
     where
         K: AsRef<[u8]>;
 
     /// Increments the given key by the specified amount with no reply from the server.
     /// Can overflow from the max value of u64 (18446744073709551615) -> 0.
     /// Always returns () for a complete request, will not return any indication of success or failure.
-    async fn increment_no_reply<K>(&mut self, key: K, amount: u64) -> Result<(), Error>
+    fn increment_no_reply<K>(&mut self, key: K, amount: u64) -> impl Future<Output = Result<(), Error>>
     where
         K: AsRef<[u8]>;
 
@@ -124,14 +125,14 @@ pub trait AsciiProtocol {
     /// Will not decrement the counter below 0.
     /// If the key does not exist, the server will return a KeyNotFound error.
     /// If the key exists but the value is non-numeric, the server will return a ClientError.
-    async fn decrement<K>(&mut self, key: K, amount: u64) -> Result<u64, Error>
+    fn decrement<K>(&mut self, key: K, amount: u64) -> impl Future<Output = Result<u64, Error>>
     where
         K: AsRef<[u8]>;
 
     /// Decrements the given key by the specified amount with no reply from the server.
     /// Will not decrement the counter below 0.
     /// Always returns () for a complete request, will not return any indication of success or failure.
-    async fn decrement_no_reply<K>(&mut self, key: K, amount: u64) -> Result<(), Error>
+    fn decrement_no_reply<K>(&mut self, key: K, amount: u64) -> impl Future<Output = Result<(), Error>>
     where
         K: AsRef<[u8]>;
 }

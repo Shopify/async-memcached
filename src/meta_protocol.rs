@@ -1,6 +1,7 @@
 use super::{Client, Error, MetaValue, Status};
 use super::{ErrorKind, AsMemcachedValue};
 
+use std::future::Future;
 use crate::parser::MetaResponse;
 // use async_trait;
 use fxhash::FxHashMap;
@@ -19,11 +20,11 @@ pub trait MetaProtocol {
     /// - h: return whether item has been hit before as a 0 or 1
     /// - l: return time since item was last accessed in seconds
     /// - t: return item TTL remaining in seconds (-1 for unlimited)
-    async fn meta_get<K: AsRef<[u8]>>(
+    fn meta_get<K: AsRef<[u8]>>(
         &mut self,
         key: K,
         meta_flags: &[char],
-    ) -> Result<Option<MetaValue>, Error>;
+    ) -> impl Future<Output = Result<Option<MetaValue>, Error>>;
 
     /// Sets the given key.
     ///
@@ -41,13 +42,13 @@ pub trait MetaProtocol {
     //
     // - <flags> are a set of single character codes ended with a space or newline.
     //   flags may have strings after the initial character.
-    async fn meta_set<K, V>(
+    fn meta_set<K, V>(
         &mut self,
         key: K,
         value: V,
         ttl: Option<i64>,
         meta_flags: FxHashMap<&[char], String>,
-    ) -> Result<Option<MetaValue>, Error>
+    ) -> impl Future<Output = Result<Option<MetaValue>, Error>>
     where
         K: AsRef<[u8]>,
         V: AsMemcachedValue;
