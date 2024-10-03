@@ -20,7 +20,7 @@ pub use self::parser::{ErrorKind, KeyMetadata, MetadumpResponse, StatsResponse, 
 mod value_serializer;
 pub use self::value_serializer::AsMemcachedValue;
 
-const MAX_KEY_LENGTH: usize = 250;
+const MAX_KEY_LENGTH: usize = 250; // reference in memcached documentation: https://github.com/memcached/memcached/blob/5609673ed29db98a377749fab469fe80777de8fd/doc/protocol.txt#L46
 
 /// High-level memcached client.
 ///
@@ -654,10 +654,7 @@ impl Client {
 
     fn validate_key_length(kr: &[u8]) -> Result<&[u8], Error> {
         if kr.len() > MAX_KEY_LENGTH {
-            return Err(Error::from(Status::Error(ErrorKind::Client(format!(
-                "Key '{}' is too long",
-                String::from_utf8_lossy(kr)
-            )))));
+            return Err(Error::from(Status::Error(ErrorKind::KeyTooLong)));
         }
         Ok(kr)
     }

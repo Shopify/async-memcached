@@ -80,7 +80,7 @@ async fn test_get_fails_with_key_too_long() {
     assert!(get_result.is_err());
     assert!(matches!(
         get_result,
-        Err(Error::Protocol(Status::Error(ErrorKind::Client(_))))
+        Err(Error::Protocol(Status::Error(ErrorKind::KeyTooLong)))
     ));
 }
 
@@ -132,7 +132,7 @@ async fn test_add_with_a_key_that_already_exists() {
 #[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
-async fn test_add_fails_with_key_too_large() {
+async fn test_add_fails_with_key_too_long() {
     let key = "b".repeat(MAX_KEY_LENGTH + 1);
 
     let mut client = setup_client(&[&key]).await;
@@ -142,7 +142,7 @@ async fn test_add_fails_with_key_too_large() {
 
     assert!(matches!(
         add_result,
-        Err(Error::Protocol(Status::Error(ErrorKind::Client(_))))
+        Err(Error::Protocol(Status::Error(ErrorKind::KeyTooLong)))
     ));
 }
 
@@ -169,10 +169,10 @@ async fn test_add_multi() {
 #[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
-async fn test_add_multi_inserts_client_error_for_key_too_large() {
-    let large_key = "e".repeat(MAX_KEY_LENGTH + 1);
+async fn test_add_multi_inserts_client_error_for_key_too_long() {
+    let key_too_long = "e".repeat(MAX_KEY_LENGTH + 1);
 
-    let keys = vec!["short-key-1", &large_key, "short-key-3"];
+    let keys = vec!["short-key-1", &key_too_long, "short-key-3"];
     let values = vec!["value1", "value2", "value3"];
 
     let kv: Vec<(&str, &str)> = keys.clone().into_iter().zip(values.into_iter()).collect();
@@ -189,9 +189,9 @@ async fn test_add_multi_inserts_client_error_for_key_too_large() {
 
     assert!(result_map[&keys[0]].is_ok(), "Key {} should be Ok", keys[0]);
     assert!(
-        result_map[&large_key.as_str()].is_err(),
+        result_map[&key_too_long.as_str()].is_err(),
         "Key {} should have an error",
-        large_key
+        key_too_long
     );
     assert!(result_map[&keys[2]].is_ok(), "Key {} should be Ok", keys[2]);
 }
@@ -359,7 +359,7 @@ async fn test_set_succeeds_with_max_length_key() {
 #[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
-async fn test_set_fails_with_key_too_large() {
+async fn test_set_fails_with_key_too_long() {
     let key = "c".repeat(MAX_KEY_LENGTH + 1);
 
     let mut client = setup_client(&[&key]).await;
@@ -369,7 +369,7 @@ async fn test_set_fails_with_key_too_large() {
 
     assert!(matches!(
         set_result,
-        Err(Error::Protocol(Status::Error(ErrorKind::Client(_))))
+        Err(Error::Protocol(Status::Error(ErrorKind::KeyTooLong)))
     ));
 }
 
@@ -658,10 +658,10 @@ async fn test_set_multi_with_string_values() {
 #[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
-async fn test_set_multi_inserts_client_error_for_key_too_large() {
-    let large_key = "e".repeat(MAX_KEY_LENGTH + 1);
+async fn test_set_multi_inserts_client_error_for_key_too_long() {
+    let key_too_long = "e".repeat(MAX_KEY_LENGTH + 1);
 
-    let keys = vec!["short-key-1", &large_key, "short-key-3"];
+    let keys = vec!["short-key-1", &key_too_long, "short-key-3"];
     let values = vec!["value1", "value2", "value3"];
 
     let kv: Vec<(&str, &str)> = keys.clone().into_iter().zip(values.into_iter()).collect();
@@ -678,9 +678,9 @@ async fn test_set_multi_inserts_client_error_for_key_too_large() {
 
     assert!(result_map[&keys[0]].is_ok(), "Key {} should be Ok", keys[0]);
     assert!(
-        result_map[&large_key.as_str()].is_err(),
+        result_map[&key_too_long.as_str()].is_err(),
         "Key {} should have an error",
-        large_key
+        key_too_long
     );
     assert!(result_map[&keys[2]].is_ok(), "Key {} should be Ok", keys[2]);
 }
