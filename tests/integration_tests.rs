@@ -1,4 +1,4 @@
-use async_memcached::{Client, Error, Status};
+use async_memcached::{Client, Error, ErrorKind, Status};
 use rand::seq::IteratorRandom;
 use serial_test::{parallel, serial};
 
@@ -6,6 +6,7 @@ use serial_test::{parallel, serial};
 // it's possible to delete/overwrite keys created by another test before they're read.
 
 const LARGE_PAYLOAD_SIZE: usize = 1000 * 1024;
+const MAX_KEY_LENGTH: usize = 250;
 
 async fn setup_client(keys: &[&str]) -> Client {
     let mut client = Client::new("tcp://127.0.0.1:11211")
@@ -13,6 +14,10 @@ async fn setup_client(keys: &[&str]) -> Client {
         .expect("Failed to connect to server");
 
     for key in keys {
+        if key.len() > MAX_KEY_LENGTH {
+            continue; // skip keys that are too long because they'll fail
+        }
+
         client
             .delete_no_reply(key)
             .await
@@ -65,6 +70,23 @@ async fn test_get_with_nonexistent_key() {
 #[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
+async fn test_get_fails_with_key_too_long() {
+    let key = "a".repeat(MAX_KEY_LENGTH + 1);
+
+    let mut client = setup_client(&[&key]).await;
+
+    let get_result = client.get(key).await;
+
+    assert!(get_result.is_err());
+    assert!(matches!(
+        get_result,
+        Err(Error::Protocol(Status::Error(ErrorKind::KeyTooLong)))
+    ));
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
 async fn test_add_with_string_value() {
     let key = "async-memcache-test-key-add-string";
 
@@ -110,6 +132,23 @@ async fn test_add_with_a_key_that_already_exists() {
 #[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
+async fn test_add_fails_with_key_too_long() {
+    let key = "b".repeat(MAX_KEY_LENGTH + 1);
+
+    let mut client = setup_client(&[&key]).await;
+
+    let value = "value";
+    let add_result = client.add(&key, value, None, None).await;
+
+    assert!(matches!(
+        add_result,
+        Err(Error::Protocol(Status::Error(ErrorKind::KeyTooLong)))
+    ));
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
 async fn test_add_multi() {
     let keys = vec!["am-key1", "am-key2", "afm-key3"];
     let values = vec!["value1", "value2", "value3"];
@@ -125,6 +164,36 @@ async fn test_add_multi() {
         &keys,
         result
     );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_add_multi_inserts_client_error_for_key_too_long() {
+    let key_too_long = "e".repeat(MAX_KEY_LENGTH + 1);
+
+    let keys = vec!["short-key-1", &key_too_long, "short-key-3"];
+    let values = vec!["value1", "value2", "value3"];
+
+    let kv: Vec<(&str, &str)> = keys.clone().into_iter().zip(values.into_iter()).collect();
+
+    let mut client = setup_client(&keys).await;
+
+    let add_multi_result = client.add_multi(&kv, None, None).await;
+
+    assert!(add_multi_result.is_ok());
+
+    let result_map = add_multi_result.unwrap();
+
+    assert_eq!(keys.len(), result_map.len());
+
+    assert!(result_map[&keys[0]].is_ok(), "Key {} should be Ok", keys[0]);
+    assert!(
+        result_map[&key_too_long.as_str()].is_err(),
+        "Key {} should have an error",
+        key_too_long
+    );
+    assert!(result_map[&keys[2]].is_ok(), "Key {} should be Ok", keys[2]);
 }
 
 #[ignore = "Relies on a running memcached server"]
@@ -276,6 +345,37 @@ async fn test_set_with_u64_value() {
 #[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
+async fn test_set_succeeds_with_max_length_key() {
+    let key = "c".repeat(MAX_KEY_LENGTH);
+
+    let mut client = setup_client(&[&key]).await;
+
+    let value = "value";
+    let set_result = client.set(&key, value, None, None).await;
+
+    assert!(set_result.is_ok());
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_set_fails_with_key_too_long() {
+    let key = "c".repeat(MAX_KEY_LENGTH + 1);
+
+    let mut client = setup_client(&[&key]).await;
+
+    let value = "value";
+    let set_result = client.set(&key, value, None, None).await;
+
+    assert!(matches!(
+        set_result,
+        Err(Error::Protocol(Status::Error(ErrorKind::KeyTooLong)))
+    ));
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
 async fn test_set_fails_with_value_too_large() {
     let key = "too-large-set-key-with-str-value";
 
@@ -283,8 +383,6 @@ async fn test_set_fails_with_value_too_large() {
 
     let value = "a".repeat(LARGE_PAYLOAD_SIZE * 2);
     let set_result = client.set(key, &value, None, None).await;
-
-    println!("set_result: {:?}", set_result);
 
     assert!(
         set_result.is_err(),
@@ -356,6 +454,41 @@ async fn test_get_multi_with_nonexistent_key() {
         let key_str = std::str::from_utf8(&result.key)
             .expect("should have been able to parse Value.key as utf8");
         assert!(&keys.contains(&key_str));
+    }
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_get_multi_skips_key_too_long() {
+    let mut keys = vec!["mgktl-key1", "mgktl-key2", "mgktl-key3"];
+    let values = vec!["value1", "value2", "value3"];
+
+    let mut client = setup_client(&keys).await;
+
+    for (key, value) in keys.iter().zip(values.iter()) {
+        let set_result = client.set(key, *value, None, None).await;
+        assert!(
+            set_result.is_ok(),
+            "failed to set {}, {:?}",
+            key,
+            set_result
+        );
+    }
+
+    let key_too_long = "d".repeat(MAX_KEY_LENGTH + 1);
+    keys = vec!["mgktl-key1", &key_too_long, "mgktl-key3"];
+
+    let get_multi_results = client.get_multi(&keys).await;
+
+    let get_multi_results = get_multi_results.expect("Should have yielded Vec<Value>");
+
+    for item in get_multi_results {
+        assert!(keys.contains(
+            &String::from_utf8(item.key)
+                .expect("Should have been able to parse key as utf8")
+                .as_str()
+        ));
     }
 }
 
@@ -520,6 +653,36 @@ async fn test_set_multi_with_string_values() {
         .expect("failed to parse string from bytes"),
         "value2"
     ));
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_set_multi_inserts_client_error_for_key_too_long() {
+    let key_too_long = "e".repeat(MAX_KEY_LENGTH + 1);
+
+    let keys = vec!["short-key-1", &key_too_long, "short-key-3"];
+    let values = vec!["value1", "value2", "value3"];
+
+    let kv: Vec<(&str, &str)> = keys.clone().into_iter().zip(values.into_iter()).collect();
+
+    let mut client = setup_client(&keys).await;
+
+    let set_multi_result = client.set_multi(&kv, None, None).await;
+
+    assert!(set_multi_result.is_ok());
+
+    let result_map = set_multi_result.unwrap();
+
+    assert_eq!(keys.len(), result_map.len());
+
+    assert!(result_map[&keys[0]].is_ok(), "Key {} should be Ok", keys[0]);
+    assert!(
+        result_map[&key_too_long.as_str()].is_err(),
+        "Key {} should have an error",
+        key_too_long
+    );
+    assert!(result_map[&keys[2]].is_ok(), "Key {} should be Ok", keys[2]);
 }
 
 #[ignore = "Relies on a running memcached server"]

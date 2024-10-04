@@ -49,6 +49,8 @@ pub enum ErrorKind {
     Client(String),
     /// An error from memcached related to SERVER_ERROR.
     Server(String),
+    /// An error from memcached related to a key that exceeds maximum allowed length.
+    KeyTooLong,
 }
 
 /// Response to a memcached operation.
@@ -128,6 +130,7 @@ impl fmt::Display for ErrorKind {
             },
             Self::Client(s) => write!(f, "client: {}", s),
             Self::Server(s) => write!(f, "server: {}", s),
+            Self::KeyTooLong => write!(f, "Key exceeds maximum allowed length of 250 characters"),
         }
     }
 }

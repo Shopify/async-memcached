@@ -20,6 +20,8 @@ pub use self::parser::{ErrorKind, KeyMetadata, MetadumpResponse, StatsResponse, 
 mod value_serializer;
 pub use self::value_serializer::AsMemcachedValue;
 
+const MAX_KEY_LENGTH: usize = 250; // reference in memcached documentation: https://github.com/memcached/memcached/blob/5609673ed29db98a377749fab469fe80777de8fd/doc/protocol.txt#L46
+
 /// High-level memcached client.
 ///
 /// [`Client`] is mapped one-to-one with a given connection to a memcached server, and provides a
@@ -109,6 +111,17 @@ impl Client {
         let mut results = FxHashMap::with_capacity_and_hasher(kv.len(), Default::default());
 
         for (key, _) in kv {
+            let kr = key.as_ref();
+            if kr.len() > MAX_KEY_LENGTH {
+                results.insert(
+                    key,
+                    Err(Error::Protocol(Status::Error(ErrorKind::Client(
+                        "Key exceeds maximum length of 250 bytes".to_string(),
+                    )))),
+                );
+                continue;
+            }
+
             let result = match self.drive_receive(parse_ascii_response).await {
                 Ok(Response::Status(Status::Stored)) => Ok(()),
                 Ok(Response::Status(s)) => Err(s.into()),
@@ -137,7 +150,7 @@ impl Client {
     /// Otherwise, [`Error`] is returned.
     pub async fn get<K: AsRef<[u8]>>(&mut self, key: K) -> Result<Option<Value>, Error> {
         self.conn
-            .write_all(&[b"get ", key.as_ref(), b"\r\n"].concat())
+            .write_all(&[b"get ", Self::validate_key_length(key.as_ref())?, b"\r\n"].concat())
             .await?;
         self.conn.flush().await?;
 
@@ -168,10 +181,13 @@ impl Client {
         I: IntoIterator<Item = K>,
         K: AsRef<[u8]>,
     {
-        self.conn.write_all(b"get ").await?;
+        self.conn.write_all(b"get").await?;
         for key in keys {
-            self.conn.write_all(key.as_ref()).await?;
+            if key.as_ref().len() > MAX_KEY_LENGTH {
+                continue;
+            }
             self.conn.write_all(b" ").await?;
+            self.conn.write_all(key.as_ref()).await?;
         }
         self.conn.write_all(b"\r\n").await?;
         self.conn.flush().await?;
@@ -213,11 +229,12 @@ impl Client {
         K: AsRef<[u8]>,
         V: AsMemcachedValue,
     {
-        let kr = key.as_ref();
         let vr = value.as_bytes();
 
         self.conn.write_all(b"set ").await?;
-        self.conn.write_all(kr).await?;
+        self.conn
+            .write_all(Self::validate_key_length(key.as_ref())?)
+            .await?;
 
         let flags = flags.unwrap_or(0).to_string();
         self.conn.write_all(b" ").await?;
@@ -260,6 +277,10 @@ impl Client {
     {
         for (key, value) in kv {
             let kr = key.as_ref();
+            if kr.len() > MAX_KEY_LENGTH {
+                continue;
+            }
+
             let vr = value.as_bytes();
 
             self.conn.write_all(b"set ").await?;
@@ -300,11 +321,12 @@ impl Client {
         K: AsRef<[u8]>,
         V: AsMemcachedValue,
     {
-        let kr = key.as_ref();
         let vr = value.as_bytes();
 
         self.conn.write_all(b"add ").await?;
-        self.conn.write_all(kr).await?;
+        self.conn
+            .write_all(Self::validate_key_length(key.as_ref())?)
+            .await?;
 
         let flags = flags.unwrap_or(0).to_string();
         self.conn.write_all(b" ").await?;
@@ -347,6 +369,10 @@ impl Client {
     {
         for (key, value) in kv {
             let kr = key.as_ref();
+            if kr.len() > MAX_KEY_LENGTH {
+                continue;
+            }
+
             let vr = value.as_bytes();
 
             self.conn.write_all(b"add ").await?;
@@ -380,10 +406,15 @@ impl Client {
     where
         K: AsRef<[u8]>,
     {
-        let kr = key.as_ref();
-
         self.conn
-            .write_all(&[b"delete ", kr, b" noreply\r\n"].concat())
+            .write_all(
+                &[
+                    b"delete ",
+                    Self::validate_key_length(key.as_ref())?,
+                    b" noreply\r\n",
+                ]
+                .concat(),
+            )
             .await?;
         self.conn.flush().await?;
         Ok(())
@@ -394,10 +425,15 @@ impl Client {
     where
         K: AsRef<[u8]>,
     {
-        let kr = key.as_ref();
-
         self.conn
-            .write_all(&[b"delete ", kr, b"\r\n"].concat())
+            .write_all(
+                &[
+                    b"delete ",
+                    Self::validate_key_length(key.as_ref())?,
+                    b"\r\n",
+                ]
+                .concat(),
+            )
             .await?;
         self.conn.flush().await?;
 
@@ -415,7 +451,9 @@ impl Client {
     {
         for key in keys {
             self.conn.write_all(b"delete ").await?;
-            self.conn.write_all(key.as_ref()).await?;
+            self.conn
+                .write_all(Self::validate_key_length(key.as_ref())?)
+                .await?;
             self.conn.write_all(b" noreply\r\n").await?;
         }
         self.conn.flush().await?;
@@ -435,7 +473,7 @@ impl Client {
             .write_all(
                 &[
                     b"incr ",
-                    key.as_ref(),
+                    Self::validate_key_length(key.as_ref())?,
                     b" ",
                     amount.to_string().as_bytes(),
                     b"\r\n",
@@ -463,7 +501,7 @@ impl Client {
             .write_all(
                 &[
                     b"incr ",
-                    key.as_ref(),
+                    Self::validate_key_length(key.as_ref())?,
                     b" ",
                     amount.to_string().as_bytes(),
                     b" noreply\r\n",
@@ -488,7 +526,7 @@ impl Client {
             .write_all(
                 &[
                     b"decr ",
-                    key.as_ref(),
+                    Self::validate_key_length(key.as_ref())?,
                     b" ",
                     amount.to_string().as_bytes(),
                     b"\r\n",
@@ -516,7 +554,7 @@ impl Client {
             .write_all(
                 &[
                     b"decr ",
-                    key.as_ref(),
+                    Self::validate_key_length(key.as_ref())?,
                     b" ",
                     amount.to_string().as_bytes(),
                     b" noreply\r\n",
@@ -612,6 +650,13 @@ impl Client {
                 format!("Invalid response for `flush_all` command: `{response}`"),
             )))))
         }
+    }
+
+    fn validate_key_length(kr: &[u8]) -> Result<&[u8], Error> {
+        if kr.len() > MAX_KEY_LENGTH {
+            return Err(Error::from(Status::Error(ErrorKind::KeyTooLong)));
+        }
+        Ok(kr)
     }
 }
 
