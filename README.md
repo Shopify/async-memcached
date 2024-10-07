@@ -7,15 +7,16 @@ async-memcache is an async [memcached](https://memcached.org/) client implementa
 ## Testing
 
 The default test suite does not require `memcached` to be running. It will ignore tests that require `memcached` to be running.
+
 ```bash
-$ cargo test
+cargo test
 ```
 
 For the full test suite, you need to have `memcached` installed and running.
 
 ```bash
-$ memcached -p 11211 -t 10 -c 10000 -m 1024
-$ cargo test && cargo test -- --ignored
+memcached -p 11211 -t 10 -c 10000 -m 1024
+cargo test && cargo test -- --ignored
 ```
 
 ## Benchmark
@@ -23,8 +24,8 @@ $ cargo test && cargo test -- --ignored
 To run the benchmark, you need to have `memcached` installed and running.
 
 ```bash
-$ memcached -p 11211 -t 10 -c 10000 -m 1024
-$ cargo bench
+memcached -p 11211 -t 10 -c 10000 -m 1024
+cargo bench
 ```
 
 ## Examples
@@ -33,16 +34,18 @@ You can run the examples with `cargo run --example <example-name>`. Examples req
 
 ### TCP
 Run a memcached server (with optional very verbose flag) that accepts a TCP connection and execute the basic examples:
+
 ```bash
-$ memcached -vv
-$ cargo run --package async-memcached --example basic
+memcached -vv
+cargo run --package async-memcached --example basic
 ```
 
 ### Unix Domain Socket
 Run a memcached server (with optional very verbose flag) that accepts a UDS connection and execute the UNIX examples:
+
 ```bash
-$ memcached -vv -s /tmp/memcached.sock
-$ cargo run --package async-memcached --example unix
+memcached -vv -s /tmp/memcached.sock
+cargo run --package async-memcached --example unix
 ```
 
 ## Profiling
@@ -50,7 +53,7 @@ $ cargo run --package async-memcached --example unix
 Install `samply` with `cargo install samply`.
 
 ```bash
-$ samply record cargo run --package async-memcached --example unix
+samply record cargo run --package async-memcached --example unix
 ```
 
 ## Features
@@ -79,16 +82,21 @@ automatically.  See the `cargo-release` [documentation for more info](https://gi
 <summary>Expand this section for `cargo publish` workflow details</summary>
 
 - Ensure the your `main` branch is up to date:
+
 ```bash
-$ git checkout main
-$ git pull
+git checkout main
+git pull
 ```
+
 - Checkout a new branch with the release version name:
+
 ```bash
-$ git checkout -b "release v<VERSION>"
+git checkout -b "release v<VERSION>"
 ```
+
 - Update the `version` field in `Cargo.toml` to reflect the desired new version of the crate, following [semantic versioning best practices](semver.org).
 - Update the `CHANGELOG.md` such that the latest changes are under a header with the new version & release date:
+
 ```
 ## [Unreleased] - ReleaseDate
 
@@ -98,7 +106,9 @@ $ git checkout -b "release v<VERSION>"
 ### Changed
 - something to be more optimized
 ```
+
 Should be updated to:
+
 ```
 ## [Unreleased] - ReleaseDate
 
@@ -110,12 +120,15 @@ Should be updated to:
 ### Changed
 - something to be more optimized
 ```
+
 - Push your changes to the remote, get approval and merge your PR
 - Update your `main` branch again:
+
 ```bash
-$ git checkout main
-$ git pull
+git checkout main
+git pull
 ```
+
 - Run `cargo publish --dry-run` to perform a dry run, ensuring that your publishing process will proceed as expected.
 - Run `cargo publish` to [publish the new version](https://doc.rust-lang.org/cargo/commands/cargo-publish.html) of this crate to crates.io.
 
@@ -127,14 +140,18 @@ $ git pull
 <summary>Expand this section for `cargo release` workflow details</summary>
 
 - Ensure the `main` branch is up to date:
+
 ```bash
-$ git checkout main
-$ git pull
+git checkout main
+git pull
 ```
+
 - Checkout a new branch with the release version name:
+
 ```bash
-$ git checkout -b "release v<VERSION>"
+git checkout -b "release v<VERSION>"
 ```
+
 - Open a PR on GitHub and fill out the PR template for a release.  Provide the `cargo release` dryrun output in the PR body.
 
 <details>
