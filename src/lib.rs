@@ -182,19 +182,15 @@ impl Client {
     /// - h: return whether item has been hit before as a 0 or 1
     /// - l: return time since item was last accessed in seconds
     /// - t: return item TTL remaining in seconds (-1 for unlimited)
-    pub async fn _meta_get<K: AsRef<[u8]>>(
+    pub async fn meta_get<K: AsRef<[u8]>>(
         &mut self,
         key: K,
-        meta_flags: &[char],
+        meta_flags: &[&str],
     ) -> Result<Option<Value>, Error> {
         self.conn.write_all(b"mg ").await?;
         self.conn.write_all(key.as_ref()).await?;
-        if !meta_flags.is_empty() {
-            for flag in meta_flags {
-                self.conn.write_all(b" ").await?;
-                self.conn.write_all(&[*flag as u8]).await?;
-            }
-        }
+        self.conn.write_all(b" ").await?;
+        self.conn.write_all(meta_flags.join(" ").as_bytes()).await?;
         self.conn.write_all(b"\r\n").await?;
         self.conn.flush().await?;
 
@@ -227,7 +223,7 @@ impl Client {
     /// - h: return whether item has been hit before as a 0 or 1
     /// - l: return time since item was last accessed in seconds
     /// - t: return item TTL remaining in seconds (-1 for unlimited)
-    pub async fn meta_get<K: AsRef<[u8]>>(
+    pub async fn meta_gets_concat<K: AsRef<[u8]>>(
         &mut self,
         key: K,
         meta_flags: &[&str], // meta_get should always have at least one flag, otherwise it's a no-op
@@ -236,12 +232,8 @@ impl Client {
         let mut command = Vec::with_capacity(command_length);
         command.extend_from_slice(b"mg ");
         command.extend_from_slice(key.as_ref());
-        if !meta_flags.is_empty() {
-            for flag in meta_flags {
-                command.extend_from_slice(b" ");
-                command.extend_from_slice(flag.as_bytes());
-            }
-        }
+        command.extend_from_slice(b" ");
+        command.extend_from_slice(meta_flags.join(" ").as_bytes());
         command.extend_from_slice(b"\r\n");
         println!("command: {:?}", String::from_utf8_lossy(&command));
         self.conn.write_all(&command).await?;
@@ -464,7 +456,7 @@ impl Client {
     //
     // - <flags> are a set of single character codes ended with a space or newline.
     //   flags may have strings after the initial character.
-    pub async fn meta_set<K, V>(
+    pub async fn meta_set_concat<K, V>(
         &mut self,
         key: K,
         value: V,
@@ -493,6 +485,54 @@ impl Client {
         command.extend_from_slice(b"\r\n");
         self.conn.write_all(&command).await?;
         println!("command: {:?}", String::from_utf8_lossy(&command));
+        self.conn.write_all(vr.as_ref()).await?;
+        self.conn.write_all(b"\r\n").await?;
+        self.conn.flush().await?;
+
+        match self.drive_receive(parse_meta_response).await? {
+            Response::Status(s) => Err(s.into()),
+            Response::Data(d) => d
+                .map(|mut items| {
+                    if items.len() != 1 {
+                        Err(Status::Error(ErrorKind::Protocol(None)).into())
+                    } else {
+                        let mut item = items.remove(0);
+                        item.key = key.as_ref().to_vec();
+                        Ok(item)
+                    }
+                })
+                .transpose(),
+            _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),
+        }
+    }
+
+    /// meta set thing without concats
+    pub async fn meta_set<K, V>(
+        &mut self,
+        key: K,
+        value: V,
+        meta_flags: Option<&[&str]>,
+    ) -> Result<Option<Value>, Error>
+    where
+        K: AsRef<[u8]>,
+        V: AsMemcachedValue,
+    {
+        let kr = key.as_ref();
+        let vr = value.as_bytes();
+
+        self.conn.write_all(b"ms ").await?;
+        self.conn.write_all(kr).await?;
+
+        let vlen = vr.len().to_string();
+        self.conn.write_all(b" ").await?;
+        self.conn.write_all(vlen.as_ref()).await?;
+
+        if let Some(meta_flags) = meta_flags {
+            self.conn.write_all(b" ").await?;
+            self.conn.write_all(meta_flags.join(" ").as_bytes()).await?;
+        }
+
+        self.conn.write_all(b"\r\n").await?;
         self.conn.write_all(vr.as_ref()).await?;
         self.conn.write_all(b"\r\n").await?;
         self.conn.flush().await?;
