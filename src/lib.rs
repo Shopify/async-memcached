@@ -230,13 +230,12 @@ impl Client {
     pub async fn meta_get<K: AsRef<[u8]>>(
         &mut self,
         key: K,
-        meta_flags: &[&str], // NOTE: This really should never be option, passing no flags is a useless op
+        meta_flags: &[&str], // meta_get should always have at least one flag, otherwise it's a no-op
     ) -> Result<Option<Value>, Error> {
         let command_length: usize = MAX_KEY_LENGTH + 2 * meta_flags.len() + 5; // key + flags & whitespaces + "mg " + "\r\n"
         let mut command = Vec::with_capacity(command_length);
         command.extend_from_slice(b"mg ");
         command.extend_from_slice(key.as_ref());
-        println!("meta_flags: {:?}", meta_flags);
         if !meta_flags.is_empty() {
             for flag in meta_flags {
                 command.extend_from_slice(b" ");
@@ -486,10 +485,7 @@ impl Client {
         command.extend_from_slice(b" ");
         command.extend_from_slice(vlen.as_ref());
 
-        println!("checking for meta_flags");
         if let Some(meta_flags) = meta_flags {
-            println!("meta_flags: {:?}", meta_flags);
-
             command.extend_from_slice(b" ");
             command.extend_from_slice(meta_flags.join(" ").as_bytes());
         }
@@ -506,7 +502,6 @@ impl Client {
             Response::Data(d) => d
                 .map(|mut items| {
                     if items.len() != 1 {
-                        println!("erroring in this place");
                         Err(Status::Error(ErrorKind::Protocol(None)).into())
                     } else {
                         let mut item = items.remove(0);

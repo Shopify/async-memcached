@@ -22,10 +22,10 @@ pub struct Value {
     pub key: Vec<u8>,
     /// CAS identifier.
     pub cas: Option<u64>,
-    /// NOTE: This is the client bitflags, not meta flags
-    /// which is an opaque number passed by the client
     /// Flags for this key.
     /// Defaults to 0.
+    /// NOTE: This is the client bitflags, not meta flags
+    /// which is an opaque number passed by the client
     pub flags: Option<u32>,
     /// Data for this key.
     pub data: Option<Vec<u8>>,
