@@ -2,10 +2,14 @@ use async_memcached::Client;
 use criterion::{criterion_group, criterion_main, Criterion};
 use tokio::runtime::Runtime;
 
+use std::env;
+
 const LARGE_PAYLOAD_SIZE: usize = 1000 * 1024; // Memcached's ~default maximum payload size
 
 async fn setup_client() -> Client {
-    Client::new("tcp://127.0.0.1:11211")
+    let memcached_host = env::var("MEMCACHED_HOST").unwrap_or("127.0.0.1".to_string());
+    let memcached_port = env::var("MEMCACHED_PORT").unwrap_or("11211".to_string());
+    Client::new(format!("tcp://{}:{}", memcached_host, memcached_port))
         .await
         .expect("failed to create client")
 }
@@ -30,10 +34,10 @@ fn bench_get(c: &mut Criterion) {
     });
 }
 
-fn bench_set_with_string(c: &mut Criterion) {
+fn bench_set_with_small_string(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
 
-    c.bench_function("set_small_with_string", |b| {
+    c.bench_function("set_with_small_string", |b| {
         b.to_async(&rt).iter_custom(|iters| async move {
             let mut client = setup_client().await;
             let start = std::time::Instant::now();
@@ -66,7 +70,7 @@ fn bench_set_with_large_string(c: &mut Criterion) {
 fn bench_set_with_u64(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
 
-    c.bench_function("set_small_with_int", |b| {
+    c.bench_function("set_with_u64", |b| {
         b.to_async(&rt).iter_custom(|iters| async move {
             let mut client = setup_client().await;
             let start = std::time::Instant::now();
@@ -78,10 +82,10 @@ fn bench_set_with_u64(c: &mut Criterion) {
     });
 }
 
-fn bench_add_with_string(c: &mut Criterion) {
+fn bench_add_with_small_string(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
 
-    c.bench_function("add_small_with_string", |b| {
+    c.bench_function("add_with_small_string", |b| {
         b.to_async(&rt).iter_custom(|iters| async move {
             let mut client = setup_client().await;
             let start = std::time::Instant::now();
@@ -96,7 +100,7 @@ fn bench_add_with_string(c: &mut Criterion) {
 fn bench_add_with_u64(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
 
-    c.bench_function("add_small_with_int", |b| {
+    c.bench_function("add_with_u64", |b| {
         b.to_async(&rt).iter_custom(|iters| async move {
             let mut client = setup_client().await;
             let start = std::time::Instant::now();
@@ -108,7 +112,7 @@ fn bench_add_with_u64(c: &mut Criterion) {
     });
 }
 
-fn bench_get_many(c: &mut Criterion) {
+fn bench_get_multi(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
     let keys = &["foo", "bar", "baz"];
 
@@ -119,7 +123,7 @@ fn bench_get_many(c: &mut Criterion) {
         }
     });
 
-    c.bench_function("get_many_small", |b| {
+    c.bench_function("get_multi_small", |b| {
         b.to_async(&rt).iter_custom(|iters| async move {
             let mut client = setup_client().await;
             let start = std::time::Instant::now();
@@ -156,46 +160,6 @@ fn bench_set_multi_small_strings(c: &mut Criterion) {
         b.to_async(&rt).iter_custom(|iters| async move {
             let mut client = setup_client().await;
             let kv = vec![("key1", "value1"), ("key2", "value2"), ("key3", "value3")];
-            let start = std::time::Instant::now();
-            for _ in 0..iters {
-                let _ = client.set_multi(&kv, None, None).await;
-            }
-            start.elapsed()
-        });
-    });
-}
-
-fn bench_set_multi_with_100_large_string_values(c: &mut Criterion) {
-    let rt = Runtime::new().unwrap();
-
-    c.bench_function("set_multi_with_100_large_string_values", |b| {
-        b.to_async(&rt).iter_custom(|iters| async move {
-            let mut client = setup_client().await;
-
-            let large_payload = "a".repeat(LARGE_PAYLOAD_SIZE);
-
-            let keys: Vec<String> = (0..100).map(|i| format!("key{}", i)).collect();
-            let kv: Vec<(&str, &str)> = keys
-                .iter()
-                .map(|k| (k.as_str(), large_payload.as_str()))
-                .collect();
-
-            let start = std::time::Instant::now();
-            for _ in 0..iters {
-                let _ = client.set_multi(&kv, None, None).await;
-            }
-            start.elapsed()
-        });
-    });
-}
-
-fn bench_set_multi_u64(c: &mut Criterion) {
-    let rt = Runtime::new().unwrap();
-
-    c.bench_function("set_multi_u64", |b| {
-        b.to_async(&rt).iter_custom(|iters| async move {
-            let mut client = setup_client().await;
-            let kv = vec![("key1", 1_u64), ("key2", 2_u64), ("key3", 3_u64)];
             let start = std::time::Instant::now();
             for _ in 0..iters {
                 let _ = client.set_multi(&kv, None, None).await;
@@ -342,16 +306,14 @@ fn bench_decrement_no_reply(c: &mut Criterion) {
 criterion_group!(
     benches,
     bench_get,
-    bench_get_many,
+    bench_get_multi,
     bench_get_large,
     bench_get_many_large,
-    bench_set_with_string,
+    bench_set_with_small_string,
     bench_set_with_large_string,
     bench_set_with_u64,
     bench_set_multi_small_strings,
-    bench_set_multi_with_100_large_string_values,
-    bench_set_multi_u64,
-    bench_add_with_string,
+    bench_add_with_small_string,
     bench_add_with_u64,
     bench_add_with_large_string,
     bench_increment,

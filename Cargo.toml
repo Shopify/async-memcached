@@ -44,3 +44,7 @@ path = "examples/tcp.rs"
 [[bench]]
 name = "bench"
 harness = false
+
+[[bench]]
+name = "request_distribution_bench"
+harness = false
