@@ -79,10 +79,10 @@ pub fn parse_meta_response(buf: &[u8]) -> Result<Option<(usize, Response)>, Erro
 //     }),
 // }
 fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
-    let (input, success) = parse_meta_get_status(buf)?; // VA comes off here
+    let (input, success) = parse_meta_get_status(buf)?;
     match success {
         Response::Status(Status::Exists) => {
-            let (input, size) = parse_u32(input)?; // 10 comes off here
+            let (input, size) = parse_u32(input)?;
 
             let input = if input.starts_with(b" ") {
                 // This arm covers the case where meta_flags are provided
@@ -120,9 +120,6 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
                 }
             }
 
-            // TODO: hmmm we don't have the key in the response anymore, should we return none and the caller maps it back?
-            // or we need to pass the key into the parser...
-            // slowly this is pointing towards a different value type all together for meta
             let value = Value {
                 key: b"key".to_vec(),
                 cas: None,

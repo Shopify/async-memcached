@@ -1088,6 +1088,24 @@ async fn test_meta_get_not_found() {
     assert_eq!(result, None);
 }
 
+// TODO: Still need to properly deal with miss cases where opaque or key flags are provided
+// Will be done in following refactor PR
+// #[ignore = "Relies on a running memcached server"]
+// #[tokio::test]
+// #[parallel]
+// async fn test_meta_get_not_found_with_opaque_flag() {
+//     let key = "meta-get-test-key-not-found";
+//     let flags = ["v", "O9001"];
+//     let mut client = setup_client(&[key]).await;
+
+//     let result = client.meta_get(key, &flags).await.unwrap();
+
+//     assert_eq!(
+//         result.unwrap().meta_values.unwrap().opaque_token,
+//         Some("9001".as_bytes().to_vec())
+//     );
+// }
+
 #[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 async fn test_meta_set_with_no_flags() {
