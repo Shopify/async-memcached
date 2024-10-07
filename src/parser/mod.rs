@@ -39,6 +39,8 @@ pub struct Value {
 // TODO: Defaults of NONE?
 #[derive(Clone, Debug, PartialEq)]
 pub struct MetaValue {
+    /// set mode flag
+    pub set_mode: Option<Vec<u8>>,
     /// Whether the item has been accessed before (X flag)
     pub hit_before: Option<bool>,
     /// Last access time in seconds since the epoch (h flag)

@@ -22,6 +22,7 @@ mod value_serializer;
 pub use self::value_serializer::AsMemcachedValue;
 
 const MAX_KEY_LENGTH: usize = 250; // reference in memcached documentation: https://github.com/memcached/memcached/blob/5609673ed29db98a377749fab469fe80777de8fd/doc/protocol.txt#L46
+const MAX_VALUE_SIZE: usize = 1024 * 1024; // 1 MB
 
 /// High-level memcached client.
 ///
@@ -181,24 +182,68 @@ impl Client {
     /// - h: return whether item has been hit before as a 0 or 1
     /// - l: return time since item was last accessed in seconds
     /// - t: return item TTL remaining in seconds (-1 for unlimited)
-    pub async fn meta_get<K: AsRef<[u8]>>(
+    pub async fn _meta_get<K: AsRef<[u8]>>(
         &mut self,
         key: K,
         meta_flags: &[char],
     ) -> Result<Option<Value>, Error> {
-        let mut command = Vec::with_capacity(64);
-        command.extend_from_slice(b"mg ");
-        command.extend_from_slice(key.as_ref());
-        // TODO: Do we want to always add the v flag? so all gets return the value? or we want clients to know to request it?
-        command.extend_from_slice(b" v");
+        self.conn.write_all(b"mg ").await?;
+        self.conn.write_all(key.as_ref()).await?;
         if !meta_flags.is_empty() {
             for flag in meta_flags {
-                command.push(b' ');
-                command.push(*flag as u8);
+                self.conn.write_all(b" ").await?;
+                self.conn.write_all(&[*flag as u8]).await?;
+            }
+        }
+        self.conn.write_all(b"\r\n").await?;
+        self.conn.flush().await?;
+
+        match self.drive_receive(parse_meta_response).await? {
+            Response::Status(Status::NotFound) => Ok(None),
+            Response::Status(s) => Err(s.into()),
+            Response::Data(d) => d
+                .map(|mut items| {
+                    if items.len() != 1 {
+                        Err(Status::Error(ErrorKind::Protocol(None)).into())
+                    } else {
+                        let mut item = items.remove(0);
+                        item.key = key.as_ref().to_vec();
+                        Ok(item)
+                    }
+                })
+                .transpose(),
+            _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),
+        }
+    }
+
+    /// Gets the given key with additional metadata.
+    ///
+    /// If the key is found, `Some(Value)` is returned, describing the metadata and data of the key.
+    ///
+    /// Otherwise, `None` is returned.
+    ///
+    /// Supported meta flags:
+    /// - v: return item value
+    /// - h: return whether item has been hit before as a 0 or 1
+    /// - l: return time since item was last accessed in seconds
+    /// - t: return item TTL remaining in seconds (-1 for unlimited)
+    pub async fn meta_get<K: AsRef<[u8]>>(
+        &mut self,
+        key: K,
+        meta_flags: &[&str],
+    ) -> Result<Option<Value>, Error> {
+        let command_length: usize = MAX_KEY_LENGTH + 2 * meta_flags.len() + 5; // key + flags & whitespaces + "mg " + "\r\n"
+        let mut command = Vec::with_capacity(command_length);
+        command.extend_from_slice(b"mg ");
+        command.extend_from_slice(key.as_ref());
+        if !meta_flags.is_empty() {
+            for flag in meta_flags {
+                command.extend_from_slice(b" ");
+                command.extend_from_slice(flag.as_bytes());
             }
         }
         command.extend_from_slice(b"\r\n");
-        //println!("command: {:?}", String::from_utf8_lossy(&command));
+        println!("command: {:?}", String::from_utf8_lossy(&command));
         self.conn.write_all(&command).await?;
         self.conn.flush().await?;
 
@@ -423,14 +468,13 @@ impl Client {
         &mut self,
         key: K,
         value: V,
-        ttl: Option<i64>,
-        meta_flags: FxHashMap<&[char], String>,
+        meta_flags: Option<&FxHashMap<&[char], String>>,
     ) -> Result<Option<Value>, Error>
     where
         K: AsRef<[u8]>,
         V: AsMemcachedValue,
     {
-        let mut command = Vec::with_capacity(64);
+        let mut command = Vec::with_capacity(MAX_VALUE_SIZE + 550);
         let kr = key.as_ref();
         let vr = value.as_bytes();
 
@@ -440,7 +484,9 @@ impl Client {
         let vlen = vr.len().to_string();
         command.extend_from_slice(vlen.as_ref());
 
-        if !meta_flags.is_empty() {
+        println!("checking for meta_flags");
+        if let Some(meta_flags) = meta_flags {
+            println!("meta_flags: {:?}", meta_flags);
             for (flag, flag_value) in meta_flags {
                 command.push(b' ');
                 command.extend(flag.iter().map(|&c| c as u8));
@@ -450,11 +496,6 @@ impl Client {
             }
         }
 
-        // TTL is just another flag, but we encourage passing it to the function for clarity
-        let ttl = ttl.unwrap_or(0).to_string();
-        command.extend_from_slice(b" ");
-        command.extend_from_slice(b"T");
-        command.extend_from_slice(ttl.as_ref());
         command.extend_from_slice(b"\r\n");
         self.conn.write_all(&command).await?;
         println!("command: {:?}", String::from_utf8_lossy(&command));
@@ -467,6 +508,7 @@ impl Client {
             Response::Data(d) => d
                 .map(|mut items| {
                     if items.len() != 1 {
+                        println!("erroring in this place");
                         Err(Status::Error(ErrorKind::Protocol(None)).into())
                     } else {
                         let mut item = items.remove(0);

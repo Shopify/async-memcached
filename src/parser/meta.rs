@@ -68,6 +68,7 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
             let (input, meta_values_array) = parse_meta_tag_values_as_slice(input)?;
 
             let mut meta_values = MetaValue {
+                set_mode: None,
                 hit_before: None,
                 last_accessed: None,
                 ttl_remaining: None,
@@ -83,7 +84,14 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
 
             for (flag, meta_value) in meta_values_array {
                 match flag {
+                    b'M' => meta_values.set_mode = Some(meta_value.to_vec()),
                     b'O' => meta_values.opaque_token = Some(meta_value.to_vec()),
+                    b'T' => meta_values.ttl_remaining = Some(
+                        std::str::from_utf8(meta_value)
+                            .unwrap()
+                            .parse::<i64>()
+                            .unwrap(),
+                    ),
                     b'c' => {
                         value.cas =
                             Some(u64::from_be_bytes(meta_value.try_into().unwrap_or([0; 8])));
@@ -127,12 +135,13 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
         Response::Status(Status::Exists) => {
             let (input, size) = parse_u32(input)?;
             let (input, _tag) = tag(" ")(input)?;
-            let (input, meta_values_array) = parse_meta_tag_values_as_u32(input)?;
+            let (input, meta_values_array) = parse_meta_tag_values_as_bytes(input)?;
             // remove the \r\n from the input
             let (input, _) = crlf(input)?;
             let (input, data) = take_until_size(input, size)?;
 
             let mut meta_values = MetaValue {
+                set_mode: None,
                 hit_before: None,
                 last_accessed: None,
                 ttl_remaining: None,
@@ -140,9 +149,10 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
             };
             for (flag, value) in meta_values_array {
                 match flag {
-                    b'h' => meta_values.hit_before = Some(value != 0),
-                    b'l' => meta_values.last_accessed = Some(value as u64),
-                    b't' => meta_values.ttl_remaining = Some(value as i64),
+                    b'h' => meta_values.hit_before = Some(value != b"0"),
+                    b'l' => meta_values.last_accessed = Some(std::str::from_utf8(value).unwrap().parse::<u64>().unwrap()),
+                    b't' => meta_values.ttl_remaining = Some(std::str::from_utf8(value).unwrap().parse::<i64>().unwrap()),
+                    b'O' => meta_values.opaque_token = Some(value.to_vec()),
                     _ => {}
                 }
             }
@@ -191,12 +201,20 @@ pub fn take_until_size(mut buf: &[u8], byte_size: u32) -> IResult<&[u8], Vec<u8>
     Ok((buf, data))
 }
 
-fn parse_meta_tag_values_as_u32(input: &[u8]) -> IResult<&[u8], Vec<(u8, u32)>> {
+fn _parse_meta_tag_values_as_u32(input: &[u8]) -> IResult<&[u8], Vec<(u8, u32)>> {
     many0(pair(
         preceded(space0, map(take(1usize), |s: &[u8]| s[0])),
         map_res(digit1, |s: &[u8]| {
             std::str::from_utf8(s).unwrap().parse::<u32>()
         }),
+    ))(input)
+}
+
+// NOTE: adding this to support Opaque (and others) token which can be a string
+fn parse_meta_tag_values_as_bytes(input: &[u8]) -> IResult<&[u8], Vec<(u8, &[u8])>> {
+    many0(pair(
+        preceded(space0, map(take(1usize), |s: &[u8]| s[0])),
+        digit1,
     ))(input)
 }
 
@@ -281,29 +299,29 @@ mod tests {
     #[test]
     fn test_parse_meta_tag_values() {
         let input = b"h1 l56 t2179\r\ntest-value";
-        let (remaining, result) = parse_meta_tag_values_as_u32(input).unwrap();
+        let (remaining, result) = parse_meta_tag_values_as_bytes(input).unwrap();
 
-        assert_eq!(result, vec![(b'h', 1), (b'l', 56), (b't', 2179),]);
+        assert_eq!(result, vec![(b'h', &b"1"[..]), (b'l', &b"56"[..]), (b't', &b"2179"[..])]);
         assert_eq!(remaining, b"\r\ntest-value");
     }
 
     #[test]
     fn test_parse_meta_tag_values_order_does_not_matter() {
         let input = b"t2179 h1 l56\r\ntest-value";
-        let (remaining, result) = parse_meta_tag_values_as_u32(input).unwrap();
+        let (remaining, result) = parse_meta_tag_values_as_bytes(input).unwrap();
 
-        assert_eq!(result, vec![(b't', 2179), (b'h', 1), (b'l', 56),]);
+        assert_eq!(result, vec![(b't', &b"2179"[..]), (b'h', &b"1"[..]), (b'l', &b"56"[..]),]);
         assert_eq!(remaining, b"\r\ntest-value");
     }
 
     #[test]
     fn test_parse_meta_tag_values_handles_unknown_tags() {
         let input = b"h1 l56 t2179 x100\r\ntest-value";
-        let (remaining, result) = parse_meta_tag_values_as_u32(input).unwrap();
+        let (remaining, result) = parse_meta_tag_values_as_bytes(input).unwrap();
 
         assert_eq!(
             result,
-            vec![(b'h', 1), (b'l', 56), (b't', 2179), (b'x', 100),]
+            vec![(b'h', &b"1"[..]), (b'l', &b"56"[..]), (b't', &b"2179"[..]), (b'x', &b"100"[..]),]
         );
         assert_eq!(remaining, b"\r\ntest-value");
     }

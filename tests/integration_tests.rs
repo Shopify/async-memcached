@@ -1036,7 +1036,7 @@ async fn test_meta_get_with_all_flags() {
         value
     );
 
-    let flags = ['h', 'l', 't'];
+    let flags = ["v", "h", "l", "t", "O9001"];
     let result = client.meta_get(key, &flags).await.unwrap();
 
     assert!(result.is_some());
@@ -1058,7 +1058,7 @@ async fn test_meta_get_with_all_flags() {
 #[parallel]
 async fn test_meta_get_not_found() {
     let key = "meta-get-test-key-not-found";
-    let flags = ['h', 'l', 't'];
+    let flags = ["v", "h", "l", "t"];
     let mut client = setup_client(&[key]).await;
 
     let result = client.meta_get(key, &flags).await.unwrap();
@@ -1070,15 +1070,13 @@ async fn test_meta_get_not_found() {
 async fn test_meta_set() {
     let key = "meta-set-test-key";
     let value = "test-value";
-    let ttl = Some(3600); // 1 hour
 
     let mut client = setup_client(&[key]).await;
 
     let mut meta_flags: FxHashMap<&[char], String> = FxHashMap::default();
-    meta_flags.insert(&['F'][..], "42".to_string()); // Set flags to 0
-
+    // meta_flags.insert(&['F'][..], "42".to_string()); // Set flags to 42
     // Set the key using meta_set
-    let result = client.meta_set(key, value, ttl, meta_flags).await;
+    let result = client.meta_set(key, value, Some(&meta_flags)).await;
     assert!(
         result.is_ok(),
         "Failed to set key using meta_set: {:?}",
@@ -1086,11 +1084,15 @@ async fn test_meta_set() {
     );
 
     // Retrieve the key using meta_get to verify
-    let get_flags = ['h', 'l', 't'];
-    let get_result = client.meta_get(key, &get_flags).await.unwrap();
+    let get_flags = [];
+    let get_result = client.meta_get(key, &get_flags).await;
 
-    assert!(get_result.is_some(), "Key not found after meta_set");
-    let result_value = get_result.unwrap();
+    println!("get_result: {:?}", get_result);
+
+    let unwrapped_result = get_result.unwrap();
+
+    assert!(unwrapped_result.is_some(), "Key not found after meta_set");
+    let result_value = unwrapped_result.unwrap();
 
     // Verify the value
     assert_eq!(
@@ -1098,9 +1100,6 @@ async fn test_meta_set() {
         value,
         "Retrieved value does not match set value"
     );
-
-    // Clean up
-    let _ = client.delete(key).await;
 }
 
 #[ignore = "Relies on a running memcached server"]
@@ -1108,20 +1107,16 @@ async fn test_meta_set() {
 async fn test_meta_set_opaque_token() {
     let key = "meta-set-opaque-token-test-key";
     let value = "test-value";
-    let ttl = Some(3600); // 1 hour
-
     let mut client = setup_client(&[key]).await;
-
-    // Clean up
-    let _ = client.delete(key).await;
 
     let mut meta_flags: FxHashMap<&[char], String> = FxHashMap::default();
     meta_flags.insert(&['M'][..], "E".to_string()); // Set mode to "add if not exists"
+    meta_flags.insert(&['T'][..], "3600".to_string()); // Set ttl to 1 hour
     meta_flags.insert(&['F'][..], "42".to_string()); // Set flags to 0
     meta_flags.insert(&['O'][..], "opaque-token".to_string()); // Set opaque token
 
     // Set the key using meta_set
-    let result = client.meta_set(key, value, ttl, meta_flags).await;
+    let result = client.meta_set(key, value, Some(&meta_flags)).await;
     assert!(
         result.is_ok(),
         "Failed to set key using meta_set: {:?}",
@@ -1129,7 +1124,7 @@ async fn test_meta_set_opaque_token() {
     );
 
     // Retrieve the key using meta_get to verify
-    let get_flags = ['h', 'l', 't'];
+    let get_flags = ["v", "h", "l", "t"];
     let get_result = client.meta_get(key, &get_flags).await.unwrap();
 
     assert!(get_result.is_some(), "Key not found after meta_set");
@@ -1141,9 +1136,6 @@ async fn test_meta_set_opaque_token() {
         value,
         "Retrieved value does not match set value"
     );
-
-    // Clean up
-    let _ = client.delete(key).await;
 }
 
 #[ignore = "Relies on a running memcached server"]
@@ -1151,7 +1143,6 @@ async fn test_meta_set_opaque_token() {
 async fn test_meta_set_not_stored() {
     let key = "meta-set-add-if-not-exists-test-key";
     let value = "test-value";
-    let ttl = Some(3600); // 1 hour
 
     let mut client = setup_client(&[key]).await;
 
@@ -1160,7 +1151,7 @@ async fn test_meta_set_not_stored() {
     meta_flags.insert(&['F'][..], "42".to_string()); // Set flags to 42
 
     // Set the key using meta_set
-    let result = client.meta_set(key, value, ttl, meta_flags.clone()).await;
+    let result = client.meta_set(key, value, Some(&meta_flags)).await;
     assert!(
         result.is_ok(),
         "Failed to set key using meta_set: {:?}",
@@ -1168,12 +1159,9 @@ async fn test_meta_set_not_stored() {
     );
 
     // Set the key using meta_set again, this should fail with Status::NotStored
-    let result = client.meta_set(key, value, ttl, meta_flags.clone()).await;
+    let result = client.meta_set(key, value, Some(&meta_flags)).await;
     let result = result.unwrap_err();
     assert_eq!(Error::Protocol(Status::NotStored), result);
-
-    // Clean up
-    let _ = client.delete(key).await;
 }
 
 #[ignore = "Relies on a running memcached server"]
