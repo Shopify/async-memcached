@@ -84,7 +84,6 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
 
             for (flag, meta_value) in meta_values_array {
                 match flag {
-                    b'M' => meta_values.set_mode = Some(meta_value.to_vec()),
                     b'O' => meta_values.opaque_token = Some(meta_value.to_vec()),
                     b'T' => meta_values.ttl_remaining = Some(
                         std::str::from_utf8(meta_value)
@@ -201,6 +200,7 @@ pub fn take_until_size(mut buf: &[u8], byte_size: u32) -> IResult<&[u8], Vec<u8>
     Ok((buf, data))
 }
 
+// TODO: remove this if we don't need it
 fn _parse_meta_tag_values_as_u32(input: &[u8]) -> IResult<&[u8], Vec<(u8, u32)>> {
     many0(pair(
         preceded(space0, map(take(1usize), |s: &[u8]| s[0])),
@@ -218,6 +218,7 @@ fn parse_meta_tag_values_as_bytes(input: &[u8]) -> IResult<&[u8], Vec<(u8, &[u8]
     ))(input)
 }
 
+#[allow(dead_code)]
 fn parse_meta_tag_values_as_slice(input: &[u8]) -> IResult<&[u8], Vec<(u8, &[u8])>> {
     if input.is_empty() || input == b"\r\n" {
         Ok((input, Vec::new()))

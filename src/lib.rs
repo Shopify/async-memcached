@@ -230,12 +230,13 @@ impl Client {
     pub async fn meta_get<K: AsRef<[u8]>>(
         &mut self,
         key: K,
-        meta_flags: &[&str],
+        meta_flags: &[&str], // NOTE: This really should never be option, passing no flags is a useless op
     ) -> Result<Option<Value>, Error> {
         let command_length: usize = MAX_KEY_LENGTH + 2 * meta_flags.len() + 5; // key + flags & whitespaces + "mg " + "\r\n"
         let mut command = Vec::with_capacity(command_length);
         command.extend_from_slice(b"mg ");
         command.extend_from_slice(key.as_ref());
+        println!("meta_flags: {:?}", meta_flags);
         if !meta_flags.is_empty() {
             for flag in meta_flags {
                 command.extend_from_slice(b" ");
@@ -468,32 +469,29 @@ impl Client {
         &mut self,
         key: K,
         value: V,
-        meta_flags: Option<&FxHashMap<&[char], String>>,
+        meta_flags: Option<&[&str]>,
     ) -> Result<Option<Value>, Error>
     where
         K: AsRef<[u8]>,
         V: AsMemcachedValue,
     {
-        let mut command = Vec::with_capacity(MAX_VALUE_SIZE + 550);
+        let mut command = Vec::with_capacity(MAX_VALUE_SIZE + 2 * MAX_KEY_LENGTH);
         let kr = key.as_ref();
         let vr = value.as_bytes();
 
         command.extend_from_slice(b"ms ");
         command.extend_from_slice(kr);
-        command.extend_from_slice(b" ");
+
         let vlen = vr.len().to_string();
+        command.extend_from_slice(b" ");
         command.extend_from_slice(vlen.as_ref());
 
         println!("checking for meta_flags");
         if let Some(meta_flags) = meta_flags {
             println!("meta_flags: {:?}", meta_flags);
-            for (flag, flag_value) in meta_flags {
-                command.push(b' ');
-                command.extend(flag.iter().map(|&c| c as u8));
-                if !flag_value.is_empty() {
-                    command.extend_from_slice(flag_value.as_bytes());
-                }
-            }
+
+            command.extend_from_slice(b" ");
+            command.extend_from_slice(meta_flags.join(" ").as_bytes());
         }
 
         command.extend_from_slice(b"\r\n");
