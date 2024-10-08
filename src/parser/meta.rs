@@ -98,7 +98,6 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
             let (input, data) = take_until_size(input, size)?;
 
             let mut meta_values = MetaValue {
-                set_mode: None,
                 hit_before: None,
                 last_accessed: None,
                 ttl_remaining: None,
@@ -160,7 +159,6 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
             }
 
             let mut meta_values = MetaValue {
-                set_mode: None,
                 hit_before: None,
                 last_accessed: None,
                 ttl_remaining: None,
@@ -268,6 +266,13 @@ mod tests {
         assert_eq!(result, vec![(b'O', token)]);
         assert_eq!(remaining, b"\r\n");
 
+        let input = b" ktest-key\r\n";
+        let (remaining, result) = parse_meta_tag_values_as_slice(input).unwrap();
+
+        let token: &[u8] = "test-key".as_bytes();
+        assert_eq!(result, vec![(b'k', token)]);
+        assert_eq!(remaining, b"\r\n");
+
         // Test with empty input
         let empty_input = b"";
         let (remaining, result) = parse_meta_tag_values_as_slice(empty_input).unwrap();
@@ -275,8 +280,8 @@ mod tests {
         assert_eq!(remaining, b"");
 
         // Test with new line
-        let empty_input = b"\r\n";
-        let (remaining, result) = parse_meta_tag_values_as_slice(empty_input).unwrap();
+        let new_line = b"\r\n";
+        let (remaining, result) = parse_meta_tag_values_as_slice(new_line).unwrap();
         assert_eq!(result, vec![]);
         assert_eq!(remaining, b"\r\n");
     }

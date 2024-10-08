@@ -203,7 +203,6 @@ impl Client {
                         Err(Status::Error(ErrorKind::Protocol(None)).into())
                     } else {
                         let mut item = items.remove(0);
-                        println!("item: {:?}", item);
                         item.key = key.as_ref().to_vec();
                         Ok(item)
                     }

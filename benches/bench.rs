@@ -336,7 +336,7 @@ fn bench_meta_get_concat(c: &mut Criterion) {
             let mut client = setup_client().await;
             let start = std::time::Instant::now();
             for _ in 0..iters {
-                let _ = client.meta_get_concat("foo", &["h", "l", "t", "v"]).await;
+                let _ = client.meta_get_concat("foo", &["h", "t", "l"]).await;
             }
             start.elapsed()
         });
