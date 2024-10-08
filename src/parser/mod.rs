@@ -39,15 +39,13 @@ pub struct Value {
 // TODO: Defaults of NONE?
 #[derive(Clone, Debug, PartialEq)]
 pub struct MetaValue {
-    /// set mode flag
-    pub set_mode: Option<Vec<u8>>,
     /// Whether the item has been accessed before (X flag)
     pub hit_before: Option<bool>,
     /// Last access time in seconds since the epoch (h flag)
     pub last_accessed: Option<u64>,
     /// Remaining TTL in seconds, or -1 for unlimited (t flag)
     pub ttl_remaining: Option<i64>,
-    /// opaque value, consumes a token and copies back with response
+    /// opaque token, consumes a token and copies back with response (O flag)
     pub opaque_token: Option<Vec<u8>>,
 }
 
