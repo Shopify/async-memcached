@@ -12,9 +12,9 @@ use std::fmt;
 mod ascii;
 pub use ascii::{parse_ascii_metadump_response, parse_ascii_response, parse_ascii_stats_response};
 
-mod meta;
-#[allow(unused_imports)]
-pub use meta::parse_meta_response;
+// mod meta;
+// #[allow(unused_imports)]
+// pub use meta::parse_meta_response;
 
 /// A value from memcached.
 #[derive(Clone, Debug, PartialEq)]
@@ -38,16 +38,26 @@ pub struct Value {
 }
 
 // TODO: Defaults of NONE?
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub struct MetaValue {
-    /// Whether the item has been accessed before (X flag)
+    /// CAS value (c flag)
+    pub cas: Option<u64>,
+    /// Client flags (f flag)
+    pub flags: Option<u32>,
+    /// Whether the item has been accessed before (h flag)
     pub hit_before: Option<bool>,
-    /// Last access time in seconds since the epoch (h flag)
+    /// Last access time in seconds since the epoch (l flag)
     pub last_accessed: Option<u64>,
     /// Remaining TTL in seconds, or -1 for unlimited (t flag)
     pub ttl_remaining: Option<i64>,
-    /// opaque value, consumes a token and copies back with response
+    /// Value size (s flag)
+    pub size: Option<u64>,
+    /// opaque value, consumes a token and copies back with response (O flag)
     pub opaque_token: Option<Vec<u8>>,
+    /// Staleness indicator (X flag)
+    pub is_stale: Option<bool>,
+    /// Win/lose for recache (W/Z flag)
+    pub is_recache_winner: Option<bool>,
 }
 
 /// Status of a memcached operation.

@@ -9,25 +9,25 @@ use nom::{
     },
     combinator::{map, map_res, value},
     multi::many0,
-    sequence::{pair, preceded, terminated, tuple},
+    sequence::{pair, preceded, tuple},
     IResult,
 };
 
 use super::{parse_u32, ErrorKind, MetaValue, Response, Status, Value};
 
-#[allow(dead_code)]
-pub fn parse_meta_status(buf: &[u8]) -> IResult<&[u8], Response> {
-    terminated(
-        alt((
-            value(Response::Status(Status::NotStored), tag(b"NS")),
-            value(Response::Status(Status::Deleted), tag(b"DE")),
-            value(Response::Status(Status::Touched), tag(b"TO")),
-            value(Response::Status(Status::Exists), tag(b"EX")),
-            value(Response::Status(Status::NotFound), tag(b"NF")),
-        )),
-        crlf,
-    )(buf)
-}
+// #[allow(dead_code)]
+// pub fn parse_meta_status(buf: &[u8]) -> IResult<&[u8], Response> {
+//     terminated(
+//         alt((
+//             value(Response::Status(Status::NotStored), tag(b"NS")),
+//             value(Response::Status(Status::Deleted), tag(b"DE")),
+//             value(Response::Status(Status::Touched), tag(b"TO")),
+//             value(Response::Status(Status::Exists), tag(b"EX")),
+//             value(Response::Status(Status::NotFound), tag(b"NF")),
+//         )),
+//         crlf,
+//     )(buf)
+// }
 
 #[allow(dead_code)]
 pub fn parse_meta_set_status(buf: &[u8]) -> IResult<&[u8], Response> {
@@ -37,32 +37,32 @@ pub fn parse_meta_set_status(buf: &[u8]) -> IResult<&[u8], Response> {
 #[allow(dead_code)]
 pub fn parse_meta_get_status(buf: &[u8]) -> IResult<&[u8], Response> {
     alt((
-        value(Response::Status(Status::Exists), tag(b"VA ")),
+        value(Response::Status(Status::Exists), tag(b"VA")),
         value(Response::Status(Status::Exists), tag(b"HD ")),
         value(Response::Status(Status::NotFound), tag(b"EN\r\n")),
     ))(buf)
 }
 
-#[allow(dead_code)]
-pub fn parse_meta_response(buf: &[u8]) -> Result<Option<(usize, Response)>, ErrorKind> {
-    let bufn = buf.len();
-    let result = alt((
-        parse_meta_status,
-        |input| parse_meta_get_data_value(input),
-        |input| parse_meta_set_data_value(input),
-    ))(buf);
+// #[allow(dead_code)]
+// pub fn parse_meta_response(buf: &[u8]) -> Result<Option<(usize, Response)>, ErrorKind> {
+//     let bufn = buf.len();
+//     let result = alt((
+//         parse_meta_status,
+//         |input| parse_meta_get_data_value(input),
+//         |input| parse_meta_set_data_value(input),
+//     ))(buf);
 
-    match result {
-        Ok((left, response)) => {
-            let n = bufn - left.len();
-            Ok(Some((n, response)))
-        }
-        Err(nom::Err::Incomplete(_)) => Ok(None),
-        Err(nom::Err::Error(e)) | Err(nom::Err::Failure(e)) => {
-            Err(ErrorKind::Protocol(Some(e.code.description().to_string())))
-        }
-    }
-}
+//     match result {
+//         Ok((left, response)) => {
+//             let n = bufn - left.len();
+//             Ok(Some((n, response)))
+//         }
+//         Err(nom::Err::Incomplete(_)) => Ok(None),
+//         Err(nom::Err::Error(e)) | Err(nom::Err::Failure(e)) => {
+//             Err(ErrorKind::Protocol(Some(e.code.description().to_string())))
+//         }
+//     }
+// }
 
 #[allow(dead_code)]
 fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
@@ -72,12 +72,8 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
             // TODO: dont' call if there are no flags
             let (input, meta_values_array) = parse_meta_tag_values_as_slice(input)?;
 
-            let mut meta_values = MetaValue {
-                hit_before: None,
-                last_accessed: None,
-                ttl_remaining: None,
-                opaque_token: None,
-            };
+            let mut meta_values = MetaValue::default();
+
             let mut value = Value {
                 key: b"key".to_vec(),
                 cas: None,
@@ -138,12 +134,8 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
             let (input, _) = crlf(input)?;
             let (input, data) = take_until_size(input, size)?;
 
-            let mut meta_values = MetaValue {
-                hit_before: None,
-                last_accessed: None,
-                ttl_remaining: None,
-                opaque_token: None,
-            };
+            let mut meta_values = MetaValue::default();
+
             for (flag, value) in meta_values_array {
                 match flag {
                     b'h' => meta_values.hit_before = Some(value != 0),
