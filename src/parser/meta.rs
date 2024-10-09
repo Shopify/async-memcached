@@ -15,6 +15,7 @@ use nom::{
 
 use super::{parse_u32, ErrorKind, MetaValue, Response, Status, Value};
 
+#[allow(dead_code)]
 pub fn parse_meta_status(buf: &[u8]) -> IResult<&[u8], Response> {
     terminated(
         alt((
@@ -28,10 +29,12 @@ pub fn parse_meta_status(buf: &[u8]) -> IResult<&[u8], Response> {
     )(buf)
 }
 
+#[allow(dead_code)]
 pub fn parse_meta_set_status(buf: &[u8]) -> IResult<&[u8], Response> {
     alt((value(Response::Status(Status::Stored), tag(b"HD")),))(buf)
 }
 
+#[allow(dead_code)]
 pub fn parse_meta_get_status(buf: &[u8]) -> IResult<&[u8], Response> {
     alt((
         value(Response::Status(Status::Exists), tag(b"VA ")),
@@ -40,6 +43,7 @@ pub fn parse_meta_get_status(buf: &[u8]) -> IResult<&[u8], Response> {
     ))(buf)
 }
 
+#[allow(dead_code)]
 pub fn parse_meta_response(buf: &[u8]) -> Result<Option<(usize, Response)>, ErrorKind> {
     let bufn = buf.len();
     let result = alt((
@@ -60,6 +64,7 @@ pub fn parse_meta_response(buf: &[u8]) -> Result<Option<(usize, Response)>, Erro
     }
 }
 
+#[allow(dead_code)]
 fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
     let (input, success) = parse_meta_set_status(buf)?;
     match success {
@@ -121,6 +126,7 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
 //         t: 2179,
 //     }),
 // }
+#[allow(dead_code)]
 fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
     let (input, success) = parse_meta_get_status(buf)?;
     match success {
@@ -171,6 +177,7 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
     }
 }
 
+#[allow(dead_code)]
 pub fn take_until_size(mut buf: &[u8], byte_size: u32) -> IResult<&[u8], Vec<u8>> {
     let mut data = Vec::with_capacity(byte_size as usize);
     while (data.len() as u32) < byte_size {
@@ -191,6 +198,7 @@ pub fn take_until_size(mut buf: &[u8], byte_size: u32) -> IResult<&[u8], Vec<u8>
     Ok((buf, data))
 }
 
+#[allow(dead_code)]
 fn parse_meta_tag_values_as_u32(input: &[u8]) -> IResult<&[u8], Vec<(u8, u32)>> {
     many0(pair(
         preceded(space0, map(take(1usize), |s: &[u8]| s[0])),
@@ -200,6 +208,7 @@ fn parse_meta_tag_values_as_u32(input: &[u8]) -> IResult<&[u8], Vec<(u8, u32)>> 
     ))(input)
 }
 
+#[allow(dead_code)]
 fn parse_meta_tag_values_as_slice(input: &[u8]) -> IResult<&[u8], Vec<(u8, &[u8])>> {
     if input.is_empty() || input == b"\r\n" {
         Ok((input, Vec::new()))
