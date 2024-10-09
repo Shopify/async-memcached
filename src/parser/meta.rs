@@ -9,25 +9,25 @@ use nom::{
     },
     combinator::{map, map_res, value},
     multi::many0,
-    sequence::{pair, preceded, tuple},
+    sequence::{pair, preceded, terminated,tuple},
     IResult,
 };
 
 use super::{parse_u32, ErrorKind, MetaValue, Response, Status, Value};
 
-// #[allow(dead_code)]
-// pub fn parse_meta_status(buf: &[u8]) -> IResult<&[u8], Response> {
-//     terminated(
-//         alt((
-//             value(Response::Status(Status::NotStored), tag(b"NS")),
-//             value(Response::Status(Status::Deleted), tag(b"DE")),
-//             value(Response::Status(Status::Touched), tag(b"TO")),
-//             value(Response::Status(Status::Exists), tag(b"EX")),
-//             value(Response::Status(Status::NotFound), tag(b"NF")),
-//         )),
-//         crlf,
-//     )(buf)
-// }
+#[allow(dead_code)]
+pub fn parse_meta_status(buf: &[u8]) -> IResult<&[u8], Response> {
+    terminated(
+        alt((
+            value(Response::Status(Status::NotStored), tag(b"NS")),
+            value(Response::Status(Status::Deleted), tag(b"DE")),
+            value(Response::Status(Status::Touched), tag(b"TO")),
+            value(Response::Status(Status::Exists), tag(b"EX")),
+            value(Response::Status(Status::NotFound), tag(b"NF")),
+        )),
+        crlf,
+    )(buf)
+}
 
 #[allow(dead_code)]
 pub fn parse_meta_set_status(buf: &[u8]) -> IResult<&[u8], Response> {
@@ -37,32 +37,120 @@ pub fn parse_meta_set_status(buf: &[u8]) -> IResult<&[u8], Response> {
 #[allow(dead_code)]
 pub fn parse_meta_get_status(buf: &[u8]) -> IResult<&[u8], Response> {
     alt((
-        value(Response::Status(Status::Exists), tag(b"VA")),
+        value(Response::Status(Status::Value), tag(b"VA ")),
         value(Response::Status(Status::Exists), tag(b"HD ")),
-        value(Response::Status(Status::NotFound), tag(b"EN\r\n")),
+        value(Response::Status(Status::NotFound), tag(b"EN")),
     ))(buf)
 }
 
-// #[allow(dead_code)]
-// pub fn parse_meta_response(buf: &[u8]) -> Result<Option<(usize, Response)>, ErrorKind> {
-//     let bufn = buf.len();
-//     let result = alt((
-//         parse_meta_status,
-//         |input| parse_meta_get_data_value(input),
-//         |input| parse_meta_set_data_value(input),
-//     ))(buf);
+#[allow(dead_code)]
+pub fn parse_meta_response(buf: &[u8]) -> Result<Option<(usize, Response)>, ErrorKind> {
+    let bufn = buf.len();
+    let result = alt((
+        parse_meta_status,
+        |input| parse_meta_get_data_value(input),
+        |input| parse_meta_set_data_value(input),
+    ))(buf);
 
-//     match result {
-//         Ok((left, response)) => {
-//             let n = bufn - left.len();
-//             Ok(Some((n, response)))
-//         }
-//         Err(nom::Err::Incomplete(_)) => Ok(None),
-//         Err(nom::Err::Error(e)) | Err(nom::Err::Failure(e)) => {
-//             Err(ErrorKind::Protocol(Some(e.code.description().to_string())))
-//         }
-//     }
+    match result {
+        Ok((left, response)) => {
+            let n = bufn - left.len();
+            Ok(Some((n, response)))
+        }
+        Err(nom::Err::Incomplete(_)) => Ok(None),
+        Err(nom::Err::Error(e)) | Err(nom::Err::Failure(e)) => {
+            Err(ErrorKind::Protocol(Some(e.code.description().to_string())))
+        }
+    }
+}
+
+// example meta_get command:
+// mg meta-get-test-key v h l t
+// so it has flags of v h l t
+// meta_get example response:
+// VA 10 h1 l56 t2179
+// test-value
+// this method should return a response with a value object like like:
+// Value {
+//     key: "meta-get-test-key",
+//     cas: None,
+//     flags: 0,
+//     data: "test-value",
+//     meta_values: Some(MetaValue {
+//         h: true,
+//         l: 56,
+//         t: 2179,
+//     }),
 // }
+#[allow(dead_code)]
+fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
+    let (input, success) = parse_meta_get_status(buf)?;
+    match success {
+        // match arm for "VA " response when v flag is used
+        Response::Status(Status::Value) => {
+            let (input, size) = parse_u32(input)?;
+
+            // might not need this anymore if we're working on "VA "
+            // let input = if input.starts_with(b" ") {
+            //     // This arm covers the case where meta_flags are provided
+            //     let (input, _tag) = tag(" ")(input)?;
+            //     input
+            // } else {
+            //     input
+            // };
+
+            let (input, _tag) = tag(" ")(input)?;
+            let (input, meta_values_array) = parse_meta_flag_values_as_u32(input)?;
+            // remove the \r\n from the input
+            let (input, _) = crlf(input)?;
+            let (input, data) = take_until_size(input, size)?;
+
+            let mut meta_values = MetaValue::default();
+
+            let mut item_key = 0;
+
+            for (flag, meta_value) in meta_values_array {
+                match flag {
+                    b'c' => meta_values.cas = Some(meta_value as u64),
+                    b'f' => meta_values.flags = Some(meta_value as u32),
+                    b'h' => meta_values.hit_before = Some(meta_value != 0),
+                    b'k' => item_key = meta_value, // TODO: this is actually a string
+                    b'l' => meta_values.last_accessed = Some(meta_value as u64),
+                    b's' => meta_values.size = Some(meta_value as u64),
+                    b't' => meta_values.ttl_remaining = Some(meta_value as i64),
+                    b'W' => meta_values.is_recache_winner = Some(true),
+                    b'Z' => meta_values.is_recache_winner = Some(false),
+                    b'X' => meta_values.is_stale = Some(true),
+                    _ => {}
+                }
+            }
+
+            // TODO: hmmm we don't have the key in the response anymore, should we return none and the caller maps it back?
+            // or we need to pass the key into the parser...
+            // slowly this is pointing towards a different value type all together for meta
+            let value = Value {
+                key: item_key.to_string().as_bytes().to_vec(), // TODO: fix this
+                cas: None,
+                flags: Some(0),
+                data: Some(data),
+                meta_values: Some(meta_values),
+            };
+
+            Ok((input, Response::Data(Some(vec![value]))))
+        }
+        Response::Status(Status::NotFound) => {
+            // TODO: improve this so that it works with opaque token or k flag
+            Ok((input, Response::Status(Status::NotFound)))
+        }
+        _ => {
+            // unexpected response code, should never happen, bail
+            Err(nom::Err::Error(nom::error::Error::new(
+                input,
+                nom::error::ErrorKind::Eof,
+            )))
+        }
+    }
+}
 
 #[allow(dead_code)]
 fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
@@ -70,7 +158,7 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
     match success {
         Response::Status(Status::Stored) => {
             // TODO: dont' call if there are no flags
-            let (input, meta_values_array) = parse_meta_tag_values_as_slice(input)?;
+            let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?;
 
             let mut meta_values = MetaValue::default();
 
@@ -104,71 +192,6 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
     }
 }
 
-// example meta_get command:
-// mg meta-get-test-key v h l t
-// so it has flags of v h l t
-// meta_get example response:
-// VA 10 h1 l56 t2179
-// test-value
-// this method should return a response with a value object like like:
-// Value {
-//     key: "meta-get-test-key",
-//     cas: None,
-//     flags: 0,
-//     data: "test-value",
-//     meta_values: Some(MetaValue {
-//         h: true,
-//         l: 56,
-//         t: 2179,
-//     }),
-// }
-#[allow(dead_code)]
-fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
-    let (input, success) = parse_meta_get_status(buf)?;
-    match success {
-        Response::Status(Status::Value) => {
-            let (input, size) = parse_u32(input)?;
-            let (input, _tag) = tag(" ")(input)?;
-            let (input, meta_values_array) = parse_meta_tag_values_as_u32(input)?;
-            // remove the \r\n from the input
-            let (input, _) = crlf(input)?;
-            let (input, data) = take_until_size(input, size)?;
-
-            let mut meta_values = MetaValue::default();
-
-            for (flag, value) in meta_values_array {
-                match flag {
-                    b'h' => meta_values.hit_before = Some(value != 0),
-                    b'l' => meta_values.last_accessed = Some(value as u64),
-                    b't' => meta_values.ttl_remaining = Some(value as i64),
-                    _ => {}
-                }
-            }
-
-            // TODO: hmmm we don't have the key in the response anymore, should we return none and the caller maps it back?
-            // or we need to pass the key into the parser...
-            // slowly this is pointing towards a different value type all together for meta
-            let value = Value {
-                key: b"key".to_vec(),
-                cas: None,
-                flags: Some(0),
-                data: Some(data),
-                meta_values: Some(meta_values),
-            };
-
-            Ok((input, Response::Data(Some(vec![value]))))
-        }
-        Response::Status(Status::NotFound) => Ok((input, Response::Status(Status::NotFound))),
-        _ => {
-            // unexpected response code, should never happen, bail
-            Err(nom::Err::Error(nom::error::Error::new(
-                input,
-                nom::error::ErrorKind::Eof,
-            )))
-        }
-    }
-}
-
 #[allow(dead_code)]
 pub fn take_until_size(mut buf: &[u8], byte_size: u32) -> IResult<&[u8], Vec<u8>> {
     let mut data = Vec::with_capacity(byte_size as usize);
@@ -191,7 +214,7 @@ pub fn take_until_size(mut buf: &[u8], byte_size: u32) -> IResult<&[u8], Vec<u8>
 }
 
 #[allow(dead_code)]
-fn parse_meta_tag_values_as_u32(input: &[u8]) -> IResult<&[u8], Vec<(u8, u32)>> {
+fn parse_meta_flag_values_as_u32(input: &[u8]) -> IResult<&[u8], Vec<(u8, u32)>> {
     many0(pair(
         preceded(space0, map(take(1usize), |s: &[u8]| s[0])),
         map_res(digit1, |s: &[u8]| {
@@ -201,7 +224,7 @@ fn parse_meta_tag_values_as_u32(input: &[u8]) -> IResult<&[u8], Vec<(u8, u32)>> 
 }
 
 #[allow(dead_code)]
-fn parse_meta_tag_values_as_slice(input: &[u8]) -> IResult<&[u8], Vec<(u8, &[u8])>> {
+fn parse_meta_flag_values_as_slice(input: &[u8]) -> IResult<&[u8], Vec<(u8, &[u8])>> {
     if input.is_empty() || input == b"\r\n" {
         Ok((input, Vec::new()))
     } else {
@@ -225,7 +248,7 @@ mod tests {
     #[test]
     fn test_parse_meta_tag_values_as_slice() {
         let input = b" Oopaque-token\r\n";
-        let (remaining, result) = parse_meta_tag_values_as_slice(input).unwrap();
+        let (remaining, result) = parse_meta_flag_values_as_slice(input).unwrap();
 
         let token: &[u8] = "opaque-token".as_bytes();
         assert_eq!(result, vec![(b'O', token)]);
@@ -233,13 +256,13 @@ mod tests {
 
         // Test with empty input
         let empty_input = b"";
-        let (remaining, result) = parse_meta_tag_values_as_slice(empty_input).unwrap();
+        let (remaining, result) = parse_meta_flag_values_as_slice(empty_input).unwrap();
         assert_eq!(result, vec![]);
         assert_eq!(remaining, b"");
 
         // Test with new line
         let empty_input = b"\r\n";
-        let (remaining, result) = parse_meta_tag_values_as_slice(empty_input).unwrap();
+        let (remaining, result) = parse_meta_flag_values_as_slice(empty_input).unwrap();
         assert_eq!(result, vec![]);
         assert_eq!(remaining, b"\r\n");
     }
@@ -282,7 +305,7 @@ mod tests {
     #[test]
     fn test_parse_meta_tag_values() {
         let input = b"h1 l56 t2179\r\ntest-value";
-        let (remaining, result) = parse_meta_tag_values_as_u32(input).unwrap();
+        let (remaining, result) = parse_meta_flag_values_as_u32(input).unwrap();
 
         assert_eq!(result, vec![(b'h', 1), (b'l', 56), (b't', 2179),]);
         assert_eq!(remaining, b"\r\ntest-value");
@@ -291,7 +314,7 @@ mod tests {
     #[test]
     fn test_parse_meta_tag_values_order_does_not_matter() {
         let input = b"t2179 h1 l56\r\ntest-value";
-        let (remaining, result) = parse_meta_tag_values_as_u32(input).unwrap();
+        let (remaining, result) = parse_meta_flag_values_as_u32(input).unwrap();
 
         assert_eq!(result, vec![(b't', 2179), (b'h', 1), (b'l', 56),]);
         assert_eq!(remaining, b"\r\ntest-value");
@@ -300,7 +323,7 @@ mod tests {
     #[test]
     fn test_parse_meta_tag_values_handles_unknown_tags() {
         let input = b"h1 l56 t2179 x100\r\ntest-value";
-        let (remaining, result) = parse_meta_tag_values_as_u32(input).unwrap();
+        let (remaining, result) = parse_meta_flag_values_as_u32(input).unwrap();
 
         assert_eq!(
             result,
@@ -394,7 +417,7 @@ mod tests {
     fn test_parse_meta_get_data_value_cache_miss() {
         let input = b"EN\r\n";
         let (remaining, response) = parse_meta_get_data_value(input).unwrap();
-        assert_eq!(remaining, b"");
+        assert_eq!(remaining, b"\r\n");
         assert_eq!(response, Response::Status(Status::NotFound));
     }
 
