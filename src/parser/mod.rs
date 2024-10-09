@@ -62,6 +62,8 @@ pub enum Status {
     Touched,
     /// The key already exists.
     Exists,
+    /// The key already exists and value was requested in a meta command
+    Value,
     /// The key was not found.
     NotFound,
     /// An error occurred for the given operation.
@@ -145,6 +147,7 @@ impl fmt::Display for Status {
             Self::Deleted => write!(f, "deleted"),
             Self::Touched => write!(f, "touched"),
             Self::Exists => write!(f, "exists"),
+            Self::Value => write!(f, "value"),
             Self::NotFound => write!(f, "not found"),
             Self::Error(ek) => write!(f, "error: {}", ek),
         }

@@ -34,7 +34,7 @@ pub fn parse_meta_set_status(buf: &[u8]) -> IResult<&[u8], Response> {
 
 pub fn parse_meta_get_status(buf: &[u8]) -> IResult<&[u8], Response> {
     alt((
-        value(Response::Status(Status::Exists), tag(b"VA ")),
+        value(Response::Status(Status::Value), tag(b"VA ")),
         value(Response::Status(Status::Exists), tag(b"HD ")),
         value(Response::Status(Status::NotFound), tag(b"EN\r\n")),
     ))(buf)
@@ -81,7 +81,7 @@ pub fn parse_meta_response(buf: &[u8]) -> Result<Option<(usize, Response)>, Erro
 fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
     let (input, success) = parse_meta_get_status(buf)?;
     match success {
-        Response::Status(Status::Exists) => {
+        Response::Status(Status::Value) => {
             let (input, size) = parse_u32(input)?;
 
             let input = if input.starts_with(b" ") {
