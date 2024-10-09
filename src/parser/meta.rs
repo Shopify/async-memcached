@@ -126,7 +126,7 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
 fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
     let (input, success) = parse_meta_get_status(buf)?;
     match success {
-        Response::Status(Status::Exists) => {
+        Response::Status(Status::Value) => {
             let (input, size) = parse_u32(input)?;
             let (input, _tag) = tag(" ")(input)?;
             let (input, meta_values_array) = parse_meta_tag_values_as_u32(input)?;
