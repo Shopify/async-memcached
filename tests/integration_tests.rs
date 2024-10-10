@@ -93,8 +93,7 @@ async fn test_meta_get_cache_hit_with_no_flags() {
 
     let mut client = setup_client(&[key]).await;
 
-    let set_result = client.set(key, value, None, None).await.unwrap();
-    assert_eq!(set_result, ());
+    client.set(key, value, None, None).await.unwrap();
 
     let get_result = client.get(key).await.unwrap();
     println!(
@@ -566,8 +565,8 @@ async fn test_set_fails_with_value_too_large() {
 #[tokio::test]
 #[parallel]
 async fn test_get_multi() {
-    let keys = vec!["mg-key1", "mg-key2", "mg-key3"];
-    let values = vec!["value1", "value2", "value3"];
+    let keys = ["mg-key1", "mg-key2", "mg-key3"];
+    let values = ["value1", "value2", "value3"];
 
     let mut client = setup_client(&keys).await;
 
@@ -592,7 +591,7 @@ async fn test_get_multi() {
 #[parallel]
 async fn test_get_multi_with_nonexistent_key() {
     let mut keys = vec!["mgne-key1", "mgne-key2", "mgne-key3"];
-    let values = vec!["value1", "value2", "value3"];
+    let values = ["value1", "value2", "value3"];
 
     let original_keys_length = keys.len();
 
@@ -628,7 +627,7 @@ async fn test_get_multi_with_nonexistent_key() {
 #[parallel]
 async fn test_get_multi_skips_key_too_long() {
     let mut keys = vec!["mgktl-key1", "mgktl-key2", "mgktl-key3"];
-    let values = vec!["value1", "value2", "value3"];
+    let values = ["value1", "value2", "value3"];
 
     let mut client = setup_client(&keys).await;
 
@@ -663,7 +662,7 @@ async fn test_get_multi_skips_key_too_long() {
 #[parallel]
 async fn test_get_many_aliases_get_multi_properly() {
     let keys = vec!["get-many-key1", "get-many-key2", "get-many-key3"];
-    let values = vec!["value1", "value2", "value3"];
+    let values = ["value1", "value2", "value3"];
 
     let mut client = setup_client(&keys).await;
 
