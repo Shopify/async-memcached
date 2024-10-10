@@ -1029,3 +1029,69 @@ async fn test_flush_all() {
     let result = client.get(key).await;
     assert!(matches!(result, Ok(None)));
 }
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_dump_raw_bytes_meta_get_key_missing() {
+    let key = "dump-raw-bytes-meta-get-key-missing";
+    let meta_get_command = format!("mg #{key} v f\r\n");
+
+    let mut client = setup_client(&[key]).await;
+
+    let result = client.dump_raw_bytes(meta_get_command.as_bytes()).await;
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn test_dump_raw_bytes_meta_get_key_exists() {
+    let key = "dump-raw-bytes-meta-get-key-exists";
+    let meta_get_command = format!("mg {key} v f\r\n");
+
+    let mut client = Client::new("tcp://127.0.0.1:11211")
+        .await
+        .expect("Failed to connect to server");
+
+    let result = client.dump_raw_bytes(meta_get_command.as_bytes()).await;
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), b"VA 1 f0\r\n1\r\n");
+}
+
+#[tokio::test]
+async fn test_dump_raw_bytes_meta_set() {
+    let key = "dump-raw-bytes-meta-set";
+    let value: &[u8; 5] = b"hello";
+    let value_len = value.len();
+    let meta_set_command = format!("ms {key} {value_len} v f\r\nhello\r\n");
+
+    let mut client = setup_client(&[key]).await;
+
+    let result = client.dump_raw_bytes(meta_set_command.as_bytes()).await;
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), b"HD\r\n");
+}
+
+#[tokio::test]
+async fn test_dump_raw_bytes_meta_set_large_value() {
+    let key = "dump-raw-bytes-meta-set-key-missing";
+    let v = "a".repeat(1024 * 1023);
+    let value_len = v.len();
+    let meta_set_command = format!("ms {key} {value_len} v f\r\n{v}\r\n");
+
+    let mut client = setup_client(&[key]).await;
+
+    let result = client.dump_raw_bytes(meta_set_command.as_bytes()).await;
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), b"HD\r\n");
+
+    println!("foo");
+
+    let result = client
+        .dump_raw_bytes(format!("mg {key} v f\r\n").as_bytes())
+        .await;
+    assert!(result.is_ok());
+    assert_eq!(
+        result.unwrap(),
+        format!("VA {value_len} f0\r\n{v}\r\n").as_bytes()
+    );
+}

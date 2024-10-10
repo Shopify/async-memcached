@@ -652,6 +652,39 @@ impl Client {
         }
     }
 
+    /// Dumps raw bytes from the server.
+    ///
+    /// This method sends the given payload to the server and reads the response.
+    /// The response is returned as a `Vec<u8>`.
+    pub async fn dump_raw_bytes(&mut self, payload: &[u8]) -> Result<&[u8], Error> {
+        self.conn.write_all(payload).await?;
+        self.conn.flush().await?;
+
+        self.buf.clear();
+
+        loop {
+            let bytes_read = self.conn.read_buf(&mut self.buf).await?;
+
+            dbg!(format!(
+                "bytes_read: {:?}, buf: {:?}",
+                bytes_read, &self.buf
+            ));
+
+            if self.buf.ends_with(b"\r\n") {
+                break;
+            }
+        }
+
+        if self.buf.is_empty() {
+            Err(Error::Io(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "Connection closed without receiving data",
+            )))
+        } else {
+            Ok(&self.buf)
+        }
+    }
+
     fn validate_key_length(kr: &[u8]) -> Result<&[u8], Error> {
         if kr.len() > MAX_KEY_LENGTH {
             return Err(Error::from(Status::Error(ErrorKind::KeyTooLong)));
