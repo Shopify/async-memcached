@@ -1,22 +1,17 @@
 use nom::{
     branch::alt,
     bytes::streaming::{tag, take, take_while1},
-    character::{
-        complete::digit1,
-        streaming::{crlf, space0, space1},
-    },
-    combinator::{map, map_res, value},
-    error::ErrorKind::Fail,
+    character::streaming::{crlf, space1},
+    combinator::{map, value},
     multi::many0,
-    sequence::{pair, preceded, terminated, tuple},
+    sequence::{terminated, tuple},
     IResult,
 };
 
 use super::{parse_u32, ErrorKind, MetaValue, Response, Status, Value};
 use crate::Error;
 
-// TODO: remove this later in favour of individual parse_meta_*_status methods
-#[allow(dead_code)]
+// TODO: remove this later in favour of individual parse_meta_*_status methods]
 pub fn parse_meta_status(buf: &[u8]) -> IResult<&[u8], Response> {
     terminated(
         alt((
@@ -48,7 +43,6 @@ pub fn parse_meta_get_status(buf: &[u8]) -> IResult<&[u8], Response> {
 }
 
 // TODO: refactor this into individual parse_meta_*_response methods
-#[allow(dead_code)]
 pub fn parse_meta_response(buf: &[u8]) -> Result<Option<(usize, Response)>, ErrorKind> {
     let bufn = buf.len();
     // TODO: alt calls parsers sequentially until one succeeds, which is not optimal.  Want to only call the correct parser, no sequencing.
