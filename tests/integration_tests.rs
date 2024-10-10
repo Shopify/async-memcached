@@ -2,11 +2,11 @@ use async_memcached::{Client, Error, ErrorKind, Status};
 use rand::seq::IteratorRandom;
 use serial_test::{parallel, serial};
 
-// Note: Each test should run with keys unique to that test to avoid async conflicts.  Because these tests run concurrently,
+// NOTE: Each test should run with keys unique to that test to avoid async conflicts.  Because these tests run concurrently,
 // it's possible to delete/overwrite keys created by another test before they're read.
 
-const LARGE_PAYLOAD_SIZE: usize = 1000 * 1024;
-const MAX_KEY_LENGTH: usize = 250;
+const LARGE_PAYLOAD_SIZE: usize = 1024 * 1024; // 1 MB, default memcached max value size
+const MAX_KEY_LENGTH: usize = 250; // 250 bytes, default memcached max key length
 
 async fn setup_client(keys: &[&str]) -> Client {
     let mut client = Client::new("tcp://127.0.0.1:11211")
@@ -82,6 +82,171 @@ async fn test_get_fails_with_key_too_long() {
         get_result,
         Err(Error::Protocol(Status::Error(ErrorKind::KeyTooLong)))
     ));
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_get_cache_hit_with_no_flags() {
+    let key = "meta-get-test-key-cache-hit-with-no-flags";
+    let value = "test-value";
+
+    let mut client = setup_client(&[key]).await;
+
+    let set_result = client.set(key, value, None, None).await.unwrap();
+    assert_eq!(set_result, ());
+
+    let get_result = client.get(key).await.unwrap();
+    println!("get_result: {:?}", std::str::from_utf8(&get_result.unwrap().data.unwrap()).unwrap());
+
+    let flags = None;
+    let result = client.meta_get(key, flags).await.unwrap();
+
+    assert!(result.is_none());
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_get_with_only_v_flag() {
+    let key = "meta-get-test-key-with-only-v-flag";
+    let value = "test-value";
+
+    let mut client = setup_client(&[key]).await;
+
+    client.set(key, value, None, None).await.unwrap();
+
+    let flags = ["v"];
+    let result = client.meta_get(key, Some(&flags)).await.unwrap();
+
+    assert!(result.is_some());
+    let result_meta_value = result.unwrap();
+
+    assert_eq!(
+        String::from_utf8(result_meta_value.data.unwrap()).unwrap(),
+        value
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_get_with_many_flags() {
+    let key = "meta-get-test-key-with-many-flags";
+    let value = "test-value";
+    let ttl = 3600; // 1 hour
+
+    let mut client = setup_client(&[key]).await;
+
+    // Set the key with a TTL
+    client.set(key, value, Some(ttl), None).await.unwrap();
+
+    // Perform a get to ensure the item has been hit
+    let result = client.get(key).await.unwrap();
+    let result_value = result.unwrap();
+    assert_eq!(
+        String::from_utf8(result_value.data.unwrap()).unwrap(),
+        value
+    );
+
+    let flags = ["v", "h", "l", "t", "O9001"];
+    let result = client.meta_get(key, Some(&flags)).await.unwrap();
+
+    assert!(result.is_some());
+    let result_meta_value = result.unwrap();
+
+    assert_eq!(
+        String::from_utf8(result_meta_value.data.unwrap()).unwrap(),
+        value
+    );
+
+    let meta_flag_values = result_meta_value.meta_values.unwrap();
+    assert!(meta_flag_values.hit_before.unwrap());
+    assert_eq!(meta_flag_values.last_accessed.unwrap(), 0);
+    assert!(meta_flag_values.ttl_remaining.unwrap() > 0);
+    assert_eq!(meta_flag_values.opaque_token.unwrap(), "9001".as_bytes());
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_get_with_many_flags_and_no_value() {
+    let key = "meta-get-test-key-with-many-flags";
+    let value = "test-value";
+    let ttl = 3600; // 1 hour
+
+    let mut client = setup_client(&[key]).await;
+
+    // Set the key with a TTL
+    client.set(key, value, Some(ttl), None).await.unwrap();
+
+    // Perform a get to ensure the item has been hit (for the h flag), and confirm the value exists
+    let get_result = client.get(key).await.unwrap();
+    let get_result_value = get_result.unwrap();
+    assert_eq!(
+        String::from_utf8(get_result_value.data.unwrap()).unwrap(),
+        value
+    );
+
+    let flags = ["h", "l", "t", "O9001"];
+    let meta_get_result = client.meta_get(key, Some(&flags)).await.unwrap();
+
+    assert!(meta_get_result.is_some());
+    let meta_get_result_value = meta_get_result.unwrap();
+
+    assert_eq!(
+        meta_get_result_value.data, None
+    );
+
+    let meta_flag_values = meta_get_result_value.meta_values.unwrap();
+    assert!(meta_flag_values.hit_before.unwrap());
+    assert_eq!(meta_flag_values.last_accessed.unwrap(), 0);
+    assert!(meta_flag_values.ttl_remaining.unwrap() > 0);
+    assert_eq!(meta_flag_values.opaque_token.unwrap(), "9001".as_bytes());
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_get_not_found() {
+    let key = "meta-get-test-key-not-found";
+    let flags = ["v", "h", "l", "t"];
+    let mut client = setup_client(&[key]).await;
+
+    let result = client.meta_get(key, Some(&flags)).await.unwrap();
+    assert_eq!(result, None);
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_get_not_found_with_opaque_flag() {
+    let key = "meta-get-test-key-not-found";
+    let flags = ["v", "O9001"];
+    let mut client = setup_client(&[key]).await;
+
+    let result = client.meta_get(key, Some(&flags)).await.unwrap();
+
+    assert_eq!(
+        result.unwrap().meta_values.unwrap().opaque_token,
+        Some("9001".as_bytes().to_vec())
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_get_not_found_with_k_flag() {
+    let key = "meta-get-test-key-not-found";
+    let flags = ["v", "O9001"];
+    let mut client = setup_client(&[key]).await;
+
+    let result = client.meta_get(key, Some(&flags)).await.unwrap();
+
+    assert_eq!(
+        result.unwrap().key,
+        key.as_bytes().to_vec()
+    );
 }
 
 #[ignore = "Relies on a running memcached server"]
