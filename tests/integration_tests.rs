@@ -925,6 +925,44 @@ async fn test_meta_set_nonexistent_key_in_append_mode() {
 #[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
+async fn test_meta_set_nonexistent_key_in_append_mode_with_autovivify() {
+    let key = "meta-set-append-autovivify-test-key";
+    let original_value = "test-value";
+
+    let mut client = setup_client(&[key]).await;
+
+    // TODO: This will throw a ("Tag") error if N is provided without a TTL, that error needs to be handled properly (raise to client as ClientError // invalid command)
+    // Seems like any flag that wants a token will complain if the token is not provided with the same error, except O which will throw ("CrLf")
+    let meta_flags = ["MA", "F24", "N3600"];
+
+    // Set the key using meta_set to pre-populate (in set mode)
+    let set_result = client
+        .meta_set(key, original_value, Some(&meta_flags))
+        .await;
+    assert!(
+        set_result.is_ok(),
+        "Failed to set key using meta_set: {:?}",
+        set_result
+    );
+
+    // Check initial set results
+    let get_flags = ["v", "f", "t"];
+    let get_result_value = client
+        .meta_get(key, Some(&get_flags))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(get_result_value.flags.unwrap(), 24);
+    assert_eq!(get_result_value.meta_values.unwrap().ttl_remaining.unwrap(), 3600);
+    assert_eq!(
+        std::str::from_utf8(&get_result_value.data.unwrap()).unwrap(),
+        original_value
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
 async fn test_meta_set_existing_key_in_replace_mode() {
     let key = "meta-set-replace-test-key";
     let original_value = "original-value";
