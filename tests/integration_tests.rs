@@ -93,8 +93,7 @@ async fn test_meta_get_cache_hit_with_no_flags() {
 
     let mut client = setup_client(&[key]).await;
 
-    let set_result = client.set(key, value, None, None).await.unwrap();
-    assert_eq!(set_result, ());
+    client.set(key, value, None, None).await.unwrap();
 
     let get_result = client.get(key).await.unwrap();
     println!(
@@ -566,7 +565,7 @@ async fn test_set_fails_with_value_too_large() {
 #[tokio::test]
 #[parallel]
 async fn test_get_multi() {
-    let keys = vec!["mg-key1", "mg-key2", "mg-key3"];
+    let keys = ["mg-key1", "mg-key2", "mg-key3"];
     let values = ["value1", "value2", "value3"];
 
     let mut client = setup_client(&keys).await;

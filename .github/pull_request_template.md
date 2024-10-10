@@ -1,4 +1,4 @@
-<!-- Ensure you have run `cargo fmt` and `cargo clippy --all-features -- -D warnings` to catch linting errors. -->
+<!-- Ensure you have run `cargo fmt` and `cargo clippy --tests --all-features` to catch linting errors. -->
 <!-- Update CHANGELOG.md with with any changes included in this PR. -->
 ### TL;DR - What are you trying to accomplish?
 <!-- One or two line summary of your change-->
