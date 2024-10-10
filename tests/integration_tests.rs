@@ -925,6 +925,88 @@ async fn test_meta_set_nonexistent_key_in_append_mode() {
 #[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
+async fn test_meta_set_existing_key_in_replace_mode() {
+    let key = "meta-set-replace-test-key";
+    let original_value = "original-value";
+
+    let mut client = setup_client(&[key]).await;
+
+    let meta_flags = ["MS", "F24"];
+
+    // Set the key using meta_set to pre-populate (in set mode)
+    let set_result = client
+        .meta_set(key, original_value, Some(&meta_flags))
+        .await;
+    assert!(
+        set_result.is_ok(),
+        "Failed to set key using meta_set: {:?}",
+        set_result
+    );
+
+    // Check initial set results
+    let get_flags = ["v", "f"];
+    let get_result_value = client
+        .meta_get(key, Some(&get_flags))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(get_result_value.flags.unwrap(), 24);
+    assert_eq!(
+        std::str::from_utf8(&get_result_value.data.unwrap()).unwrap(),
+        original_value
+    );
+
+    let new_value = "new-value";
+    // Assign a new F flag value - this should be ignored and the flags are also replaced
+    let meta_flags = ["MR", "F42"];
+
+    // Set the key using meta_set again, this should fail with Status::NotStored
+    let replace_result = client.meta_set(key, new_value, Some(&meta_flags)).await;
+    assert!(
+        replace_result.is_ok(),
+        "Failed to set key using meta_set: {:?}",
+        replace_result
+    );
+
+    // Verify that the new value was replaced and that the original flags are preserved
+    let get_flags = ["v", "f"];
+    let get_result_value = client
+        .meta_get(key, Some(&get_flags))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(get_result_value.flags.unwrap(), 42);
+    assert_eq!(
+        std::str::from_utf8(&get_result_value.data.unwrap()).unwrap(),
+        new_value
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_set_nonexistent_key_in_replace_mode() {
+    let key = "meta-set-replace-non-existent-key";
+    let original_value = "test-value";
+
+    let mut client = setup_client(&[key]).await;
+
+    let meta_flags = ["MR", "F24"];
+
+    // Set the key using meta_set to pre-populate (in replace mode)
+    let set_result = client
+        .meta_set(key, original_value, Some(&meta_flags))
+        .await;
+    assert!(
+        set_result.is_err(),
+        "Should have received Err(Protocol(NotStored)) but got: {:?}",
+        set_result
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
 async fn test_get_multi() {
     let keys = ["mg-key1", "mg-key2", "mg-key3"];
     let values = ["value1", "value2", "value3"];
