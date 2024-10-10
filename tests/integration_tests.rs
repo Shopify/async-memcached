@@ -2,11 +2,11 @@ use async_memcached::{Client, Error, ErrorKind, Status};
 use rand::seq::IteratorRandom;
 use serial_test::{parallel, serial};
 
-// Note: Each test should run with keys unique to that test to avoid async conflicts.  Because these tests run concurrently,
+// NOTE: Each test should run with keys unique to that test to avoid async conflicts.  Because these tests run concurrently,
 // it's possible to delete/overwrite keys created by another test before they're read.
 
-const LARGE_PAYLOAD_SIZE: usize = 1000 * 1024;
-const MAX_KEY_LENGTH: usize = 250;
+const LARGE_PAYLOAD_SIZE: usize = 1024 * 1024; // 1 MB, default memcached max value size
+const MAX_KEY_LENGTH: usize = 250; // 250 bytes, default memcached max key length
 
 async fn setup_client(keys: &[&str]) -> Client {
     let mut client = Client::new("tcp://127.0.0.1:11211")
@@ -82,6 +82,168 @@ async fn test_get_fails_with_key_too_long() {
         get_result,
         Err(Error::Protocol(Status::Error(ErrorKind::KeyTooLong)))
     ));
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_get_cache_hit_with_no_flags() {
+    let key = "meta-get-test-key-cache-hit-with-no-flags";
+    let value = "test-value";
+
+    let mut client = setup_client(&[key]).await;
+
+    client.set(key, value, None, None).await.unwrap();
+
+    let get_result = client.get(key).await.unwrap();
+    println!(
+        "get_result: {:?}",
+        std::str::from_utf8(&get_result.unwrap().data.unwrap()).unwrap()
+    );
+
+    let flags = None;
+    let result = client.meta_get(key, flags).await.unwrap();
+
+    assert!(result.is_none());
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_get_with_only_v_flag() {
+    let key = "meta-get-test-key-with-only-v-flag";
+    let value = "test-value";
+
+    let mut client = setup_client(&[key]).await;
+
+    client.set(key, value, None, None).await.unwrap();
+
+    let flags = ["v"];
+    let result = client.meta_get(key, Some(&flags)).await.unwrap();
+
+    assert!(result.is_some());
+    let result_meta_value = result.unwrap();
+
+    assert_eq!(
+        String::from_utf8(result_meta_value.data.unwrap()).unwrap(),
+        value
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_get_with_many_flags() {
+    let key = "meta-get-test-key-with-many-flags";
+    let value = "test-value";
+    let ttl = 3600; // 1 hour
+
+    let mut client = setup_client(&[key]).await;
+
+    // Set the key with a TTL
+    client.set(key, value, Some(ttl), None).await.unwrap();
+
+    // Perform a get to ensure the item has been hit
+    let result = client.get(key).await.unwrap();
+    let result_value = result.unwrap();
+    assert_eq!(
+        String::from_utf8(result_value.data.unwrap()).unwrap(),
+        value
+    );
+
+    let flags = ["v", "h", "l", "t", "O9001"];
+    let result = client.meta_get(key, Some(&flags)).await.unwrap();
+
+    assert!(result.is_some());
+    let result_meta_value = result.unwrap();
+
+    assert_eq!(
+        String::from_utf8(result_meta_value.data.unwrap()).unwrap(),
+        value
+    );
+
+    let meta_flag_values = result_meta_value.meta_values.unwrap();
+    assert!(meta_flag_values.hit_before.unwrap());
+    assert_eq!(meta_flag_values.last_accessed.unwrap(), 0);
+    assert!(meta_flag_values.ttl_remaining.unwrap() > 0);
+    assert_eq!(meta_flag_values.opaque_token.unwrap(), "9001".as_bytes());
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_get_with_many_flags_and_no_value() {
+    let key = "meta-get-test-key-with-many-flags-no-value";
+    let value = "test-value";
+    let ttl = 3600; // 1 hour
+
+    let mut client = setup_client(&[key]).await;
+
+    // Set the key with a TTL
+    client.set(key, value, Some(ttl), None).await.unwrap();
+
+    // Perform a get to ensure the item has been hit (for the h flag), and confirm the value exists
+    let get_result = client.get(key).await.unwrap();
+    let get_result_value = get_result.unwrap();
+    assert_eq!(
+        String::from_utf8(get_result_value.data.unwrap()).unwrap(),
+        value
+    );
+
+    let flags = ["h", "l", "t", "O9001"];
+    let meta_get_result = client.meta_get(key, Some(&flags)).await.unwrap();
+
+    assert!(meta_get_result.is_some());
+    let meta_get_result_value = meta_get_result.unwrap();
+
+    assert_eq!(meta_get_result_value.data, None);
+
+    let meta_flag_values = meta_get_result_value.meta_values.unwrap();
+    assert!(meta_flag_values.hit_before.unwrap());
+    assert_eq!(meta_flag_values.last_accessed.unwrap(), 0);
+    assert!(meta_flag_values.ttl_remaining.unwrap() > 0);
+    assert_eq!(meta_flag_values.opaque_token.unwrap(), "9001".as_bytes());
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_get_not_found() {
+    let key = "meta-get-test-key-not-found";
+    let flags = ["v", "h", "l", "t"];
+    let mut client = setup_client(&[key]).await;
+
+    let result = client.meta_get(key, Some(&flags)).await.unwrap();
+    assert_eq!(result, None);
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_get_not_found_with_opaque_flag() {
+    let key = "meta-get-test-key-not-found";
+    let flags = ["v", "O9001"];
+    let mut client = setup_client(&[key]).await;
+
+    let result = client.meta_get(key, Some(&flags)).await.unwrap();
+
+    assert_eq!(
+        result.unwrap().meta_values.unwrap().opaque_token,
+        Some("9001".as_bytes().to_vec())
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_get_not_found_with_k_flag() {
+    let key = "meta-get-test-key-not-found";
+    let flags = ["v", "O9001"];
+    let mut client = setup_client(&[key]).await;
+
+    let result = client.meta_get(key, Some(&flags)).await.unwrap();
+
+    assert_eq!(result.unwrap().key, key.as_bytes().to_vec());
 }
 
 #[ignore = "Relies on a running memcached server"]
@@ -242,7 +404,7 @@ async fn test_add_multi_with_a_key_that_already_exists() {
     // the get result for the preset key should be the original value that it was set with
     // not the new value from the add_multi call
     assert_eq!(
-        std::str::from_utf8(&get_result.unwrap().unwrap().data)
+        std::str::from_utf8(&get_result.unwrap().unwrap().data.unwrap())
             .expect("failed to parse string from bytes"),
         "original-value"
     );
@@ -276,6 +438,7 @@ async fn test_set_with_string_value() {
                 .expect("should have unwrapped a Result")
                 .expect("should have unwrapped an Option")
                 .data
+                .unwrap()
         )
         .expect("failed to parse String from bytes"),
         value
@@ -308,6 +471,7 @@ async fn test_set_with_string_ref_value() {
                 .expect("should have unwrapped a Result")
                 .expect("should have unwrapped an Option")
                 .data
+                .unwrap()
         )
         .expect("failed to parse String from bytes"),
         value
@@ -337,6 +501,7 @@ async fn test_set_with_u64_value() {
                 .expect("should have unwrapped a Result")
                 .expect("should have unwrapped an Option")
                 .data
+                .unwrap()
         )
         .expect("couldn't parse data from bytes to integer")
     );
@@ -400,8 +565,8 @@ async fn test_set_fails_with_value_too_large() {
 #[tokio::test]
 #[parallel]
 async fn test_get_multi() {
-    let keys = vec!["mg-key1", "mg-key2", "mg-key3"];
-    let values = vec!["value1", "value2", "value3"];
+    let keys = ["mg-key1", "mg-key2", "mg-key3"];
+    let values = ["value1", "value2", "value3"];
 
     let mut client = setup_client(&keys).await;
 
@@ -426,7 +591,7 @@ async fn test_get_multi() {
 #[parallel]
 async fn test_get_multi_with_nonexistent_key() {
     let mut keys = vec!["mgne-key1", "mgne-key2", "mgne-key3"];
-    let values = vec!["value1", "value2", "value3"];
+    let values = ["value1", "value2", "value3"];
 
     let original_keys_length = keys.len();
 
@@ -462,7 +627,7 @@ async fn test_get_multi_with_nonexistent_key() {
 #[parallel]
 async fn test_get_multi_skips_key_too_long() {
     let mut keys = vec!["mgktl-key1", "mgktl-key2", "mgktl-key3"];
-    let values = vec!["value1", "value2", "value3"];
+    let values = ["value1", "value2", "value3"];
 
     let mut client = setup_client(&keys).await;
 
@@ -497,7 +662,7 @@ async fn test_get_multi_skips_key_too_long() {
 #[parallel]
 async fn test_get_many_aliases_get_multi_properly() {
     let keys = vec!["get-many-key1", "get-many-key2", "get-many-key3"];
-    let values = vec!["value1", "value2", "value3"];
+    let values = ["value1", "value2", "value3"];
 
     let mut client = setup_client(&keys).await;
 
@@ -549,7 +714,7 @@ async fn test_delete() {
 
     match get_result {
         Some(get_value) => assert_eq!(
-            String::from_utf8(get_value.data).expect("failed to parse a string"),
+            String::from_utf8(get_value.data.unwrap()).expect("failed to parse a string"),
             value.to_string()
         ),
         None => panic!("failed to get {}", key),
@@ -591,7 +756,7 @@ async fn test_delete_no_reply() {
 
     match get_result {
         Some(get_value) => assert_eq!(
-            String::from_utf8(get_value.data).expect("failed to parse a string"),
+            String::from_utf8(get_value.data.unwrap()).expect("failed to parse a string"),
             value
         ),
         None => panic!("failed to get {}", key),
@@ -649,6 +814,7 @@ async fn test_set_multi_with_string_values() {
                 .expect("should have unwrapped a Result")
                 .expect("should have unwrapped an Option")
                 .data
+                .unwrap()
         )
         .expect("failed to parse string from bytes"),
         "value2"
@@ -746,7 +912,7 @@ async fn test_set_multi_with_string_values_that_exceed_max_size() {
     // Check a small value to make sure it was cached properly - key0 is never chosen to be a large value
     let small_result = client.get("multi-key0").await;
     assert!(matches!(
-        std::str::from_utf8(&small_result.unwrap().unwrap().data)
+        std::str::from_utf8(&small_result.unwrap().unwrap().data.unwrap())
             .expect("failed to parse string from bytes"),
         "value0"
     ));
@@ -772,7 +938,7 @@ async fn test_set_multi_with_string_values_that_exceed_max_size() {
             );
             let get_result = client.get(key.as_str()).await.unwrap().unwrap();
             assert_eq!(
-                std::str::from_utf8(&get_result.data).unwrap(),
+                std::str::from_utf8(&get_result.data.unwrap()).unwrap(),
                 format!("value{}", i),
                 "Mismatch for key {}",
                 key
@@ -925,7 +1091,7 @@ async fn test_increments_existing_key_with_no_reply() {
 
     assert_eq!(
         value + amount,
-        btoi::btoi::<u64>(&result.unwrap().unwrap().data)
+        btoi::btoi::<u64>(&result.unwrap().unwrap().data.unwrap())
             .expect("couldn't parse data from bytes to integer")
     );
 }
@@ -1005,7 +1171,7 @@ async fn test_decrements_existing_key_with_no_reply() {
 
     assert_eq!(
         value - amount,
-        btoi::btoi::<u64>(&result.unwrap().unwrap().data)
+        btoi::btoi::<u64>(&result.unwrap().unwrap().data.unwrap())
             .expect("couldn't parse data from bytes to integer")
     );
 }
