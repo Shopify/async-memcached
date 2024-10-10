@@ -256,6 +256,51 @@ impl Client {
         }
     }
 
+    /// Gets the given key with additional metadata.
+    ///
+    /// If the key is found, `Some(Value)` is returned, describing the metadata and data of the key.
+    ///
+    /// Otherwise, `None` is returned.
+    ///
+    /// Supported meta flags:
+    /// - v: return item value
+    /// - h: return whether item has been hit before as a 0 or 1
+    /// - l: return time since item was last accessed in seconds
+    /// - t: return item TTL remaining in seconds (-1 for unlimited)
+    pub async fn meta_get_concat<K: AsRef<[u8]>>(
+        &mut self,
+        key: K,
+        meta_flags: &[&str], // meta_get should always have at least one flag, otherwise it's a no-op
+    ) -> Result<Option<Value>, Error> {
+        let command_length: usize = MAX_KEY_LENGTH + 2 * meta_flags.len() + 5; // key + flags & whitespaces + "mg " + "\r\n"
+        let mut command = Vec::with_capacity(command_length);
+        command.extend_from_slice(b"mg ");
+        command.extend_from_slice(key.as_ref());
+        command.extend_from_slice(b" ");
+        command.extend_from_slice(meta_flags.join(" ").as_bytes());
+        command.extend_from_slice(b"\r\n");
+        // println!("command: {:?}", String::from_utf8_lossy(&command));
+        self.conn.write_all(&command).await?;
+        self.conn.flush().await?;
+
+        match self.drive_receive(parse_meta_response).await? {
+            Response::Status(Status::NotFound) => Ok(None),
+            Response::Status(s) => Err(s.into()),
+            Response::Data(d) => d
+                .map(|mut items| {
+                    if items.len() != 1 {
+                        Err(Status::Error(ErrorKind::Protocol(None)).into())
+                    } else {
+                        let mut item = items.remove(0);
+                        item.key = key.as_ref().to_vec();
+                        Ok(item)
+                    }
+                })
+                .transpose(),
+            _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),
+        }
+    }
+
     /// Sets the given key.
     ///
     /// If `ttl` or `flags` are not specified, they will default to 0.  If the value is set
