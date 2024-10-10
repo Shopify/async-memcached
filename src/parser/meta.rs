@@ -423,7 +423,7 @@ mod tests {
         match response {
             Response::Data(Some(values)) => {
                 assert_eq!(values.len(), 1);
-                let value = &values[0];
+                let value = values.first().unwrap();
                 assert_eq!(
                     str::from_utf8(value.data.as_ref().unwrap()).unwrap(),
                     "test-value"
@@ -450,7 +450,7 @@ mod tests {
         match response {
             Response::Data(Some(values)) => {
                 assert_eq!(values.len(), 1);
-                let value = &values[0];
+                let value = values.first().unwrap();
                 assert_eq!(
                     str::from_utf8(value.data.as_ref().unwrap()).unwrap(),
                     "test-value"
@@ -478,7 +478,7 @@ mod tests {
         match response {
             Response::Data(Some(values)) => {
                 assert_eq!(values.len(), 1);
-                let value = &values[0];
+                let value = values.first().unwrap();
                 assert_eq!(
                     str::from_utf8(value.data.as_ref().unwrap()).unwrap(),
                     "test-value"
@@ -493,9 +493,11 @@ mod tests {
     #[test]
     fn test_parse_meta_get_data_value_with_no_flags() {
         let input = b"HD\r\n";
-        let (remaining, _) = parse_meta_get_data_value(input).unwrap();
+        let (remaining, response) = parse_meta_get_data_value(input).unwrap();
 
         assert_eq!(remaining, b"\r\n");
+
+        assert_eq!(response, Response::Data(None));
     }
 
     #[test]
@@ -664,6 +666,61 @@ mod tests {
                 assert_eq!(meta_values.hit_before, Some(true));
                 assert_eq!(meta_values.last_accessed, Some(56));
                 assert_eq!(meta_values.ttl_remaining, Some(2179));
+            }
+            _ => panic!("Expected Response::Data, got something else"),
+        }
+    }
+
+    #[test]
+    fn test_parse_meta_set_data_value_success_no_flags() {
+        let server_response = b"HD\r\n";
+        let (remaining, response) = parse_meta_set_data_value(server_response).unwrap();
+
+        assert_eq!(remaining, b"\r\n");
+
+        assert_eq!(response, Response::Data(None));
+    }
+
+    #[test]
+    fn test_parse_meta_set_data_value_success_with_opaque_token() {
+        let server_response = b"HD O123\r\n";
+        let (remaining, response) = parse_meta_set_data_value(server_response).unwrap();
+
+        assert_eq!(remaining, b"\r\n");
+
+        match response {
+            Response::Data(Some(values)) => {
+                assert_eq!(values.len(), 1);
+                let value = values.first().unwrap();
+                assert_eq!(value.data, None);
+                assert_eq!(value.flags, Some(0));
+                assert_eq!(value.cas, None);
+
+                let meta_values = value.meta_values.as_ref().unwrap();
+                assert_eq!(meta_values.opaque_token, Some(b"123".to_vec()));
+            }
+            _ => panic!("Expected Response::Data, got something else"),
+        }
+    }
+
+    #[test]
+    fn test_parse_meta_set_data_value_success_with_k_flag() {
+        let server_response = b"HD ktest-key\r\n";
+        let (remaining, response) = parse_meta_set_data_value(server_response).unwrap();
+
+        assert_eq!(remaining, b"\r\n");
+
+        match response {
+            Response::Data(Some(values)) => {
+                assert_eq!(values.len(), 1);
+                let value = values.first().unwrap();
+                assert_eq!(value.key, b"test-key");
+                assert_eq!(value.data, None);
+                assert_eq!(value.flags, Some(0));
+                assert_eq!(value.cas, None);
+
+                let meta_values = value.meta_values.as_ref().unwrap();
+                assert_eq!(*meta_values, MetaValue::default());
             }
             _ => panic!("Expected Response::Data, got something else"),
         }
