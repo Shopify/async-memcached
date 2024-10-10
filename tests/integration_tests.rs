@@ -97,7 +97,10 @@ async fn test_meta_get_cache_hit_with_no_flags() {
     assert_eq!(set_result, ());
 
     let get_result = client.get(key).await.unwrap();
-    println!("get_result: {:?}", std::str::from_utf8(&get_result.unwrap().data.unwrap()).unwrap());
+    println!(
+        "get_result: {:?}",
+        std::str::from_utf8(&get_result.unwrap().data.unwrap()).unwrap()
+    );
 
     let flags = None;
     let result = client.meta_get(key, flags).await.unwrap();
@@ -171,7 +174,7 @@ async fn test_meta_get_with_many_flags() {
 #[tokio::test]
 #[parallel]
 async fn test_meta_get_with_many_flags_and_no_value() {
-    let key = "meta-get-test-key-with-many-flags";
+    let key = "meta-get-test-key-with-many-flags-no-value";
     let value = "test-value";
     let ttl = 3600; // 1 hour
 
@@ -194,9 +197,7 @@ async fn test_meta_get_with_many_flags_and_no_value() {
     assert!(meta_get_result.is_some());
     let meta_get_result_value = meta_get_result.unwrap();
 
-    assert_eq!(
-        meta_get_result_value.data, None
-    );
+    assert_eq!(meta_get_result_value.data, None);
 
     let meta_flag_values = meta_get_result_value.meta_values.unwrap();
     assert!(meta_flag_values.hit_before.unwrap());
@@ -243,10 +244,7 @@ async fn test_meta_get_not_found_with_k_flag() {
 
     let result = client.meta_get(key, Some(&flags)).await.unwrap();
 
-    assert_eq!(
-        result.unwrap().key,
-        key.as_bytes().to_vec()
-    );
+    assert_eq!(result.unwrap().key, key.as_bytes().to_vec());
 }
 
 #[ignore = "Relies on a running memcached server"]

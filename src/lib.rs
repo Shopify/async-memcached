@@ -16,13 +16,14 @@ use self::parser::{
     parse_ascii_metadump_response, parse_ascii_response, parse_ascii_stats_response,
     parse_meta_response,
 };
-pub use self::parser::{ErrorKind, KeyMetadata, MetadumpResponse, Response, StatsResponse, Status, Value};
+pub use self::parser::{
+    ErrorKind, KeyMetadata, MetadumpResponse, Response, StatsResponse, Status, Value,
+};
 
 mod value_serializer;
 pub use self::value_serializer::AsMemcachedValue;
 
 const MAX_KEY_LENGTH: usize = 250; // reference in memcached documentation: https://github.com/memcached/memcached/blob/5609673ed29db98a377749fab469fe80777de8fd/doc/protocol.txt#L46
-// const MAX_VALUE_SIZE: usize = 1024 * 1024; // 1 MB
 
 /// High-level memcached client.
 ///
@@ -274,8 +275,8 @@ impl Client {
         key: K,
         meta_flags: Option<&[&str]>, // meta_get should always have at least one flag, otherwise it's a no-op
     ) -> Result<Option<Value>, Error> {
-        let command_length: usize = MAX_KEY_LENGTH + 2 * meta_flags.as_ref().map_or(0, |flags| flags.len()) + 5; // key + flags & whitespaces + "mg " + "\r\n"
-        let mut command = Vec::with_capacity(command_length);
+        // let command_length: usize = MAX_KEY_LENGTH + 2 * meta_flags.as_ref().map_or(0, |flags| flags.len()) + 5; // key + flags & whitespaces + "mg " + "\r\n"
+        let mut command = Vec::new();
         command.extend_from_slice(b"mg ");
         command.extend_from_slice(key.as_ref());
         command.extend_from_slice(b" ");
@@ -283,7 +284,6 @@ impl Client {
             command.extend_from_slice(flags.join(" ").as_bytes());
         }
         command.extend_from_slice(b"\r\n");
-        // println!("command: {:?}", String::from_utf8_lossy(&command));
         self.conn.write_all(&command).await?;
         self.conn.flush().await?;
 

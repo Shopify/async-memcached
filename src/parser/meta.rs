@@ -102,7 +102,6 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
         }
         // match arm for "HD" response when v flag is omitted
         Response::Status(Status::Exists) => {
-            println!("parse_meta_get_data_value: Status::Exists");
             // no value (data block) or size in this case, potentially just flags
             let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?;
 
