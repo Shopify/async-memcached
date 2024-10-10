@@ -233,7 +233,9 @@ impl Client {
         meta_flags: Option<&[&str]>,
     ) -> Result<Option<Value>, Error> {
         self.conn.write_all(b"mg ").await?;
-        self.conn.write_all(Self::validate_key_length(key.as_ref())?).await?;
+        self.conn
+            .write_all(Self::validate_key_length(key.as_ref())?)
+            .await?;
         self.conn.write_all(b" ").await?;
         if let Some(flags) = meta_flags {
             self.conn.write_all(flags.join(" ").as_bytes()).await?;
