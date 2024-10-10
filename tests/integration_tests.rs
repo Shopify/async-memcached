@@ -788,6 +788,82 @@ async fn test_meta_set_with_cas_mismatch_on_key_that_exists() {
     );
 }
 
+// #[ignore = "Relies on a running memcached server"]
+// #[tokio::test]
+// #[parallel]
+// async fn test_meta_set_invalidate_on_expired_cas() {
+//     let key = "meta-set-invalidate-on-expired-cas-test-key";
+//     let value = "VALID";
+//     let mut client = setup_client(&[key]).await;
+
+//     // Set the key using meta_set to prepopulate, use E flag to set CAS value
+//     let meta_flags = ["MS", "E99999"];
+//     let set_result = client.meta_set(key, value, Some(&meta_flags)).await;
+//     assert!(
+//         set_result.is_ok(),
+//         "Failed to set key using meta_set: {:?}",
+//         set_result
+//     );
+
+//     // Invalidate the key by combining I flag with a C flag with a token lower than the existing CAS value
+//     let meta_flags = ["C1", "I"];
+//     let new_value = "INVALID";
+
+//     let set_result = client.meta_set(key, new_value, Some(&meta_flags)).await;
+//     assert!(
+//         set_result.is_ok(),
+//         "meta_set should invalidate the key when I flag is used with a C flag token that is lower than the existing CAS value"
+//     );
+//     println!("set result:{:?}", set_result);
+
+//     // Verify that the key was invalidated
+//     let get_flags = ["v", "c"];
+//     let get_result = client.meta_get(key, Some(&get_flags)).await;
+
+//     println!("get result:{:?}", get_result);
+
+//     let get_result = get_result.unwrap();
+
+//     let get_value = get_result.unwrap();
+//     assert_eq!(
+//         std::str::from_utf8(&get_value.data.unwrap()).unwrap(),
+//         new_value
+//     );
+//     assert_eq!(get_value.cas.unwrap(), 99999);
+
+//     let meta_values = get_value.meta_values.unwrap();
+//     assert_eq!(meta_values.is_recache_winner.unwrap(), true);
+//     assert_eq!(meta_values.is_stale.unwrap(), true);
+// }
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_set_invalidate_on_non_expired_cas() {
+    let key = "meta-set-invalidate-on-non-expired-cas-test-key";
+    let value = "VALID";
+    let mut client = setup_client(&[key]).await;
+
+    // Set the key using meta_set to prepopulate, use E flag to set CAS value
+    let meta_flags = ["MS", "E1"];
+    let set_result = client.meta_set(key, value, Some(&meta_flags)).await;
+    assert!(
+        set_result.is_ok(),
+        "Failed to set key using meta_set: {:?}",
+        set_result
+    );
+
+    // Invalidate the key by combining I flag with a C flag with a token lower than the existing CAS value
+    let meta_flags = ["C9999999", "I"];
+    let new_value = "INVALID";
+
+    let set_result = client.meta_set(key, new_value, Some(&meta_flags)).await;
+    assert!(
+        set_result.is_err(),
+        "meta_set should not invalidate the key when I flag is used with a C flag token that is greater than the existing CAS value"
+    );
+}
+
 #[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
@@ -1039,7 +1115,10 @@ async fn test_meta_set_nonexistent_key_in_append_mode_with_autovivify() {
         .unwrap()
         .unwrap();
     assert_eq!(get_result_value.flags.unwrap(), 24);
-    assert_eq!(get_result_value.meta_values.unwrap().ttl_remaining.unwrap(), 3600);
+    assert_eq!(
+        get_result_value.meta_values.unwrap().ttl_remaining.unwrap(),
+        3600
+    );
     assert_eq!(
         std::str::from_utf8(&get_result_value.data.unwrap()).unwrap(),
         original_value

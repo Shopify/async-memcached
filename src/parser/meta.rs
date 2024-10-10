@@ -87,6 +87,7 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
     match status {
         // match arm for "VA " response when v flag is used
         Response::Status(Status::Value) => {
+            println!("parse_meta_get_data_value: VA response");
             let (input, size) = parse_u32(input)?; // parses the size of the data from the input
             let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?; // parses the flags from the input
             let (input, _) = crlf(input)?; // removes the leading crlf from the data block
@@ -102,6 +103,7 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
         }
         // match arm for "HD" response when v flag is omitted
         Response::Status(Status::Exists) => {
+            println!("parse_meta_get_data_value: HD response");
             // no value (data block) or size in this case, potentially just flags
             let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?;
             let (input, _) = crlf(input)?; // consume the trailing crlf and leave the buffer empty
@@ -120,6 +122,7 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
         }
         // match arm for "EN" response
         Response::Status(Status::NotFound) => {
+            println!("parse_meta_get_data_value: EN response");
             let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?;
             let (input, _) = crlf(input)?; // consume the trailing crlf and leave the buffer empty
 

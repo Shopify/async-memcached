@@ -233,6 +233,8 @@ impl Client {
         key: K,
         meta_flags: Option<&[&str]>,
     ) -> Result<Option<Value>, Error> {
+        println!("meta_get: {:?}", key.as_ref());
+        println!("meta_get: {:?}", meta_flags);
         self.conn.write_all(b"mg ").await?;
         self.conn
             .write_all(Self::validate_key_length(key.as_ref())?)
@@ -246,7 +248,10 @@ impl Client {
 
         match self.drive_receive(parse_meta_response).await? {
             Response::Status(Status::NotFound) => Ok(None),
-            Response::Status(s) => Err(s.into()),
+            Response::Status(s) => {
+                println!("error here? meta_get: {:?}", s);
+                Err(s.into())
+            }
             Response::Data(d) => d
                 .map(|mut items| {
                     if items.len() != 1 {
@@ -258,7 +263,10 @@ impl Client {
                     }
                 })
                 .transpose(),
-            _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),
+            _ => {
+                println!("error in catchall?");
+                Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None))))
+            }
         }
     }
 
