@@ -89,28 +89,39 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
             let (input, _) = crlf(input)?; // removes the leading crlf from the data block
             let (input, data) = take_until_size(input, size)?; // parses the data from the input
 
-            let mut meta_values = MetaValue::default();
-            let mut item_key = Vec::new();
-
-            for (flag, meta_value) in meta_values_array {
-                map_meta_flag(flag, meta_value, &mut meta_values, &mut item_key);
-            }
-
-            let value = Value {
-                key: item_key.to_vec(),
-                cas: None,
-                flags: Some(0),
-                data: Some(data),
-                meta_values: Some(meta_values),
-            };
+            let value = construct_value_from_meta_values(meta_values_array, &data);
 
             Ok((input, Response::Data(Some(vec![value]))))
         }
         // match arm for "HD" response when v flag is omitted
-        Response::Status(Status::Exists) => Ok((input, Response::Status(Status::Exists))),
+        Response::Status(Status::Exists) => {
+            // no value (data block) or size in this case, potentially just flags
+            let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?;
+
+            // early return if there were no flags passed in (no-op)
+            if meta_values_array.len() == 0 {
+                return Ok((input, Response::Data(None)));
+            }
+
+            // data is empty in this case
+            let data = Vec::new();
+            let value = construct_value_from_meta_values(meta_values_array, &data);
+
+            Ok((input, Response::Data(Some(vec![value]))))
+        },
         Response::Status(Status::NotFound) => {
-            // TODO: improve this so that it works with opaque token or k flag
-            Ok((input, Response::Status(Status::NotFound)))
+            let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?;
+
+            // return early if there were no flags passed in (miss without opaque or k flag)
+            if meta_values_array.len() == 0 {
+                return Ok((input, Response::Status(Status::NotFound)));
+            }
+
+            // data is empty in this case
+            let data = Vec::new();
+            let value = construct_value_from_meta_values(meta_values_array, &data);
+
+            Ok((input, Response::Data(Some(vec![value]))))
         }
         _ => {
             // unexpected response code, should never happen, bail
@@ -276,6 +287,25 @@ fn map_meta_flag(flag: u8, meta_value: &[u8], meta_values: &mut MetaValue, item_
         b'X' => meta_values.is_stale = Some(true),
         _ => {}
     }
+}
+
+fn construct_value_from_meta_values(meta_values_array: Vec<(u8, &[u8])>, data: &[u8]) -> Value {
+    let mut meta_values = MetaValue::default();
+    let mut item_key = Vec::new();
+
+    for (flag, meta_value) in meta_values_array {
+        map_meta_flag(flag, meta_value, &mut meta_values, &mut item_key);
+    }
+
+    let value = Value {
+        key: item_key.to_vec(),
+        cas: None,
+        flags: Some(0),
+        data: Some(data.to_vec()),
+        meta_values: Some(meta_values),
+    };
+
+    value
 }
 
 #[cfg(test)]
