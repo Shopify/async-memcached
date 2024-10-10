@@ -106,6 +106,7 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
         Response::Status(Status::Exists) => {
             // no value (data block) or size in this case, potentially just flags
             let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?;
+            let (input, _) = crlf(input)?; // consume the trailing crlf and leave the buffer empty
 
             // early return if there were no flags passed in (no-op)
             if meta_values_array.is_empty() {
@@ -122,6 +123,7 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
         }
         Response::Status(Status::NotFound) => {
             let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?;
+            let (input, _) = crlf(input)?; // consume the trailing crlf and leave the buffer empty
 
             // return early if there were no flags passed in (miss without opaque or k flag)
             if meta_values_array.is_empty() {
@@ -153,6 +155,7 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
             // no value (data block) or size in this case, potentially just flags
             let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)
                 .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
+            let (input, _) = crlf(input)?; // consume the trailing crlf and leave the buffer empty
 
             // early return if there were no flags passed in
             if meta_values_array.is_empty() {
@@ -171,6 +174,7 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
             // no value (data block) or size in this case, potentially just flags
             let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)
                 .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
+            let (input, _) = crlf(input)?; // consume the trailing crlf and leave the buffer empty
 
             // early return if there were no flags passed in
             if meta_values_array.is_empty() {
@@ -188,6 +192,7 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
         Response::Status(Status::Exists) => {
             // no value (data block) or size in this case, potentially just flags
             let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?;
+            let (input, _) = crlf(input)?; // consume the trailing crlf and leave the buffer empty
 
             // early return if there were no flags passed in
             if meta_values_array.is_empty() {
@@ -205,6 +210,7 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
         Response::Status(Status::NotFound) => {
             // no value (data block) or size in this case, potentially just flags
             let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?;
+            let (input, _) = crlf(input)?; // consume the trailing crlf and leave the buffer empty
 
             // early return if there were no flags passed in
             if meta_values_array.is_empty() {
