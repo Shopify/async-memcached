@@ -24,6 +24,7 @@ mod value_serializer;
 pub use self::value_serializer::AsMemcachedValue;
 
 const MAX_KEY_LENGTH: usize = 250; // reference in memcached documentation: https://github.com/memcached/memcached/blob/5609673ed29db98a377749fab469fe80777de8fd/doc/protocol.txt#L46
+// const MAX_VALUE_SIZE: usize = 1024 * 1024; // 1 MB
 
 /// High-level memcached client.
 ///
