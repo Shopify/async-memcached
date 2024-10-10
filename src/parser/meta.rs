@@ -89,7 +89,7 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
             let (input, _) = crlf(input)?; // removes the leading crlf from the data block
             let (input, data) = take_until_size(input, size)?; // parses the data from the input
 
-            let value = construct_value_from_meta_values(meta_values_array, &data);
+            let value = construct_value_from_meta_values(meta_values_array, Some(&data));
 
             Ok((input, Response::Data(Some(vec![value]))))
         }
@@ -99,27 +99,27 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
             let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?;
 
             // early return if there were no flags passed in (no-op)
-            if meta_values_array.len() == 0 {
+            if meta_values_array.is_empty() {
                 return Ok((input, Response::Data(None)));
             }
 
             // data is empty in this case
-            let data = Vec::new();
-            let value = construct_value_from_meta_values(meta_values_array, &data);
+            let data = None;
+            let value = construct_value_from_meta_values(meta_values_array, data);
 
             Ok((input, Response::Data(Some(vec![value]))))
-        },
+        }
         Response::Status(Status::NotFound) => {
             let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?;
 
             // return early if there were no flags passed in (miss without opaque or k flag)
-            if meta_values_array.len() == 0 {
+            if meta_values_array.is_empty() {
                 return Ok((input, Response::Status(Status::NotFound)));
             }
 
             // data is empty in this case
-            let data = Vec::new();
-            let value = construct_value_from_meta_values(meta_values_array, &data);
+            let data = None;
+            let value = construct_value_from_meta_values(meta_values_array, data);
 
             Ok((input, Response::Data(Some(vec![value]))))
         }
@@ -217,11 +217,17 @@ fn parse_meta_flag_values_as_slice(input: &[u8]) -> IResult<&[u8], Vec<(u8, &[u8
     }
 }
 
-fn map_meta_flag(flag: u8, meta_value: &[u8], meta_values: &mut MetaValue, item_key: &mut Vec<u8>) {
+fn map_meta_flag(
+    flag: u8,
+    meta_value: &[u8],
+    value: &mut Value,
+    meta_values: &mut MetaValue,
+    item_key: &mut Vec<u8>,
+) {
     match flag {
         b'c' => {
             println!("c flag: {:?}", meta_value);
-            meta_values.cas = Some(
+            value.cas = Some(
                 std::str::from_utf8(meta_value)
                     .expect("Failed to convert c flag to string")
                     .parse::<u64>()
@@ -289,21 +295,33 @@ fn map_meta_flag(flag: u8, meta_value: &[u8], meta_values: &mut MetaValue, item_
     }
 }
 
-fn construct_value_from_meta_values(meta_values_array: Vec<(u8, &[u8])>, data: &[u8]) -> Value {
+fn construct_value_from_meta_values(
+    meta_values_array: Vec<(u8, &[u8])>,
+    data: Option<&[u8]>,
+) -> Value {
     let mut meta_values = MetaValue::default();
     let mut item_key = Vec::new();
 
-    for (flag, meta_value) in meta_values_array {
-        map_meta_flag(flag, meta_value, &mut meta_values, &mut item_key);
-    }
-
-    let value = Value {
-        key: item_key.to_vec(),
+    let mut value = Value {
+        key: Vec::new(),
         cas: None,
         flags: Some(0),
-        data: Some(data.to_vec()),
-        meta_values: Some(meta_values),
+        data: data.map(|d| d.to_vec()),
+        meta_values: None,
     };
+
+    for (flag, meta_value) in meta_values_array {
+        map_meta_flag(
+            flag,
+            meta_value,
+            &mut value,
+            &mut meta_values,
+            &mut item_key,
+        );
+    }
+
+    value.key = item_key;
+    value.meta_values = Some(meta_values);
 
     value
 }
@@ -506,35 +524,36 @@ mod tests {
         }
     }
 
-    // #[test]
-    // fn test_parse_meta_get_data_value_with_no_flags() {
-    //     let input = b"HD\r\n";
-    //     let (remaining, _) = parse_meta_get_data_value(input).unwrap();
+    #[test]
+    fn test_parse_meta_get_data_value_with_no_flags() {
+        let input = b"HD\r\n";
+        let (remaining, _) = parse_meta_get_data_value(input).unwrap();
 
-    //     assert_eq!(remaining, b"");
-    // }
+        assert_eq!(remaining, b"\r\n");
+    }
 
-    // #[test]
-    // fn test_parse_meta_get_data_value_with_only_non_v_flags() {
-    //     let input = b"HD h1 c1 l123\r\n";
-    //     let (remaining, _) = parse_meta_get_data_value(input).unwrap();
+    #[test]
+    fn test_parse_meta_get_data_value_with_only_non_v_flags() {
+        let input = b"HD h1 c1 l123\r\n";
+        let (remaining, response) = parse_meta_get_data_value(input).unwrap();
 
-    //     assert_eq!(remaining, b"");
+        assert_eq!(remaining, b"\r\n");
 
-    //     // match response {
-    //     //     Response::Data(Some(values)) => {
-    //     //         assert_eq!(values.len(), 1);
-    //     //         let value = &values[0];
-    //     //         assert_eq!(
-    //     //             str::from_utf8(value.data.as_ref().unwrap()).unwrap(),
-    //     //             "test-value"
-    //     //         );
-    //     //         assert_eq!(value.flags, Some(0));
-    //     //         assert_eq!(value.cas, None);
-    //     //     }
-    //     //     _ => panic!("Expected Response::Data, got something else"),
-    //     // }
-    // }
+        match response {
+            Response::Data(Some(values)) => {
+                assert_eq!(values.len(), 1);
+                let value = &values[0];
+                assert_eq!(value.data, None);
+                assert_eq!(value.flags, Some(0));
+                assert_eq!(value.cas, Some(1));
+
+                let meta_values = value.meta_values.as_ref().unwrap();
+                assert_eq!(meta_values.hit_before, Some(true));
+                assert_eq!(meta_values.last_accessed, Some(123));
+            }
+            _ => panic!("Expected Response::Data, got something else"),
+        }
+    }
 
     #[test]
     fn test_parse_meta_get_data_value_ignores_unknown_tags() {
@@ -600,21 +619,50 @@ mod tests {
         assert_eq!(response, Response::Status(Status::NotFound));
     }
 
-    // #[test]
-    // fn test_parse_meta_get_data_value_cache_miss_with_opaque_token() {
-    //     let input = b"EN Oopaque-token\r\n";
-    //     let (remaining, response) = parse_meta_get_data_value(input).unwrap();
-    //     assert_eq!(remaining, b"\r\n");
-    //     assert_eq!(response, Response::Status(Status::NotFound));
-    // }
+    #[test]
+    fn test_parse_meta_get_data_value_cache_miss_with_opaque_token() {
+        let input = b"EN Oopaque-token\r\n";
+        let (remaining, response) = parse_meta_get_data_value(input).unwrap();
 
-    // #[test]
-    // fn test_parse_meta_get_data_value_cache_miss_with_k_flag() {
-    //     let input = b"EN ktest-key\r\n";
-    //     let (remaining, response) = parse_meta_get_data_value(input).unwrap();
-    //     assert_eq!(remaining, b"\r\n");
-    //     assert_eq!(response, Response::Status(Status::NotFound));
-    // }
+        assert_eq!(remaining, b"\r\n");
+
+        match response {
+            Response::Data(Some(values)) => {
+                assert_eq!(values.len(), 1);
+                let value = values.first().unwrap();
+                assert_eq!(value.key, b"");
+                assert_eq!(value.data, None);
+                assert_eq!(value.flags, Some(0));
+                assert_eq!(value.cas, None);
+
+                let meta_values = value.meta_values.as_ref().unwrap();
+                assert_eq!(meta_values.opaque_token, Some(b"opaque-token".to_vec()));
+            }
+            _ => panic!("Expected Response::Data, got something else"),
+        }
+    }
+
+    #[test]
+    fn test_parse_meta_get_data_value_cache_miss_with_k_flag() {
+        let input = b"EN ktest-key\r\n";
+        let (remaining, response) = parse_meta_get_data_value(input).unwrap();
+        assert_eq!(remaining, b"\r\n");
+
+        match response {
+            Response::Data(Some(values)) => {
+                assert_eq!(values.len(), 1);
+                let value = values.first().unwrap();
+                assert_eq!(value.key, b"test-key");
+                assert_eq!(value.data, None);
+                assert_eq!(value.flags, Some(0));
+                assert_eq!(value.cas, None);
+
+                let meta_values = value.meta_values.as_ref().unwrap();
+                assert_eq!(*meta_values, MetaValue::default());
+            }
+            _ => panic!("Expected Response::Data, got something else"),
+        }
+    }
 
     // Text lines are always terminated by \r\n. Unstructured data is _also_
     // terminated by \r\n, even though \r, \n or any other 8-bit characters
