@@ -123,6 +123,7 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
 
             Ok((input, Response::Data(Some(vec![value]))))
         }
+        // match arm for "EN" response
         Response::Status(Status::NotFound) => {
             let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?;
             let (input, _) = crlf(input)?; // consume the trailing crlf and leave the buffer empty
@@ -154,7 +155,9 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
 fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
     let (input, status) = parse_meta_set_status(buf)?;
     match status {
+        // match arm for "HD" response
         Response::Status(Status::Stored) => {
+            println!("parse_meta_set_data_value: HD response");
             // no value (data block) or size in this case, potentially just flags
             let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)
                 .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
@@ -173,7 +176,9 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
 
             Ok((input, Response::Data(Some(vec![value]))))
         }
+        // match arm for "NS" response
         Response::Status(Status::NotStored) => {
+            println!("parse_meta_set_data_value: NS response");
             // no value (data block) or size in this case, potentially just flags
             let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)
                 .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
@@ -192,7 +197,9 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
 
             Ok((input, Response::Data(Some(vec![value]))))
         }
+        // match arm for "EX" response
         Response::Status(Status::Exists) => {
+            println!("parse_meta_set_data_value: EX response");
             // no value (data block) or size in this case, potentially just flags
             let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?;
             let (input, _) = crlf(input)?; // consume the trailing crlf and leave the buffer empty
@@ -210,7 +217,9 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
 
             Ok((input, Response::Data(Some(vec![value]))))
         }
+        // match arm for "NF" response
         Response::Status(Status::NotFound) => {
+            println!("parse_meta_set_data_value: NF response");
             // no value (data block) or size in this case, potentially just flags
             let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?;
             let (input, _) = crlf(input)?; // consume the trailing crlf and leave the buffer empty
