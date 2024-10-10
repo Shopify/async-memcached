@@ -172,6 +172,10 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
                                 .expect("Failed to convert t flag to i64"),
                         )
                     }
+                    b'O' => {
+                        println!("O flag: {:?}", meta_value);
+                        meta_values.opaque_token = Some(meta_value.to_vec());
+                    }
                     b'W' => meta_values.is_recache_winner = Some(true),
                     b'Z' => meta_values.is_recache_winner = Some(false),
                     b'X' => meta_values.is_stale = Some(true),
@@ -299,6 +303,22 @@ mod tests {
     use std::str;
 
     #[test]
+    fn test_parse_meta_flag_values_as_slice_with_empty_input() {
+        let empty_input = b"";
+        let (remaining, result) = parse_meta_flag_values_as_slice(empty_input).unwrap();
+        assert_eq!(result, vec![]);
+        assert_eq!(remaining, b"");
+    }
+
+    #[test]
+    fn test_parse_meta_flag_values_as_slice_with_crlf() {
+        let new_line = b"\r\n";
+        let (remaining, result) = parse_meta_flag_values_as_slice(new_line).unwrap();
+        assert_eq!(result, vec![]);
+        assert_eq!(remaining, b"\r\n");
+    }
+
+    #[test]
     fn test_parse_meta_flag_values_as_slice_with_single_flag() {
         let input = b" Oopaque-token\r\n";
         let (remaining, result) = parse_meta_flag_values_as_slice(input).unwrap();
@@ -317,24 +337,49 @@ mod tests {
         let l_token: &[u8] = "1".as_bytes();
         let t_token: &[u8] = "123".as_bytes();
         let o_token: &[u8] = "opaque-token".as_bytes();
-        assert_eq!(result, vec![(b'h', h_token), (b'l', l_token), (b't', t_token), (b'O', o_token)]);
+        assert_eq!(
+            result,
+            vec![
+                (b'h', h_token),
+                (b'l', l_token),
+                (b't', t_token),
+                (b'O', o_token)
+            ]
+        );
         assert_eq!(remaining, b"\r\n");
     }
 
     #[test]
-    fn test_parse_meta_flag_values_as_slice_with_empty_input() {
-        let empty_input = b"";
-        let (remaining, result) = parse_meta_flag_values_as_slice(empty_input).unwrap();
-        assert_eq!(result, vec![]);
-        assert_eq!(remaining, b"");
+    fn test_parse_meta_flag_values_as_slice_flag_order_does_not_matter() {
+        let input = b" t2179 h1 l56\r\ntest-value\r\n";
+        let (remaining, result) = parse_meta_flag_values_as_slice(input).unwrap();
+
+        assert_eq!(
+            result,
+            vec![
+                (b't', b"2179".as_ref()),
+                (b'h', b"1".as_ref()),
+                (b'l', b"56".as_ref()),
+            ]
+        );
+        assert_eq!(remaining, b"\r\ntest-value\r\n");
     }
 
     #[test]
-    fn test_parse_meta_flag_values_as_slice_with_crlf() {
-        let new_line = b"\r\n";
-        let (remaining, result) = parse_meta_flag_values_as_slice(new_line).unwrap();
-        assert_eq!(result, vec![]);
-        assert_eq!(remaining, b"\r\n");
+    fn test_parse_meta_flag_values_as_slice_handles_unknown_tags() {
+        let input = b" h1 l56 t2179 x100\r\ntest-value\r\n";
+        let (remaining, result) = parse_meta_flag_values_as_slice(input).unwrap();
+
+        assert_eq!(
+            result,
+            vec![
+                (b'h', b"1".as_ref()),
+                (b'l', b"56".as_ref()),
+                (b't', b"2179".as_ref()),
+                (b'x', b"100".as_ref()),
+            ]
+        );
+        assert_eq!(remaining, b"\r\ntest-value\r\n");
     }
 
     #[test]
@@ -373,36 +418,6 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_meta_tag_values() {
-        let input = b"h1 l56 t2179\r\ntest-value";
-        let (remaining, result) = parse_meta_flag_values_as_u32(input).unwrap();
-
-        assert_eq!(result, vec![(b'h', 1), (b'l', 56), (b't', 2179),]);
-        assert_eq!(remaining, b"\r\ntest-value");
-    }
-
-    #[test]
-    fn test_parse_meta_tag_values_order_does_not_matter() {
-        let input = b"t2179 h1 l56\r\ntest-value";
-        let (remaining, result) = parse_meta_flag_values_as_u32(input).unwrap();
-
-        assert_eq!(result, vec![(b't', 2179), (b'h', 1), (b'l', 56),]);
-        assert_eq!(remaining, b"\r\ntest-value");
-    }
-
-    #[test]
-    fn test_parse_meta_tag_values_handles_unknown_tags() {
-        let input = b"h1 l56 t2179 x100\r\ntest-value";
-        let (remaining, result) = parse_meta_flag_values_as_u32(input).unwrap();
-
-        assert_eq!(
-            result,
-            vec![(b'h', 1), (b'l', 56), (b't', 2179), (b'x', 100),]
-        );
-        assert_eq!(remaining, b"\r\ntest-value");
-    }
-
-    #[test]
     fn test_parse_meta_get_data_value() {
         let input = b"VA 10 h1 l56 t2179\r\ntest-value\r\n";
         let (remaining, response) = parse_meta_get_data_value(input).unwrap();
@@ -431,7 +446,7 @@ mod tests {
 
     #[test]
     fn test_parse_meta_get_data_value_tag_order_does_not_matter() {
-        let input = b"VA 10 t2179 h1 l56\r\ntest-value\r\n";
+        let input = b"VA 10 t2179 h1 l56 Oopaque-token\r\ntest-value\r\n";
         let (remaining, response) = parse_meta_get_data_value(input).unwrap();
 
         assert_eq!(remaining, b"");
@@ -451,6 +466,7 @@ mod tests {
                 assert_eq!(meta_values.hit_before, Some(true));
                 assert_eq!(meta_values.last_accessed, Some(56));
                 assert_eq!(meta_values.ttl_remaining, Some(2179));
+                assert_eq!(meta_values.opaque_token, Some(b"opaque-token".to_vec()));
             }
             _ => panic!("Expected Response::Data, got something else"),
         }
