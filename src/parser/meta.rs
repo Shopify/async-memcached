@@ -1,20 +1,16 @@
 use nom::{
     branch::alt,
     bytes::streaming::{tag, take, take_while1},
-    character::{
-        complete::digit1,
-        streaming::{crlf, space0, space1},
-    },
-    combinator::{map, map_res, value},
+    character::streaming::{crlf, space1},
+    combinator::{map, value},
     multi::many0,
-    sequence::{pair, preceded, terminated, tuple},
+    sequence::{terminated, tuple},
     IResult,
 };
 
 use super::{parse_u32, ErrorKind, MetaValue, Response, Status, Value};
 
-// TODO: remove this later in favour of individual parse_meta_*_status methods
-#[allow(dead_code)]
+// TODO: remove this later in favour of individual parse_meta_*_status methods]
 pub fn parse_meta_status(buf: &[u8]) -> IResult<&[u8], Response> {
     terminated(
         alt((
@@ -46,7 +42,6 @@ pub fn parse_meta_get_status(buf: &[u8]) -> IResult<&[u8], Response> {
 }
 
 // TODO: refactor this into individual parse_meta_*_response methods
-#[allow(dead_code)]
 pub fn parse_meta_response(buf: &[u8]) -> Result<Option<(usize, Response)>, ErrorKind> {
     let bufn = buf.len();
     // TODO: alt calls parsers sequentially until one succeeds, which is not optimal.  Want to only call the correct parser, no sequencing.
@@ -239,16 +234,6 @@ pub fn take_until_size(mut buf: &[u8], byte_size: u32) -> IResult<&[u8], Vec<u8>
     // If we have reached byte_size, consume '\r\n' and return the data
     let (buf, _) = tag("\r\n")(buf)?;
     Ok((buf, data))
-}
-
-#[allow(dead_code)]
-fn parse_meta_flag_values_as_u32(input: &[u8]) -> IResult<&[u8], Vec<(u8, u32)>> {
-    many0(pair(
-        preceded(space0, map(take(1usize), |s: &[u8]| s[0])),
-        map_res(digit1, |s: &[u8]| {
-            std::str::from_utf8(s).unwrap().parse::<u32>()
-        }),
-    ))(input)
 }
 
 fn parse_meta_flag_values_as_slice(input: &[u8]) -> IResult<&[u8], Vec<(u8, &[u8])>> {
