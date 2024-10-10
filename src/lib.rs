@@ -233,7 +233,7 @@ impl Client {
         meta_flags: Option<&[&str]>,
     ) -> Result<Option<Value>, Error> {
         self.conn.write_all(b"mg ").await?;
-        self.conn.write_all(key.as_ref()).await?;
+        self.conn.write_all(Self::validate_key_length(key.as_ref())?).await?;
         self.conn.write_all(b" ").await?;
         if let Some(flags) = meta_flags {
             self.conn.write_all(flags.join(" ").as_bytes()).await?;
@@ -278,7 +278,7 @@ impl Client {
         // let command_length: usize = MAX_KEY_LENGTH + 2 * meta_flags.as_ref().map_or(0, |flags| flags.len()) + 5; // key + flags & whitespaces + "mg " + "\r\n"
         let mut command = Vec::new();
         command.extend_from_slice(b"mg ");
-        command.extend_from_slice(key.as_ref());
+        command.extend_from_slice(Self::validate_key_length(key.as_ref())?);
         command.extend_from_slice(b" ");
         if let Some(flags) = meta_flags {
             command.extend_from_slice(flags.join(" ").as_bytes());

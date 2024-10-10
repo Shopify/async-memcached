@@ -541,7 +541,7 @@ mod tests {
         let input = b"HD\r\n";
         let (remaining, response) = parse_meta_get_data_value(input).unwrap();
 
-        assert_eq!(remaining, b"\r\n");
+        assert_eq!(remaining, b"");
 
         assert_eq!(response, Response::Data(None));
     }
@@ -551,7 +551,7 @@ mod tests {
         let input = b"HD h1 c1 l123\r\n";
         let (remaining, response) = parse_meta_get_data_value(input).unwrap();
 
-        assert_eq!(remaining, b"\r\n");
+        assert_eq!(remaining, b"");
 
         match response {
             Response::Data(Some(values)) => {
@@ -629,7 +629,7 @@ mod tests {
     fn test_parse_meta_get_data_value_cache_miss() {
         let input = b"EN\r\n";
         let (remaining, response) = parse_meta_get_data_value(input).unwrap();
-        assert_eq!(remaining, b"\r\n");
+        assert_eq!(remaining, b"");
         assert_eq!(response, Response::Status(Status::NotFound));
     }
 
@@ -638,7 +638,7 @@ mod tests {
         let input = b"EN Oopaque-token\r\n";
         let (remaining, response) = parse_meta_get_data_value(input).unwrap();
 
-        assert_eq!(remaining, b"\r\n");
+        assert_eq!(remaining, b"");
 
         match response {
             Response::Data(Some(values)) => {
@@ -660,7 +660,7 @@ mod tests {
     fn test_parse_meta_get_data_value_cache_miss_with_k_flag() {
         let input = b"EN ktest-key\r\n";
         let (remaining, response) = parse_meta_get_data_value(input).unwrap();
-        assert_eq!(remaining, b"\r\n");
+        assert_eq!(remaining, b"");
 
         match response {
             Response::Data(Some(values)) => {
@@ -722,7 +722,7 @@ mod tests {
         let server_response = b"HD\r\n";
         let (remaining, response) = parse_meta_set_data_value(server_response).unwrap();
 
-        assert_eq!(remaining, b"\r\n");
+        assert_eq!(remaining, b"");
 
         assert_eq!(response, Response::Status(Status::Stored));
     }
@@ -732,7 +732,7 @@ mod tests {
         let server_response = b"NS\r\n";
         let (remaining, response) = parse_meta_set_data_value(server_response).unwrap();
 
-        assert_eq!(remaining, b"\r\n");
+        assert_eq!(remaining, b"");
 
         assert_eq!(response, Response::Status(Status::NotStored));
     }
@@ -742,7 +742,7 @@ mod tests {
         let server_response = b"EX\r\n";
         let (remaining, response) = parse_meta_set_data_value(server_response).unwrap();
 
-        assert_eq!(remaining, b"\r\n");
+        assert_eq!(remaining, b"");
 
         assert_eq!(response, Response::Status(Status::Exists));
     }
@@ -752,7 +752,7 @@ mod tests {
         let server_response = b"NF\r\n";
         let (remaining, response) = parse_meta_set_data_value(server_response).unwrap();
 
-        assert_eq!(remaining, b"\r\n");
+        assert_eq!(remaining, b"");
 
         assert_eq!(response, Response::Status(Status::NotFound));
     }
@@ -762,7 +762,7 @@ mod tests {
         let server_response = b"HD O123\r\n";
         let (remaining, response) = parse_meta_set_data_value(server_response).unwrap();
 
-        assert_eq!(remaining, b"\r\n");
+        assert_eq!(remaining, b"");
 
         match response {
             Response::Data(Some(values)) => {
@@ -784,7 +784,7 @@ mod tests {
         let server_response = b"HD ktest-key\r\n";
         let (remaining, response) = parse_meta_set_data_value(server_response).unwrap();
 
-        assert_eq!(remaining, b"\r\n");
+        assert_eq!(remaining, b"");
 
         match response {
             Response::Data(Some(values)) => {
