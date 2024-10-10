@@ -34,6 +34,48 @@ fn bench_get(c: &mut Criterion) {
     });
 }
 
+fn bench_meta_get(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+
+    rt.block_on(async {
+        let mut client = setup_client().await;
+        client.set("foo", "bar", None, None).await.unwrap();
+    });
+
+    c.bench_function("bench meta_get", |b| {
+        b.to_async(&rt).iter_custom(|iters| async move {
+            let mut client = setup_client().await;
+            let start = std::time::Instant::now();
+            for _ in 0..iters {
+                let _ = client.meta_get("foo", Some(&["v", "h", "t", "l"])).await;
+            }
+            start.elapsed()
+        });
+    });
+}
+
+fn bench_meta_get_concat(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+
+    rt.block_on(async {
+        let mut client = setup_client().await;
+        client.set("foo", "bar", None, None).await.unwrap();
+    });
+
+    c.bench_function("bench meta_get_concat", |b| {
+        b.to_async(&rt).iter_custom(|iters| async move {
+            let mut client = setup_client().await;
+            let start = std::time::Instant::now();
+            for _ in 0..iters {
+                let _ = client
+                    .meta_get_concat("foo", Some(&["v", "h", "t", "l"]))
+                    .await;
+            }
+            start.elapsed()
+        });
+    });
+}
+
 fn bench_set_with_small_string(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
 
@@ -306,6 +348,8 @@ fn bench_decrement_no_reply(c: &mut Criterion) {
 criterion_group!(
     benches,
     bench_get,
+    bench_meta_get,
+    bench_meta_get_concat,
     bench_get_multi,
     bench_get_large,
     bench_get_many_large,

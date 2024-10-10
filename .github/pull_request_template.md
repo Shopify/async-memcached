@@ -6,7 +6,7 @@
 ### Details - How are you making this change?  What are the effects of this change?
 <!-- If this is a PR for a new feature, changed feature or a bug fix: -->
 <!-- Link to an issue or provide enough context so that someone new can understand the 'why' behind this change. -->
-<!-- If you are propsing changes to existing code, please run `cargo bench` against main branch and your feature branch. -->
+<!-- If you are proposing changes to existing code, please run `cargo bench` against main branch and your feature branch. -->
 <!-- Include results of your benchmarks in a code block in this section to show performance changes. -->
 
 <!-- -------------------------------------------- -->
