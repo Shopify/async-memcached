@@ -229,12 +229,14 @@ impl Client {
     pub async fn meta_get<K: AsRef<[u8]>>(
         &mut self,
         key: K,
-        meta_flags: &[&str],
+        meta_flags: Option<&[&str]>,
     ) -> Result<Option<Value>, Error> {
         self.conn.write_all(b"mg ").await?;
         self.conn.write_all(key.as_ref()).await?;
         self.conn.write_all(b" ").await?;
-        self.conn.write_all(meta_flags.join(" ").as_bytes()).await?;
+        if let Some(flags) = meta_flags {
+            self.conn.write_all(flags.join(" ").as_bytes()).await?;
+        }
         self.conn.write_all(b"\r\n").await?;
         self.conn.flush().await?;
 
@@ -270,14 +272,16 @@ impl Client {
     pub async fn meta_get_concat<K: AsRef<[u8]>>(
         &mut self,
         key: K,
-        meta_flags: &[&str], // meta_get should always have at least one flag, otherwise it's a no-op
+        meta_flags: Option<&[&str]>, // meta_get should always have at least one flag, otherwise it's a no-op
     ) -> Result<Option<Value>, Error> {
-        let command_length: usize = MAX_KEY_LENGTH + 2 * meta_flags.len() + 5; // key + flags & whitespaces + "mg " + "\r\n"
+        let command_length: usize = MAX_KEY_LENGTH + 2 * meta_flags.as_ref().map_or(0, |flags| flags.len()) + 5; // key + flags & whitespaces + "mg " + "\r\n"
         let mut command = Vec::with_capacity(command_length);
         command.extend_from_slice(b"mg ");
         command.extend_from_slice(key.as_ref());
         command.extend_from_slice(b" ");
-        command.extend_from_slice(meta_flags.join(" ").as_bytes());
+        if let Some(flags) = meta_flags {
+            command.extend_from_slice(flags.join(" ").as_bytes());
+        }
         command.extend_from_slice(b"\r\n");
         // println!("command: {:?}", String::from_utf8_lossy(&command));
         self.conn.write_all(&command).await?;

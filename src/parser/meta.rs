@@ -4,25 +4,25 @@ use nom::{
     character::streaming::{crlf, space1},
     combinator::{map, value},
     multi::many0,
-    sequence::{terminated, tuple},
+    sequence::tuple,
     IResult,
 };
 
 use super::{parse_u32, ErrorKind, MetaValue, Response, Status, Value};
 
-// TODO: remove this later in favour of individual parse_meta_*_status methods]
-pub fn parse_meta_status(buf: &[u8]) -> IResult<&[u8], Response> {
-    terminated(
-        alt((
-            value(Response::Status(Status::NotStored), tag(b"NS")),
-            value(Response::Status(Status::Deleted), tag(b"DE")),
-            value(Response::Status(Status::Touched), tag(b"TO")),
-            value(Response::Status(Status::Exists), tag(b"EX")),
-            value(Response::Status(Status::NotFound), tag(b"NF")),
-        )),
-        crlf,
-    )(buf)
-}
+// // TODO: remove this later in favour of individual parse_meta_*_status methods]
+// pub fn parse_meta_status(buf: &[u8]) -> IResult<&[u8], Response> {
+//     terminated(
+//         alt((
+//             value(Response::Status(Status::NotStored), tag(b"NS")),
+//             value(Response::Status(Status::Deleted), tag(b"DE")),
+//             value(Response::Status(Status::Touched), tag(b"TO")),
+//             value(Response::Status(Status::Exists), tag(b"EX")),
+//             value(Response::Status(Status::NotFound), tag(b"NF")),
+//         )),
+//         crlf,
+//     )(buf)
+// }
 
 pub fn parse_meta_set_status(buf: &[u8]) -> IResult<&[u8], Response> {
     alt((
@@ -47,7 +47,7 @@ pub fn parse_meta_response(buf: &[u8]) -> Result<Option<(usize, Response)>, Erro
     // TODO: alt calls parsers sequentially until one succeeds, which is not optimal.  Want to only call the correct parser, no sequencing.
     // Also run the risk of hitting the wrong parser since there is overlap in response codes.
     let result = alt((
-        parse_meta_status,
+        // parse_meta_status,
         |input| parse_meta_get_data_value(input),
         |input| parse_meta_set_data_value(input),
     ))(buf);
@@ -102,6 +102,7 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
         }
         // match arm for "HD" response when v flag is omitted
         Response::Status(Status::Exists) => {
+            println!("parse_meta_get_data_value: Status::Exists");
             // no value (data block) or size in this case, potentially just flags
             let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?;
 
