@@ -146,6 +146,17 @@ impl Client {
         self.drive_receive(parse_ascii_stats_response).await
     }
 
+    /// write
+    pub async fn write_raw(&mut self, command: &[u8]) -> Result<&[u8], Error> {
+        self.conn.write_all(command).await?;
+        self.conn.flush().await?;
+
+        match self.get_read_write_response().await? {
+            // does things to get response back from server but no parsing, just return raw response e.g. VA 10 flags\r\nvaluevalue\r\n
+            _ => todo!("do stuff")
+        }
+    }
+
     /// Gets the given key.
     ///
     /// If the key is found, `Some(Value)` is returned, describing the metadata and data of the key.
