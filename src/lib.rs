@@ -13,7 +13,8 @@ pub use self::error::Error;
 
 mod parser;
 use self::parser::{
-    parse_ascii_metadump_response, parse_ascii_response, parse_ascii_stats_response, Response,
+    parse_ascii_metadump_response, parse_ascii_response, parse_ascii_stats_response,
+    parse_meta_response, Response,
 };
 pub use self::parser::{ErrorKind, KeyMetadata, MetadumpResponse, StatsResponse, Status, Value};
 
@@ -21,6 +22,7 @@ mod value_serializer;
 pub use self::value_serializer::AsMemcachedValue;
 
 const MAX_KEY_LENGTH: usize = 250; // reference in memcached documentation: https://github.com/memcached/memcached/blob/5609673ed29db98a377749fab469fe80777de8fd/doc/protocol.txt#L46
+const MAX_VALUE_SIZE: usize = 1024 * 1024; // 1 MB
 
 /// High-level memcached client.
 ///
@@ -163,6 +165,91 @@ impl Client {
                         Err(Status::Error(ErrorKind::Protocol(None)).into())
                     } else {
                         Ok(items.remove(0))
+                    }
+                })
+                .transpose(),
+            _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),
+        }
+    }
+
+    /// Gets the given key with additional metadata.
+    ///
+    /// If the key is found, `Some(Value)` is returned, describing the metadata and data of the key.
+    ///
+    /// Otherwise, `None` is returned.
+    ///
+    /// Supported meta flags:
+    /// - h: return whether item has been hit before as a 0 or 1
+    /// - l: return time since item was last accessed in seconds
+    /// - t: return item TTL remaining in seconds (-1 for unlimited)
+    pub async fn meta_get<K: AsRef<[u8]>>(
+        &mut self,
+        key: K,
+        meta_flags: &[&str],
+    ) -> Result<Option<Value>, Error> {
+        self.conn.write_all(b"mg ").await?;
+        self.conn.write_all(key.as_ref()).await?;
+        self.conn.write_all(b" ").await?;
+        self.conn.write_all(meta_flags.join(" ").as_bytes()).await?;
+        self.conn.write_all(b"\r\n").await?;
+        self.conn.flush().await?;
+
+        match self.drive_receive(parse_meta_response).await? {
+            Response::Status(Status::NotFound) => Ok(None),
+            Response::Status(s) => Err(s.into()),
+            Response::Data(d) => d
+                .map(|mut items| {
+                    if items.len() != 1 {
+                        Err(Status::Error(ErrorKind::Protocol(None)).into())
+                    } else {
+                        let mut item = items.remove(0);
+                        item.key = key.as_ref().to_vec();
+                        Ok(item)
+                    }
+                })
+                .transpose(),
+            _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),
+        }
+    }
+
+    /// Gets the given key with additional metadata.
+    ///
+    /// If the key is found, `Some(Value)` is returned, describing the metadata and data of the key.
+    ///
+    /// Otherwise, `None` is returned.
+    ///
+    /// Supported meta flags:
+    /// - v: return item value
+    /// - h: return whether item has been hit before as a 0 or 1
+    /// - l: return time since item was last accessed in seconds
+    /// - t: return item TTL remaining in seconds (-1 for unlimited)
+    pub async fn meta_get_concat<K: AsRef<[u8]>>(
+        &mut self,
+        key: K,
+        meta_flags: &[&str], // meta_get should always have at least one flag, otherwise it's a no-op
+    ) -> Result<Option<Value>, Error> {
+        let command_length: usize = MAX_KEY_LENGTH + 2 * meta_flags.len() + 5; // key + flags & whitespaces + "mg " + "\r\n"
+        let mut command = Vec::with_capacity(command_length);
+        command.extend_from_slice(b"mg ");
+        command.extend_from_slice(key.as_ref());
+        command.extend_from_slice(b" ");
+        command.extend_from_slice(meta_flags.join(" ").as_bytes());
+        command.extend_from_slice(b"\r\n");
+        // println!("command: {:?}", String::from_utf8_lossy(&command));
+        self.conn.write_all(&command).await?;
+        self.conn.flush().await?;
+
+        match self.drive_receive(parse_meta_response).await? {
+            Response::Status(Status::NotFound) => Ok(None),
+            Response::Status(s) => Err(s.into()),
+            Response::Data(d) => d
+                .map(|mut items| {
+                    if items.len() != 1 {
+                        Err(Status::Error(ErrorKind::Protocol(None)).into())
+                    } else {
+                        let mut item = items.remove(0);
+                        item.key = key.as_ref().to_vec();
+                        Ok(item)
                     }
                 })
                 .transpose(),
@@ -350,6 +437,120 @@ impl Client {
             Response::Status(Status::Stored) => Ok(()),
             Response::Status(s) => Err(s.into()),
             _ => Err(Status::Error(ErrorKind::Protocol(None)).into()),
+        }
+    }
+
+    /// meta set thing without concats
+    pub async fn meta_set<K, V>(
+        &mut self,
+        key: K,
+        value: V,
+        meta_flags: Option<&[&str]>,
+    ) -> Result<Option<Value>, Error>
+    where
+        K: AsRef<[u8]>,
+        V: AsMemcachedValue,
+    {
+        let kr = key.as_ref();
+        let vr = value.as_bytes();
+
+        self.conn.write_all(b"ms ").await?;
+        self.conn.write_all(kr).await?;
+
+        let vlen = vr.len().to_string();
+        self.conn.write_all(b" ").await?;
+        self.conn.write_all(vlen.as_ref()).await?;
+
+        if let Some(meta_flags) = meta_flags {
+            self.conn.write_all(b" ").await?;
+            self.conn.write_all(meta_flags.join(" ").as_bytes()).await?;
+        }
+
+        self.conn.write_all(b"\r\n").await?;
+        self.conn.write_all(vr.as_ref()).await?;
+        self.conn.write_all(b"\r\n").await?;
+        self.conn.flush().await?;
+
+        match self.drive_receive(parse_meta_response).await? {
+            Response::Status(s) => Err(s.into()),
+            Response::Data(d) => d
+                .map(|mut items| {
+                    if items.len() != 1 {
+                        Err(Status::Error(ErrorKind::Protocol(None)).into())
+                    } else {
+                        let mut item = items.remove(0);
+                        item.key = key.as_ref().to_vec();
+                        Ok(item)
+                    }
+                })
+                .transpose(),
+            _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),
+        }
+    }
+
+    /// Sets the given key.
+    ///
+    /// If `ttl` they will default to 0.  If the value is set
+    /// successfully, `Some(Value)` is returned, otherwise [`Error`] is returned.
+    /// NOTE: That the data is some Value is sparsely populated, containing only requested data by meta_flags
+    /// The meta set command a generic command for storing data to memcached. Based
+    /// on the flags supplied, it can replace all storage commands (see token M) as
+    /// well as adds new options.
+    //
+    // ms <key> <datalen> <flags>*\r\n
+    //
+    // - <key> means one key string.
+    // - <datalen> is the length of the payload data.
+    //
+    // - <flags> are a set of single character codes ended with a space or newline.
+    //   flags may have strings after the initial character.
+    pub async fn meta_set_concat<K, V>(
+        &mut self,
+        key: K,
+        value: V,
+        meta_flags: Option<&[&str]>,
+    ) -> Result<Option<Value>, Error>
+    where
+        K: AsRef<[u8]>,
+        V: AsMemcachedValue,
+    {
+        let mut command = Vec::with_capacity(MAX_VALUE_SIZE + 2 * MAX_KEY_LENGTH);
+        let kr = key.as_ref();
+        let vr = value.as_bytes();
+
+        command.extend_from_slice(b"ms ");
+        command.extend_from_slice(kr);
+
+        let vlen = vr.len().to_string();
+        command.extend_from_slice(b" ");
+        command.extend_from_slice(vlen.as_ref());
+
+        if let Some(meta_flags) = meta_flags {
+            command.extend_from_slice(b" ");
+            command.extend_from_slice(meta_flags.join(" ").as_bytes());
+        }
+
+        command.extend_from_slice(b"\r\n");
+        self.conn.write_all(&command).await?;
+        println!("command: {:?}", String::from_utf8_lossy(&command));
+        self.conn.write_all(vr.as_ref()).await?;
+        self.conn.write_all(b"\r\n").await?;
+        self.conn.flush().await?;
+
+        match self.drive_receive(parse_meta_response).await? {
+            Response::Status(s) => Err(s.into()),
+            Response::Data(d) => d
+                .map(|mut items| {
+                    if items.len() != 1 {
+                        Err(Status::Error(ErrorKind::Protocol(None)).into())
+                    } else {
+                        let mut item = items.remove(0);
+                        item.key = key.as_ref().to_vec();
+                        Ok(item)
+                    }
+                })
+                .transpose(),
+            _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),
         }
     }
 

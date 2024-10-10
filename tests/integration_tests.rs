@@ -2,7 +2,7 @@ use async_memcached::{Client, Error, ErrorKind, Status};
 use rand::seq::IteratorRandom;
 use serial_test::{parallel, serial};
 
-// Note: Each test should run with keys unique to that test to avoid async conflicts.  Because these tests run concurrently,
+// NOTE: Each test should run with keys unique to that test to avoid async conflicts.  Because these tests run concurrently,
 // it's possible to delete/overwrite keys created by another test before they're read.
 
 const LARGE_PAYLOAD_SIZE: usize = 1000 * 1024;
@@ -242,7 +242,7 @@ async fn test_add_multi_with_a_key_that_already_exists() {
     // the get result for the preset key should be the original value that it was set with
     // not the new value from the add_multi call
     assert_eq!(
-        std::str::from_utf8(&get_result.unwrap().unwrap().data)
+        std::str::from_utf8(&get_result.unwrap().unwrap().data.unwrap())
             .expect("failed to parse string from bytes"),
         "original-value"
     );
@@ -276,6 +276,7 @@ async fn test_set_with_string_value() {
                 .expect("should have unwrapped a Result")
                 .expect("should have unwrapped an Option")
                 .data
+                .unwrap()
         )
         .expect("failed to parse String from bytes"),
         value
@@ -308,6 +309,7 @@ async fn test_set_with_string_ref_value() {
                 .expect("should have unwrapped a Result")
                 .expect("should have unwrapped an Option")
                 .data
+                .unwrap()
         )
         .expect("failed to parse String from bytes"),
         value
@@ -337,6 +339,7 @@ async fn test_set_with_u64_value() {
                 .expect("should have unwrapped a Result")
                 .expect("should have unwrapped an Option")
                 .data
+                .unwrap()
         )
         .expect("couldn't parse data from bytes to integer")
     );
@@ -549,7 +552,7 @@ async fn test_delete() {
 
     match get_result {
         Some(get_value) => assert_eq!(
-            String::from_utf8(get_value.data).expect("failed to parse a string"),
+            String::from_utf8(get_value.data.unwrap()).expect("failed to parse a string"),
             value.to_string()
         ),
         None => panic!("failed to get {}", key),
@@ -591,7 +594,7 @@ async fn test_delete_no_reply() {
 
     match get_result {
         Some(get_value) => assert_eq!(
-            String::from_utf8(get_value.data).expect("failed to parse a string"),
+            String::from_utf8(get_value.data.unwrap()).expect("failed to parse a string"),
             value
         ),
         None => panic!("failed to get {}", key),
@@ -649,6 +652,7 @@ async fn test_set_multi_with_string_values() {
                 .expect("should have unwrapped a Result")
                 .expect("should have unwrapped an Option")
                 .data
+                .unwrap()
         )
         .expect("failed to parse string from bytes"),
         "value2"
@@ -746,7 +750,7 @@ async fn test_set_multi_with_string_values_that_exceed_max_size() {
     // Check a small value to make sure it was cached properly - key0 is never chosen to be a large value
     let small_result = client.get("multi-key0").await;
     assert!(matches!(
-        std::str::from_utf8(&small_result.unwrap().unwrap().data)
+        std::str::from_utf8(&small_result.unwrap().unwrap().data.unwrap())
             .expect("failed to parse string from bytes"),
         "value0"
     ));
@@ -772,7 +776,7 @@ async fn test_set_multi_with_string_values_that_exceed_max_size() {
             );
             let get_result = client.get(key.as_str()).await.unwrap().unwrap();
             assert_eq!(
-                std::str::from_utf8(&get_result.data).unwrap(),
+                std::str::from_utf8(&get_result.data.unwrap()).unwrap(),
                 format!("value{}", i),
                 "Mismatch for key {}",
                 key
@@ -925,7 +929,7 @@ async fn test_increments_existing_key_with_no_reply() {
 
     assert_eq!(
         value + amount,
-        btoi::btoi::<u64>(&result.unwrap().unwrap().data)
+        btoi::btoi::<u64>(&result.unwrap().unwrap().data.unwrap())
             .expect("couldn't parse data from bytes to integer")
     );
 }
@@ -1005,9 +1009,199 @@ async fn test_decrements_existing_key_with_no_reply() {
 
     assert_eq!(
         value - amount,
-        btoi::btoi::<u64>(&result.unwrap().unwrap().data)
+        btoi::btoi::<u64>(&result.unwrap().unwrap().data.unwrap())
             .expect("couldn't parse data from bytes to integer")
     );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_get_with_only_v_flag() {
+    let key = "meta-get-test-key-with-only-v-flag";
+    let value = "test-value";
+
+    let mut client = setup_client(&[key]).await;
+
+    client.set(key, value, None, None).await.unwrap();
+
+    let flags = ["v"];
+    let result = client.meta_get(key, &flags).await.unwrap();
+
+    assert!(result.is_some());
+    let result_meta_value = result.unwrap();
+
+    assert_eq!(
+        String::from_utf8(result_meta_value.data.unwrap()).unwrap(),
+        value
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_get_with_many_flags() {
+    let key = "meta-get-test-key-with-many-flags";
+    let value = "test-value";
+    let ttl = 3600; // 1 hour
+
+    let mut client = setup_client(&[key]).await;
+
+    // Set the key with a TTL
+    client.set(key, value, Some(ttl), None).await.unwrap();
+
+    // Perform a get to ensure the item has been hit
+    let result = client.get(key).await.unwrap();
+    let result_value = result.unwrap();
+    assert_eq!(
+        String::from_utf8(result_value.data.unwrap()).unwrap(),
+        value
+    );
+
+    let flags = ["v", "h", "l", "t", "O9001"];
+    let result = client.meta_get(key, &flags).await.unwrap();
+
+    assert!(result.is_some());
+    let result_meta_value = result.unwrap();
+
+    assert_eq!(
+        String::from_utf8(result_meta_value.data.unwrap()).unwrap(),
+        value
+    );
+
+    let meta_flag_values = result_meta_value.meta_values.unwrap();
+    assert!(meta_flag_values.hit_before.unwrap());
+    assert_eq!(meta_flag_values.last_accessed.unwrap(), 0);
+    assert!(meta_flag_values.ttl_remaining.unwrap() > 0);
+    assert_eq!(meta_flag_values.opaque_token.unwrap(), "9001".as_bytes());
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_get_not_found() {
+    let key = "meta-get-test-key-not-found";
+    let flags = ["v", "h", "l", "t"];
+    let mut client = setup_client(&[key]).await;
+
+    let result = client.meta_get(key, &flags).await.unwrap();
+    assert_eq!(result, None);
+}
+
+// TODO: Still need to properly deal with miss cases where opaque or key flags are provided
+// Will be done in following refactor PR
+// #[ignore = "Relies on a running memcached server"]
+// #[tokio::test]
+// #[parallel]
+// async fn test_meta_get_not_found_with_opaque_flag() {
+//     let key = "meta-get-test-key-not-found";
+//     let flags = ["v", "O9001"];
+//     let mut client = setup_client(&[key]).await;
+
+//     let result = client.meta_get(key, &flags).await.unwrap();
+
+//     assert_eq!(
+//         result.unwrap().meta_values.unwrap().opaque_token,
+//         Some("9001".as_bytes().to_vec())
+//     );
+// }
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+async fn test_meta_set_with_no_flags() {
+    let key = "meta-set-test-key";
+    let value = "test-value";
+
+    let mut client = setup_client(&[key]).await;
+
+    // Set the key using meta_set
+    let result = client.meta_set(key, value, None).await;
+    assert!(
+        result.is_ok(),
+        "Failed to set key using meta_set: {:?}",
+        result
+    );
+
+    // Retrieve the key using meta_get with v flag to verify that the item was stored
+    let get_flags = ["v"];
+    let get_result = client.meta_get(key, &get_flags).await.unwrap();
+
+    assert!(get_result.is_some(), "Key not found after meta_set");
+    let result_value = get_result.unwrap();
+
+    // Verify the value
+    assert_eq!(
+        String::from_utf8(result_value.data.unwrap()).unwrap(),
+        value,
+        "Retrieved value does not match set value"
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+async fn test_meta_set_opaque_token() {
+    let key = "meta-set-opaque-token-test-key";
+    let value = "test-value";
+    let mut client = setup_client(&[key]).await;
+
+    let meta_flags = ["ME", "T3600", "F42", "Oopaque-token"];
+
+    // Set the key using meta_set
+    let result = client.meta_set(key, value, Some(&meta_flags)).await;
+    assert!(
+        result.is_ok(),
+        "Failed to set key using meta_set: {:?}",
+        result
+    );
+
+    // Fetch the key with .get() to ensure that the item has been hit before
+    let get_result = client.get(key).await.unwrap();
+    assert!(get_result.is_some(), "Key not found after meta_set");
+
+    // Retrieve the key using meta_get to verify
+    let get_flags = ["v", "h", "l", "t"];
+    let get_result = client.meta_get(key, &get_flags).await.unwrap();
+
+    assert!(get_result.is_some(), "Key not found after meta_set");
+    let result_value = get_result.unwrap();
+
+    // Verify the value
+    assert_eq!(
+        String::from_utf8(result_value.data.unwrap()).unwrap(),
+        value,
+        "Retrieved value does not match set value"
+    );
+
+    // Verify the metaflags
+    let meta_flag_values = result_value.meta_values.unwrap();
+    assert_eq!(meta_flag_values.hit_before.unwrap(), true);
+    assert_eq!(meta_flag_values.last_accessed.unwrap(), 0);
+    assert_eq!(meta_flag_values.ttl_remaining.unwrap(), 3600);
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_set_not_stored() {
+    let key = "meta-set-add-if-not-exists-test-key";
+    let value = "test-value";
+
+    let mut client = setup_client(&[key]).await;
+
+    let meta_flags = ["ME", "F42"];
+
+    // Set the key using meta_set
+    let result = client.meta_set(key, value, Some(&meta_flags)).await;
+    assert!(
+        result.is_ok(),
+        "Failed to set key using meta_set: {:?}",
+        result
+    );
+
+    // Set the key using meta_set again, this should fail with Status::NotStored
+    let result = client.meta_set(key, value, Some(&meta_flags)).await;
+    let result = result.unwrap_err();
+    assert_eq!(Error::Protocol(Status::NotStored), result);
 }
 
 #[ignore = "Relies on a running memcached server"]
