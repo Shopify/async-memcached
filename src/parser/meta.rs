@@ -1,5 +1,3 @@
-use std::convert::TryInto;
-
 use nom::{
     branch::alt,
     bytes::streaming::{tag, take, take_while1},
@@ -15,6 +13,8 @@ use nom::{
 
 use super::{parse_u32, ErrorKind, MetaValue, Response, Status, Value};
 
+// TODO: remove this later in favour of individual parse_meta_*_status methods
+#[allow(dead_code)]
 pub fn parse_meta_status(buf: &[u8]) -> IResult<&[u8], Response> {
     terminated(
         alt((
@@ -40,9 +40,12 @@ pub fn parse_meta_get_status(buf: &[u8]) -> IResult<&[u8], Response> {
     ))(buf)
 }
 
+// TODO: refactor this into individual parse_meta_*_response methods
 #[allow(dead_code)]
 pub fn parse_meta_response(buf: &[u8]) -> Result<Option<(usize, Response)>, ErrorKind> {
     let bufn = buf.len();
+    // TODO: alt calls parsers sequentially until one succeeds, which is not optimal.  Want to only call the correct parser, no sequencing.
+    // Also run the risk of hitting the wrong parser since there is overlap in response codes.
     let result = alt((
         parse_meta_status,
         |input| parse_meta_get_data_value(input),
@@ -80,8 +83,8 @@ pub fn parse_meta_response(buf: &[u8]) -> Result<Option<(usize, Response)>, Erro
 //     }),
 // }
 fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
-    let (input, success) = parse_meta_get_status(buf)?; // removes <CD> response code from the input
-    match success {
+    let (input, status) = parse_meta_get_status(buf)?; // removes <CD> response code from the input
+    match status {
         // match arm for "VA " response when v flag is used
         Response::Status(Status::Value) => {
             let (input, size) = parse_u32(input)?; // parses the size of the data from the input
@@ -134,36 +137,31 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
 }
 
 fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
-    let (input, success) = parse_meta_set_status(buf)?;
-    match success {
+    let (input, status) = parse_meta_set_status(buf)?;
+    match status {
         Response::Status(Status::Stored) => {
-            // TODO: dont' call if there are no flags
+            // no value (data block) or size in this case, potentially just flags
             let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?;
 
-            let mut meta_values = MetaValue::default();
-
-            let mut value = Value {
-                key: b"key".to_vec(),
-                cas: None,
-                flags: None,
-                data: None,
-                meta_values: None,
-            };
-
-            for (flag, meta_value) in meta_values_array {
-                match flag {
-                    b'O' => meta_values.opaque_token = Some(meta_value.to_vec()),
-                    b'c' => {
-                        value.cas =
-                            Some(u64::from_be_bytes(meta_value.try_into().unwrap_or([0; 8])));
-                    }
-                    _ => {}
-                }
+            // early return if there were no flags passed in
+            if meta_values_array.is_empty() {
+                return Ok((input, Response::Data(None)));
             }
 
-            value.meta_values = Some(meta_values);
-            let (input, _) = tag("\r\n")(input)?;
+            // data is empty in this case
+            let data = None;
+            let value = construct_value_from_meta_values(meta_values_array, data);
+
             Ok((input, Response::Data(Some(vec![value]))))
+        }
+        Response::Status(Status::NotStored) => {
+            todo!("Handle Status::NotStored")
+        }
+        Response::Status(Status::Exists) => {
+            todo!("Handle Status::Exists")
+        }
+        Response::Status(Status::NotFound) => {
+            todo!("Handle Status::NotFound")
         }
         _ => Err(nom::Err::Error(nom::error::Error::new(
             input,
@@ -217,16 +215,9 @@ fn parse_meta_flag_values_as_slice(input: &[u8]) -> IResult<&[u8], Vec<(u8, &[u8
     }
 }
 
-fn map_meta_flag(
-    flag: u8,
-    meta_value: &[u8],
-    value: &mut Value,
-    meta_values: &mut MetaValue,
-    item_key: &mut Vec<u8>,
-) {
+fn map_meta_flag(flag: u8, meta_value: &[u8], value: &mut Value, meta_values: &mut MetaValue) {
     match flag {
         b'c' => {
-            println!("c flag: {:?}", meta_value);
             value.cas = Some(
                 std::str::from_utf8(meta_value)
                     .expect("Failed to convert c flag to string")
@@ -235,8 +226,7 @@ fn map_meta_flag(
             )
         }
         b'f' => {
-            println!("f flag: {:?}", meta_value);
-            meta_values.flags = Some(
+            value.flags = Some(
                 std::str::from_utf8(meta_value)
                     .expect("Failed to convert f flag to string")
                     .parse::<u32>()
@@ -244,21 +234,12 @@ fn map_meta_flag(
             )
         }
         b'h' => {
-            println!("h flag: {:?}", meta_value);
-            meta_values.hit_before = Some(
-                std::str::from_utf8(meta_value)
-                    .expect("Failed to convert h flag to string")
-                    .parse::<u64>()
-                    .expect("Failed to convert h flag to u64")
-                    != 0,
-            )
+            meta_values.hit_before = Some(meta_value != b"0");
         }
         b'k' => {
-            println!("k flag: {:?}", meta_value);
-            *item_key = meta_value.to_vec();
+            value.key = meta_value.to_vec();
         }
         b'l' => {
-            println!("l flag: {:?}", meta_value);
             meta_values.last_accessed = Some(
                 std::str::from_utf8(meta_value)
                     .expect("Failed to convert l flag to string")
@@ -266,8 +247,10 @@ fn map_meta_flag(
                     .expect("Failed to convert l flag to u64"),
             )
         }
+        b'O' => {
+            meta_values.opaque_token = Some(meta_value.to_vec());
+        }
         b's' => {
-            println!("s flag: {:?}", meta_value);
             meta_values.size = Some(
                 std::str::from_utf8(meta_value)
                     .expect("Failed to convert s flag to string")
@@ -276,17 +259,12 @@ fn map_meta_flag(
             )
         }
         b't' => {
-            println!("t flag: {:?}", meta_value);
             meta_values.ttl_remaining = Some(
                 std::str::from_utf8(meta_value)
                     .expect("Failed to convert t flag to string")
                     .parse::<i64>()
                     .expect("Failed to convert t flag to i64"),
             )
-        }
-        b'O' => {
-            println!("O flag: {:?}", meta_value);
-            meta_values.opaque_token = Some(meta_value.to_vec());
         }
         b'W' => meta_values.is_recache_winner = Some(true),
         b'Z' => meta_values.is_recache_winner = Some(false),
@@ -300,7 +278,6 @@ fn construct_value_from_meta_values(
     data: Option<&[u8]>,
 ) -> Value {
     let mut meta_values = MetaValue::default();
-    let mut item_key = Vec::new();
 
     let mut value = Value {
         key: Vec::new(),
@@ -311,16 +288,9 @@ fn construct_value_from_meta_values(
     };
 
     for (flag, meta_value) in meta_values_array {
-        map_meta_flag(
-            flag,
-            meta_value,
-            &mut value,
-            &mut meta_values,
-            &mut item_key,
-        );
+        map_meta_flag(flag, meta_value, &mut value, &mut meta_values);
     }
 
-    value.key = item_key;
     value.meta_values = Some(meta_values);
 
     value
@@ -363,17 +333,13 @@ mod tests {
         let input = b" h1 l1 t123 Oopaque-token\r\n";
         let (remaining, result) = parse_meta_flag_values_as_slice(input).unwrap();
 
-        let h_token: &[u8] = "1".as_bytes();
-        let l_token: &[u8] = "1".as_bytes();
-        let t_token: &[u8] = "123".as_bytes();
-        let o_token: &[u8] = "opaque-token".as_bytes();
         assert_eq!(
             result,
             vec![
-                (b'h', h_token),
-                (b'l', l_token),
-                (b't', t_token),
-                (b'O', o_token)
+                (b'h', b"1".as_ref()),
+                (b'l', b"1".as_ref()),
+                (b't', b"123".as_ref()),
+                (b'O', b"opaque-token".as_ref())
             ]
         );
         assert_eq!(remaining, b"\r\n");
@@ -449,7 +415,7 @@ mod tests {
 
     #[test]
     fn test_parse_meta_get_data_value() {
-        let input = b"VA 10 h1 l56 t2179\r\ntest-value\r\n";
+        let input = b"VA 10 h1 l56 t2179 f9001\r\ntest-value\r\n";
         let (remaining, response) = parse_meta_get_data_value(input).unwrap();
 
         assert_eq!(remaining, b"");
@@ -462,7 +428,7 @@ mod tests {
                     str::from_utf8(value.data.as_ref().unwrap()).unwrap(),
                     "test-value"
                 );
-                assert_eq!(value.flags, Some(0));
+                assert_eq!(value.flags, Some(9001));
                 assert_eq!(value.cas, None);
 
                 let meta_values = value.meta_values.as_ref().unwrap();
