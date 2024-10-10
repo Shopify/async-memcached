@@ -29,7 +29,12 @@ pub fn parse_meta_status(buf: &[u8]) -> IResult<&[u8], Response> {
 }
 
 pub fn parse_meta_set_status(buf: &[u8]) -> IResult<&[u8], Response> {
-    alt((value(Response::Status(Status::Stored), tag(b"HD")),))(buf)
+    alt((
+        value(Response::Status(Status::Stored), tag(b"HD")),
+        value(Response::Status(Status::NotStored), tag(b"NS")),
+        value(Response::Status(Status::Exists), tag(b"EX")),
+        value(Response::Status(Status::NotFound), tag(b"NF")),
+    ))(buf)
 }
 
 pub fn parse_meta_get_status(buf: &[u8]) -> IResult<&[u8], Response> {
@@ -92,7 +97,11 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
             let (input, _) = crlf(input)?; // removes the leading crlf from the data block
             let (input, data) = take_until_size(input, size)?; // parses the data from the input
 
-            let value = construct_value_from_meta_values(meta_values_array, Some(&data));
+            let value = construct_value_from_meta_values(
+                meta_values_array,
+                Some(&data),
+                Some(Status::Value),
+            );
 
             Ok((input, Response::Data(Some(vec![value]))))
         }
@@ -108,7 +117,8 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
 
             // data is empty in this case
             let data = None;
-            let value = construct_value_from_meta_values(meta_values_array, data);
+            let value =
+                construct_value_from_meta_values(meta_values_array, data, Some(Status::Exists));
 
             Ok((input, Response::Data(Some(vec![value]))))
         }
@@ -122,7 +132,8 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
 
             // data is empty in this case
             let data = None;
-            let value = construct_value_from_meta_values(meta_values_array, data);
+            let value =
+                construct_value_from_meta_values(meta_values_array, data, Some(Status::NotFound));
 
             Ok((input, Response::Data(Some(vec![value]))))
         }
@@ -145,23 +156,63 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
 
             // early return if there were no flags passed in
             if meta_values_array.is_empty() {
-                return Ok((input, Response::Data(None)));
+                return Ok((input, Response::Status(Status::Stored)));
             }
 
             // data is empty in this case
             let data = None;
-            let value = construct_value_from_meta_values(meta_values_array, data);
+            let value =
+                construct_value_from_meta_values(meta_values_array, data, Some(Status::Stored));
 
             Ok((input, Response::Data(Some(vec![value]))))
         }
         Response::Status(Status::NotStored) => {
-            todo!("Handle Status::NotStored")
+            // no value (data block) or size in this case, potentially just flags
+            let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?;
+
+            // early return if there were no flags passed in
+            if meta_values_array.is_empty() {
+                return Ok((input, Response::Status(Status::NotStored)));
+            }
+
+            // data is empty in this case
+            let data = None;
+            let value =
+                construct_value_from_meta_values(meta_values_array, data, Some(Status::NotStored));
+
+            Ok((input, Response::Data(Some(vec![value]))))
         }
         Response::Status(Status::Exists) => {
-            todo!("Handle Status::Exists")
+            // no value (data block) or size in this case, potentially just flags
+            let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?;
+
+            // early return if there were no flags passed in
+            if meta_values_array.is_empty() {
+                return Ok((input, Response::Status(Status::Exists)));
+            }
+
+            // data is empty in this case
+            let data = None;
+            let value =
+                construct_value_from_meta_values(meta_values_array, data, Some(Status::Exists));
+
+            Ok((input, Response::Data(Some(vec![value]))))
         }
         Response::Status(Status::NotFound) => {
-            todo!("Handle Status::NotFound")
+            // no value (data block) or size in this case, potentially just flags
+            let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?;
+
+            // early return if there were no flags passed in
+            if meta_values_array.is_empty() {
+                return Ok((input, Response::Status(Status::NotFound)));
+            }
+
+            // data is empty in this case
+            let data = None;
+            let value =
+                construct_value_from_meta_values(meta_values_array, data, Some(Status::NotFound));
+
+            Ok((input, Response::Data(Some(vec![value]))))
         }
         _ => Err(nom::Err::Error(nom::error::Error::new(
             input,
@@ -276,8 +327,12 @@ fn map_meta_flag(flag: u8, meta_value: &[u8], value: &mut Value, meta_values: &m
 fn construct_value_from_meta_values(
     meta_values_array: Vec<(u8, &[u8])>,
     data: Option<&[u8]>,
+    status: Option<Status>,
 ) -> Value {
-    let mut meta_values = MetaValue::default();
+    let mut meta_values = MetaValue {
+        status,
+        ..Default::default()
+    };
 
     let mut value = Value {
         key: Vec::new(),
@@ -626,7 +681,7 @@ mod tests {
                 assert_eq!(value.cas, None);
 
                 let meta_values = value.meta_values.as_ref().unwrap();
-                assert_eq!(*meta_values, MetaValue::default());
+                assert_eq!(meta_values.status, Some(Status::NotFound));
             }
             _ => panic!("Expected Response::Data, got something else"),
         }
@@ -672,13 +727,43 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_meta_set_data_value_success_no_flags() {
+    fn test_parse_meta_set_data_value_stored_with_no_flags() {
         let server_response = b"HD\r\n";
         let (remaining, response) = parse_meta_set_data_value(server_response).unwrap();
 
         assert_eq!(remaining, b"\r\n");
 
-        assert_eq!(response, Response::Data(None));
+        assert_eq!(response, Response::Status(Status::Stored));
+    }
+
+    #[test]
+    fn test_parse_meta_set_data_value_not_stored_with_no_flags() {
+        let server_response = b"NS\r\n";
+        let (remaining, response) = parse_meta_set_data_value(server_response).unwrap();
+
+        assert_eq!(remaining, b"\r\n");
+
+        assert_eq!(response, Response::Status(Status::NotStored));
+    }
+
+    #[test]
+    fn test_parse_meta_set_data_value_exists_with_no_flags() {
+        let server_response = b"EX\r\n";
+        let (remaining, response) = parse_meta_set_data_value(server_response).unwrap();
+
+        assert_eq!(remaining, b"\r\n");
+
+        assert_eq!(response, Response::Status(Status::Exists));
+    }
+
+    #[test]
+    fn test_parse_meta_set_data_value_not_found_with_no_flags() {
+        let server_response = b"NF\r\n";
+        let (remaining, response) = parse_meta_set_data_value(server_response).unwrap();
+
+        assert_eq!(remaining, b"\r\n");
+
+        assert_eq!(response, Response::Status(Status::NotFound));
     }
 
     #[test]
@@ -720,7 +805,7 @@ mod tests {
                 assert_eq!(value.cas, None);
 
                 let meta_values = value.meta_values.as_ref().unwrap();
-                assert_eq!(*meta_values, MetaValue::default());
+                assert_eq!(meta_values.status, Some(Status::Stored));
             }
             _ => panic!("Expected Response::Data, got something else"),
         }

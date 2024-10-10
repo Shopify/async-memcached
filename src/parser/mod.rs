@@ -23,9 +23,9 @@ pub struct Value {
     pub key: Vec<u8>,
     /// CAS identifier.
     pub cas: Option<u64>,
+    /// Flags for this key.
     /// NOTE: This is the client bitflags, not meta flags
     /// which is an opaque number passed by the client
-    /// Flags for this key.
     /// Defaults to 0.
     pub flags: Option<u32>,
     /// Data for this key.
@@ -37,9 +37,10 @@ pub struct Value {
     pub meta_values: Option<MetaValue>,
 }
 
-// TODO: Defaults of NONE?
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct MetaValue {
+    /// Status of the operation for set/add/replace commands
+    pub status: Option<Status>,
     /// CAS value (c flag)
     pub cas: Option<u64>,
     /// Client flags (f flag)
