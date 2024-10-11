@@ -12,6 +12,8 @@ pub enum Error {
     /// A protocol-level error i.e. a failed operation or message that
     /// does not match the protocol specification.
     Protocol(Status),
+    /// A parsing error surfaced from nom
+    ParseError(nom::error::ErrorKind),
 }
 
 impl PartialEq for Error {
@@ -40,6 +42,7 @@ impl fmt::Display for Error {
             Self::Connect(e) => write!(f, "connect: {}", e),
             Self::Io(e) => write!(f, "io: {}", e),
             Self::Protocol(e) => write!(f, "protocol: {}", e),
+            Self::ParseError(e) => write!(f, "parse error: {:?}", e),
         }
     }
 }
@@ -53,5 +56,11 @@ impl From<std::io::Error> for Error {
 impl From<Status> for Error {
     fn from(s: Status) -> Self {
         Error::Protocol(s)
+    }
+}
+
+impl From<nom::error::ErrorKind> for Error {
+    fn from(e: nom::error::ErrorKind) -> Self {
+        Error::ParseError(e)
     }
 }

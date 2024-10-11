@@ -6,12 +6,14 @@ use nom::{
         streaming::{crlf, space0, space1},
     },
     combinator::{map, map_res, value},
+    error::ErrorKind::Fail,
     multi::many0,
     sequence::{pair, preceded, terminated, tuple},
     IResult,
 };
 
 use super::{parse_u32, ErrorKind, MetaValue, Response, Status, Value};
+use crate::Error;
 
 // TODO: remove this later in favour of individual parse_meta_*_status methods
 #[allow(dead_code)]
@@ -101,7 +103,8 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
                 meta_values_array,
                 Some(data),
                 Some(Status::Value),
-            );
+            )
+            .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?; // Throw Fail as a generic nom error
 
             Ok((input, Response::Data(Some(vec![value]))))
         }
@@ -118,7 +121,8 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
             // data is empty in this case
             let data = None;
             let value =
-                construct_value_from_meta_values(meta_values_array, data, Some(Status::Exists));
+                construct_value_from_meta_values(meta_values_array, data, Some(Status::Exists))
+                    .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
 
             Ok((input, Response::Data(Some(vec![value]))))
         }
@@ -133,7 +137,8 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
             // data is empty in this case
             let data = None;
             let value =
-                construct_value_from_meta_values(meta_values_array, data, Some(Status::NotFound));
+                construct_value_from_meta_values(meta_values_array, data, Some(Status::NotFound))
+                    .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
 
             Ok((input, Response::Data(Some(vec![value]))))
         }
@@ -152,7 +157,8 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
     match status {
         Response::Status(Status::Stored) => {
             // no value (data block) or size in this case, potentially just flags
-            let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?;
+            let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)
+                .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
 
             // early return if there were no flags passed in
             if meta_values_array.is_empty() {
@@ -162,13 +168,15 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
             // data is empty in this case
             let data = None;
             let value =
-                construct_value_from_meta_values(meta_values_array, data, Some(Status::Stored));
+                construct_value_from_meta_values(meta_values_array, data, Some(Status::Stored))
+                    .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
 
             Ok((input, Response::Data(Some(vec![value]))))
         }
         Response::Status(Status::NotStored) => {
             // no value (data block) or size in this case, potentially just flags
-            let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?;
+            let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)
+                .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
 
             // early return if there were no flags passed in
             if meta_values_array.is_empty() {
@@ -178,7 +186,8 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
             // data is empty in this case
             let data = None;
             let value =
-                construct_value_from_meta_values(meta_values_array, data, Some(Status::NotStored));
+                construct_value_from_meta_values(meta_values_array, data, Some(Status::NotStored))
+                    .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
 
             Ok((input, Response::Data(Some(vec![value]))))
         }
@@ -194,7 +203,8 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
             // data is empty in this case
             let data = None;
             let value =
-                construct_value_from_meta_values(meta_values_array, data, Some(Status::Exists));
+                construct_value_from_meta_values(meta_values_array, data, Some(Status::Exists))
+                    .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
 
             Ok((input, Response::Data(Some(vec![value]))))
         }
@@ -210,7 +220,8 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
             // data is empty in this case
             let data = None;
             let value =
-                construct_value_from_meta_values(meta_values_array, data, Some(Status::NotFound));
+                construct_value_from_meta_values(meta_values_array, data, Some(Status::NotFound))
+                    .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
 
             Ok((input, Response::Data(Some(vec![value]))))
         }
@@ -233,7 +244,10 @@ fn parse_meta_flag_values_as_u32(input: &[u8]) -> IResult<&[u8], Vec<(u8, u32)>>
     many0(pair(
         preceded(space0, map(take(1usize), |s: &[u8]| s[0])),
         map_res(digit1, |s: &[u8]| {
-            std::str::from_utf8(s).unwrap().parse::<u32>()
+            std::str::from_utf8(s)
+                .map_err(|_| Error::ParseError(nom::error::ErrorKind::AlphaNumeric))?
+                .parse::<u32>()
+                .map_err(|_| Error::ParseError(nom::error::ErrorKind::Digit))
         }),
     ))(input)
 }
@@ -253,22 +267,43 @@ fn parse_meta_flag_values_as_slice(input: &[u8]) -> IResult<&[u8], Vec<(u8, &[u8
     }
 }
 
-fn map_meta_flag(flag: u8, meta_value: &[u8], value: &mut Value, meta_values: &mut MetaValue) {
+fn map_meta_flag(
+    flag: u8,
+    meta_value: &[u8],
+    value: &mut Value,
+    meta_values: &mut MetaValue,
+) -> Result<(), crate::Error> {
     match flag {
         b'c' => {
             value.cas = Some(
                 std::str::from_utf8(meta_value)
-                    .expect("Failed to convert c flag to string")
+                    .map_err(|_| {
+                        Error::Protocol(Status::Error(ErrorKind::Generic(
+                            "Failed to parse c flag".to_string(),
+                        )))
+                    })?
                     .parse::<u64>()
-                    .expect("Failed to convert c flag to u64"),
-            )
+                    .map_err(|_| {
+                        Error::Protocol(Status::Error(ErrorKind::Generic(
+                            "Invalid CAS value".to_string(),
+                        )))
+                    })?,
+            );
         }
         b'f' => {
             value.flags = Some(
                 std::str::from_utf8(meta_value)
-                    .expect("Failed to convert f flag to string")
+                    .map_err(|_| {
+                        Error::Protocol(Status::Error(ErrorKind::Generic(
+                            "Failed to parse f flag".to_string(),
+                        )))
+                    })?
                     .parse::<u32>()
-                    .expect("Failed to convert f flag to u32"),
+                    .map_err(|_| {
+                        Error::Protocol(Status::Error(ErrorKind::Generic(
+                            "Invalid client flags value".to_string(),
+                        )))
+                    })?,
             )
         }
         b'h' => {
@@ -280,9 +315,17 @@ fn map_meta_flag(flag: u8, meta_value: &[u8], value: &mut Value, meta_values: &m
         b'l' => {
             meta_values.last_accessed = Some(
                 std::str::from_utf8(meta_value)
-                    .expect("Failed to convert l flag to string")
+                    .map_err(|_| {
+                        Error::Protocol(Status::Error(ErrorKind::Generic(
+                            "Failed to parse l flag".to_string(),
+                        )))
+                    })?
                     .parse::<u64>()
-                    .expect("Failed to convert l flag to u64"),
+                    .map_err(|_| {
+                        Error::Protocol(Status::Error(ErrorKind::Generic(
+                            "Invalid last accessed value".to_string(),
+                        )))
+                    })?,
             )
         }
         b'O' => {
@@ -291,17 +334,33 @@ fn map_meta_flag(flag: u8, meta_value: &[u8], value: &mut Value, meta_values: &m
         b's' => {
             meta_values.size = Some(
                 std::str::from_utf8(meta_value)
-                    .expect("Failed to convert s flag to string")
+                    .map_err(|_| {
+                        Error::Protocol(Status::Error(ErrorKind::Generic(
+                            "Failed to parse s flag".to_string(),
+                        )))
+                    })?
                     .parse::<u64>()
-                    .expect("Failed to convert s flag to u64"),
+                    .map_err(|_| {
+                        Error::Protocol(Status::Error(ErrorKind::Generic(
+                            "Invalid size value".to_string(),
+                        )))
+                    })?,
             )
         }
         b't' => {
             meta_values.ttl_remaining = Some(
                 std::str::from_utf8(meta_value)
-                    .expect("Failed to convert t flag to string")
+                    .map_err(|_| {
+                        Error::Protocol(Status::Error(ErrorKind::Generic(
+                            "Failed to parse t flag".to_string(),
+                        )))
+                    })?
                     .parse::<i64>()
-                    .expect("Failed to convert t flag to i64"),
+                    .map_err(|_| {
+                        Error::Protocol(Status::Error(ErrorKind::Generic(
+                            "Invalid ttl remaining value".to_string(),
+                        )))
+                    })?,
             )
         }
         b'W' => meta_values.is_recache_winner = Some(true),
@@ -309,13 +368,15 @@ fn map_meta_flag(flag: u8, meta_value: &[u8], value: &mut Value, meta_values: &m
         b'X' => meta_values.is_stale = Some(true),
         _ => {}
     }
+
+    Ok(())
 }
 
 fn construct_value_from_meta_values(
     meta_values_array: Vec<(u8, &[u8])>,
     data: Option<&[u8]>,
     status: Option<Status>,
-) -> Value {
+) -> Result<Value, Error> {
     let mut meta_values = MetaValue {
         status,
         ..Default::default()
@@ -330,12 +391,12 @@ fn construct_value_from_meta_values(
     };
 
     for (flag, meta_value) in meta_values_array {
-        map_meta_flag(flag, meta_value, &mut value, &mut meta_values);
+        map_meta_flag(flag, meta_value, &mut value, &mut meta_values)?;
     }
 
     value.meta_values = Some(meta_values);
 
-    value
+    Ok(value)
 }
 
 #[cfg(test)]

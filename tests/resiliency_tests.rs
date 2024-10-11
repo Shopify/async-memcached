@@ -140,7 +140,7 @@ async fn clear_keys(client: &mut Client, keys: &[&str]) {
 
 fn setup_runtime_and_clients(
     toxic_local_url: &String,
-    keys: &Vec<&str>,
+    keys: &[&str],
 ) -> (tokio::runtime::Runtime, Client, Client) {
     let rt = setup_runtime();
     let mut clean_client = rt.block_on(setup_clean_client());
