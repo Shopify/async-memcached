@@ -233,8 +233,6 @@ impl Client {
         key: K,
         meta_flags: Option<&[&str]>,
     ) -> Result<Option<Value>, Error> {
-        println!("meta_get: {:?}", key.as_ref());
-        println!("meta_get: {:?}", meta_flags);
         self.conn.write_all(b"mg ").await?;
         self.conn
             .write_all(Self::validate_key_length(key.as_ref())?)
@@ -248,10 +246,7 @@ impl Client {
 
         match self.drive_receive(parse_meta_get_response).await? {
             Response::Status(Status::NotFound) => Ok(None),
-            Response::Status(s) => {
-                println!("error here? meta_get: {:?}", s);
-                Err(s.into())
-            }
+            Response::Status(s) => Err(s.into()),
             Response::Data(d) => d
                 .map(|mut items| {
                     if items.len() != 1 {
@@ -263,10 +258,7 @@ impl Client {
                     }
                 })
                 .transpose(),
-            _ => {
-                println!("error in catchall?");
-                Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None))))
-            }
+            _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),
         }
     }
 
@@ -410,7 +402,6 @@ impl Client {
 
         command.extend_from_slice(b"\r\n");
         self.conn.write_all(&command).await?;
-        println!("command: {:?}", String::from_utf8_lossy(&command));
         self.conn.write_all(vr.as_ref()).await?;
         self.conn.write_all(b"\r\n").await?;
         self.conn.flush().await?;
