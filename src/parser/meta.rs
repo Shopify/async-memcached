@@ -2,7 +2,7 @@ use nom::{
     branch::alt,
     bytes::streaming::{tag, take, take_while1},
     character::streaming::{crlf, space1},
-    combinator::{map, value},
+    combinator::{map, opt, value},
     error::ErrorKind::Fail,
     multi::many0,
     sequence::tuple,
@@ -86,10 +86,10 @@ pub fn parse_meta_set_response(buf: &[u8]) -> Result<Option<(usize, Response)>, 
 // }
 fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
     let (input, status) = parse_meta_get_status(buf)?; // removes <CD> response code from the input
+
     match status {
         // match arm for "VA " response when v flag is used
         Response::Status(Status::Value) => {
-            println!("parse_meta_get_data_value: VA response");
             let (input, size) = parse_u32(input)?; // parses the size of the data from the input
             let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?; // parses the flags from the input
             let (input, _) = crlf(input)?; // removes the leading crlf from the data block
@@ -125,7 +125,6 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
         }
         // match arm for "EN" response
         Response::Status(Status::NotFound) => {
-            println!("parse_meta_get_data_value: EN response");
             let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?;
             let (input, _) = crlf(input)?; // consume the trailing crlf and leave the buffer empty
 
@@ -153,24 +152,18 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
     }
 }
 
-#[allow(dead_code)]
 fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
     let (input, status) = parse_meta_set_status(buf)?;
     match status {
         // match arm for "HD" response
         Response::Status(Status::Stored) => {
-            println!("parse_meta_set_data_value: HD response");
             // no value (data block) or size in this case, potentially just flags
             let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)
                 .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
-            println!("meta_values_array: {:?}", meta_values_array);
-            println!("input: {:?}", std::str::from_utf8(input).unwrap());
             let (input, _) = crlf(input)?; // consume the trailing crlf and leave the buffer empty
 
-            println!("input after crlf: {:?}", std::str::from_utf8(input).unwrap());
             // early return if there were no flags passed in
             if meta_values_array.is_empty() {
-                println!("meta_values_array is empty, returning HD response");
                 return Ok((input, Response::Status(Status::Stored)));
             }
 
@@ -184,7 +177,6 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
         }
         // match arm for "NS" response
         Response::Status(Status::NotStored) => {
-            println!("parse_meta_set_data_value: NS response");
             // no value (data block) or size in this case, potentially just flags
             let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)
                 .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
@@ -205,7 +197,6 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
         }
         // match arm for "EX" response
         Response::Status(Status::Exists) => {
-            println!("parse_meta_set_data_value: EX response");
             // no value (data block) or size in this case, potentially just flags
             let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?;
             let (input, _) = crlf(input)?; // consume the trailing crlf and leave the buffer empty
@@ -225,7 +216,6 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
         }
         // match arm for "NF" response
         Response::Status(Status::NotFound) => {
-            println!("parse_meta_set_data_value: NF response");
             // no value (data block) or size in this case, potentially just flags
             let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?;
             let (input, _) = crlf(input)?; // consume the trailing crlf and leave the buffer empty
@@ -270,7 +260,8 @@ pub fn take_until_size(buf: &[u8], byte_size: u32) -> IResult<&[u8], &[u8]> {
     Ok((remaining, extracted))
 }
 
-fn parse_meta_flag_values_as_slice(input: &[u8]) -> IResult<&[u8], Vec<(u8, &[u8])>> {
+#[allow(clippy::type_complexity)]
+fn parse_meta_flag_values_as_slice(input: &[u8]) -> IResult<&[u8], Vec<(u8, Option<&[u8]>)>> {
     if input.is_empty() || input == b"\r\n" {
         Ok((input, Vec::new()))
     } else {
@@ -278,7 +269,7 @@ fn parse_meta_flag_values_as_slice(input: &[u8]) -> IResult<&[u8], Vec<(u8, &[u8
             tuple((
                 space1,
                 map(take(1usize), |s: &[u8]| s[0]),
-                take_while1(|c: u8| c != b'\r' && c != b' '), // finding a space means more flags, finding \r means end of flags
+                opt(take_while1(|c: u8| c != b'\r' && c != b' ')), // finding a space means more flags, finding \r means end of flags
             )),
             |(_, flag, value)| (flag, value),
         ))(input)
@@ -391,7 +382,7 @@ fn map_meta_flag(
 }
 
 fn construct_value_from_meta_values(
-    meta_values_array: Vec<(u8, &[u8])>,
+    meta_values_array: Vec<(u8, Option<&[u8]>)>,
     data: Option<&[u8]>,
     status: Option<Status>,
 ) -> Result<Value, Error> {
@@ -399,6 +390,11 @@ fn construct_value_from_meta_values(
         status,
         ..Default::default()
     };
+
+    let meta_values_array: Vec<(u8, &[u8])> = meta_values_array
+        .iter()
+        .map(|(flag, value)| (*flag, value.unwrap_or_default()))
+        .collect();
 
     let mut value = Value {
         key: Vec::new(),
@@ -445,7 +441,7 @@ mod tests {
         let (remaining, result) = parse_meta_flag_values_as_slice(input).unwrap();
 
         let token: &[u8] = "opaque-token".as_bytes();
-        assert_eq!(result, vec![(b'O', token)]);
+        assert_eq!(result, vec![(b'O', Some(token))]);
         assert_eq!(remaining, b"\r\n");
     }
 
@@ -457,10 +453,10 @@ mod tests {
         assert_eq!(
             result,
             vec![
-                (b'h', b"1".as_ref()),
-                (b'l', b"1".as_ref()),
-                (b't', b"123".as_ref()),
-                (b'O', b"opaque-token".as_ref())
+                (b'h', Some(b"1".as_ref())),
+                (b'l', Some(b"1".as_ref())),
+                (b't', Some(b"123".as_ref())),
+                (b'O', Some(b"opaque-token".as_ref()))
             ]
         );
         assert_eq!(remaining, b"\r\n");
@@ -474,9 +470,9 @@ mod tests {
         assert_eq!(
             result,
             vec![
-                (b't', b"2179".as_ref()),
-                (b'h', b"1".as_ref()),
-                (b'l', b"56".as_ref()),
+                (b't', Some(b"2179".as_ref())),
+                (b'h', Some(b"1".as_ref())),
+                (b'l', Some(b"56".as_ref())),
             ]
         );
         assert_eq!(remaining, b"\r\ntest-value\r\n");
@@ -490,10 +486,10 @@ mod tests {
         assert_eq!(
             result,
             vec![
-                (b'h', b"1".as_ref()),
-                (b'l', b"56".as_ref()),
-                (b't', b"2179".as_ref()),
-                (b'x', b"100".as_ref()),
+                (b'h', Some(b"1".as_ref())),
+                (b'l', Some(b"56".as_ref())),
+                (b't', Some(b"2179".as_ref())),
+                (b'x', Some(b"100".as_ref())),
             ]
         );
         assert_eq!(remaining, b"\r\ntest-value\r\n");

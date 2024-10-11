@@ -425,7 +425,6 @@ impl Client {
 
         command.extend_from_slice(b"\r\n");
         self.conn.write_all(&command).await?;
-        println!("command: {:?}", String::from_utf8_lossy(&command));
         self.conn.write_all(vr.as_ref()).await?;
         self.conn.write_all(b"\r\n").await?;
         self.conn.flush().await?;
