@@ -109,35 +109,6 @@ fn bench_meta_get_large(c: &mut Criterion) {
     });
 }
 
-fn bench_meta_get_concat(c: &mut Criterion) {
-    let rt = Runtime::new().unwrap();
-
-    let key = "a".repeat(MAX_KEY_LENGTH);
-    let value = "b".repeat(LARGE_PAYLOAD_SIZE);
-
-    rt.block_on(async {
-        let mut client = setup_client().await;
-        client.set(&key, &value, None, None).await.unwrap();
-    });
-
-    c.bench_function("bench meta_get_concat", |b| {
-        let key_clone = key.clone();
-        b.to_async(&rt).iter_custom(move |iters| {
-            let key = key_clone.clone();
-            async move {
-                let mut client = setup_client().await;
-                let start = std::time::Instant::now();
-                for _ in 0..iters {
-                    let _ = client
-                        .meta_get_concat(&key, Some(&["v", "h", "t", "l"]))
-                        .await;
-                }
-                start.elapsed()
-            }
-        })
-    });
-}
-
 fn bench_set_with_small_string(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
 
@@ -389,7 +360,6 @@ criterion_group!(
     bench_get_large,
     bench_meta_get_small,
     bench_meta_get_large,
-    bench_meta_get_concat,
     bench_get_multi,
     bench_get_many_large,
     bench_set_with_small_string,

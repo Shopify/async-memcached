@@ -52,7 +52,7 @@ pub fn parse_meta_get_response(buf: &[u8]) -> Result<Option<(usize, Response)>, 
 pub fn parse_meta_set_response(buf: &[u8]) -> Result<Option<(usize, Response)>, ErrorKind> {
     let bufn = buf.len();
 
-    let result = parse_meta_get_data_value(buf);
+    let result = parse_meta_set_data_value(buf);
 
     match result {
         Ok((left, response)) => {
