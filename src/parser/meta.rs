@@ -3,6 +3,7 @@ use nom::{
     bytes::streaming::{tag, take, take_while1},
     character::streaming::{crlf, space1},
     combinator::{map, value},
+    error::ErrorKind::Fail,
     multi::many0,
     sequence::tuple,
     IResult,
@@ -11,20 +12,7 @@ use nom::{
 use super::{parse_u32, ErrorKind, MetaValue, Response, Status, Value};
 use crate::Error;
 
-// // TODO: remove this later in favour of individual parse_meta_*_status methods]
-// pub fn parse_meta_status(buf: &[u8]) -> IResult<&[u8], Response> {
-//     terminated(
-//         alt((
-//             value(Response::Status(Status::NotStored), tag(b"NS")),
-//             value(Response::Status(Status::Deleted), tag(b"DE")),
-//             value(Response::Status(Status::Touched), tag(b"TO")),
-//             value(Response::Status(Status::Exists), tag(b"EX")),
-//             value(Response::Status(Status::NotFound), tag(b"NF")),
-//         )),
-//         crlf,
-//     )(buf)
-// }
-
+#[allow(dead_code)]
 pub fn parse_meta_set_status(buf: &[u8]) -> IResult<&[u8], Response> {
     alt((
         value(Response::Status(Status::Stored), tag(b"HD")),
@@ -42,16 +30,28 @@ pub fn parse_meta_get_status(buf: &[u8]) -> IResult<&[u8], Response> {
     ))(buf)
 }
 
-// TODO: refactor this into individual parse_meta_*_response methods
-pub fn parse_meta_response(buf: &[u8]) -> Result<Option<(usize, Response)>, ErrorKind> {
+pub fn parse_meta_get_response(buf: &[u8]) -> Result<Option<(usize, Response)>, ErrorKind> {
     let bufn = buf.len();
-    // TODO: alt calls parsers sequentially until one succeeds, which is not optimal.  Want to only call the correct parser, no sequencing.
-    // Also run the risk of hitting the wrong parser since there is overlap in response codes.
-    let result = alt((
-        // parse_meta_status,
-        |input| parse_meta_get_data_value(input),
-        |input| parse_meta_set_data_value(input),
-    ))(buf);
+
+    let result = parse_meta_get_data_value(buf);
+
+    match result {
+        Ok((left, response)) => {
+            let n = bufn - left.len();
+            Ok(Some((n, response)))
+        }
+        Err(nom::Err::Incomplete(_)) => Ok(None),
+        Err(nom::Err::Error(e)) | Err(nom::Err::Failure(e)) => {
+            Err(ErrorKind::Protocol(Some(e.code.description().to_string())))
+        }
+    }
+}
+
+#[allow(dead_code)]
+pub fn parse_meta_set_response(buf: &[u8]) -> Result<Option<(usize, Response)>, ErrorKind> {
+    let bufn = buf.len();
+
+    let result = parse_meta_get_data_value(buf);
 
     match result {
         Ok((left, response)) => {
@@ -148,6 +148,7 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
     }
 }
 
+#[allow(dead_code)]
 fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
     let (input, status) = parse_meta_set_status(buf)?;
     match status {
@@ -237,19 +238,6 @@ pub fn take_until_size(buf: &[u8], byte_size: u32) -> IResult<&[u8], &[u8]> {
     let (remaining, _) = tag("\r\n")(remaining)?; // consume the trailing \r\n to ensure the buffer is empty
 
     Ok((remaining, &buf[..byte_size as usize]))
-}
-
-#[allow(dead_code)]
-fn parse_meta_flag_values_as_u32(input: &[u8]) -> IResult<&[u8], Vec<(u8, u32)>> {
-    many0(pair(
-        preceded(space0, map(take(1usize), |s: &[u8]| s[0])),
-        map_res(digit1, |s: &[u8]| {
-            std::str::from_utf8(s)
-                .map_err(|_| Error::ParseError(nom::error::ErrorKind::AlphaNumeric))?
-                .parse::<u32>()
-                .map_err(|_| Error::ParseError(nom::error::ErrorKind::Digit))
-        }),
-    ))(input)
 }
 
 fn parse_meta_flag_values_as_slice(input: &[u8]) -> IResult<&[u8], Vec<(u8, &[u8])>> {

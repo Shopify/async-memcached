@@ -14,7 +14,7 @@ pub use self::error::Error;
 mod parser;
 use self::parser::{
     parse_ascii_metadump_response, parse_ascii_response, parse_ascii_stats_response,
-    parse_meta_response,
+    parse_meta_get_response,
 };
 pub use self::parser::{
     ErrorKind, KeyMetadata, MetadumpResponse, Response, StatsResponse, Status, Value,
@@ -243,7 +243,7 @@ impl Client {
         self.conn.write_all(b"\r\n").await?;
         self.conn.flush().await?;
 
-        match self.drive_receive(parse_meta_response).await? {
+        match self.drive_receive(parse_meta_get_response).await? {
             Response::Status(Status::NotFound) => Ok(None),
             Response::Status(s) => Err(s.into()),
             Response::Data(d) => d
@@ -289,7 +289,7 @@ impl Client {
         self.conn.write_all(&command).await?;
         self.conn.flush().await?;
 
-        match self.drive_receive(parse_meta_response).await? {
+        match self.drive_receive(parse_meta_get_response).await? {
             Response::Status(Status::NotFound) => Ok(None),
             Response::Status(s) => Err(s.into()),
             Response::Data(d) => d
