@@ -99,7 +99,7 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
 
             let value = construct_value_from_meta_values(
                 meta_values_array,
-                Some(&data),
+                Some(data),
                 Some(Status::Value),
             );
 
@@ -221,24 +221,11 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
     }
 }
 
-pub fn take_until_size(mut buf: &[u8], byte_size: u32) -> IResult<&[u8], Vec<u8>> {
-    let mut data = Vec::with_capacity(byte_size as usize);
-    while (data.len() as u32) < byte_size {
-        let (remaining, chunk) = take_while1(|c| c != b'\r')(buf)?;
-        data.extend_from_slice(chunk);
-        buf = remaining;
-        if data.len() as u32 == byte_size {
-            // break out of the loop
-            break;
-        } else {
-            let (remaining, chunk) = tag("\r\n")(buf)?;
-            data.extend_from_slice(chunk);
-            buf = remaining;
-        }
-    }
-    // If we have reached byte_size, consume '\r\n' and return the data
-    let (buf, _) = tag("\r\n")(buf)?;
-    Ok((buf, data))
+pub fn take_until_size(buf: &[u8], byte_size: u32) -> IResult<&[u8], &[u8]> {
+    let remaining = &buf[byte_size as usize..];
+    let (remaining, _) = tag("\r\n")(remaining)?; // consume the trailing \r\n to ensure the buffer is empty
+
+    Ok((remaining, &buf[..byte_size as usize]))
 }
 
 #[allow(dead_code)]
@@ -697,6 +684,7 @@ mod tests {
     // https://github.com/memcached/memcached/blob/master/doc/protocol.txt
     #[test]
     fn test_parse_meta_get_data_value_handles_data_with_embedded_crlf() {
+        // full crlf in value
         let input = b"VA 12 h1 l56 t2179\r\ntest-\r\nvalue\r\n";
         let (remaining, response) = parse_meta_get_data_value(input).unwrap();
 
@@ -713,6 +701,70 @@ mod tests {
                 assert_eq!(
                     str::from_utf8(value.data.as_ref().unwrap()).unwrap(),
                     "test-\r\nvalue"
+                );
+                assert_eq!(value.flags, Some(0));
+                assert_eq!(value.cas, None);
+
+                let meta_values = value.meta_values.as_ref().unwrap();
+                assert_eq!(meta_values.hit_before, Some(true));
+                assert_eq!(meta_values.last_accessed, Some(56));
+                assert_eq!(meta_values.ttl_remaining, Some(2179));
+            }
+            _ => panic!("Expected Response::Data, got something else"),
+        }
+    }
+
+    #[test]
+    fn test_parse_meta_get_data_value_handles_data_with_embedded_cr_followed_by_nl() {
+        // \r followed by \n in value
+        let input = b"VA 12 h1 l56 t2179\r\ntest\r-\nvalue\r\n";
+        let (remaining, response) = parse_meta_get_data_value(input).unwrap();
+
+        assert_eq!(
+            remaining,
+            b"",
+            "Remaining input should be empty but was {:?}",
+            str::from_utf8(remaining).unwrap()
+        );
+        match response {
+            Response::Data(Some(values)) => {
+                assert_eq!(values.len(), 1);
+                let value = &values[0];
+                assert_eq!(
+                    str::from_utf8(value.data.as_ref().unwrap()).unwrap(),
+                    "test\r-\nvalue"
+                );
+                assert_eq!(value.flags, Some(0));
+                assert_eq!(value.cas, None);
+
+                let meta_values = value.meta_values.as_ref().unwrap();
+                assert_eq!(meta_values.hit_before, Some(true));
+                assert_eq!(meta_values.last_accessed, Some(56));
+                assert_eq!(meta_values.ttl_remaining, Some(2179));
+            }
+            _ => panic!("Expected Response::Data, got something else"),
+        }
+    }
+
+    #[test]
+    fn test_parse_meta_get_data_value_handles_data_with_embedded_nl_followed_by_cr() {
+        // \n followed by \r in value
+        let input = b"VA 12 h1 l56 t2179\r\ntest\n-\rvalue\r\n";
+        let (remaining, response) = parse_meta_get_data_value(input).unwrap();
+
+        assert_eq!(
+            remaining,
+            b"",
+            "Remaining input should be empty but was {:?}",
+            str::from_utf8(remaining).unwrap()
+        );
+        match response {
+            Response::Data(Some(values)) => {
+                assert_eq!(values.len(), 1);
+                let value = &values[0];
+                assert_eq!(
+                    str::from_utf8(value.data.as_ref().unwrap()).unwrap(),
+                    "test\n-\rvalue"
                 );
                 assert_eq!(value.flags, Some(0));
                 assert_eq!(value.cas, None);

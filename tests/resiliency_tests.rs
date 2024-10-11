@@ -146,7 +146,7 @@ fn setup_runtime_and_clients(
     let mut clean_client = rt.block_on(setup_clean_client());
     let toxic_client = rt.block_on(setup_toxic_client(toxic_local_url));
 
-    rt.block_on(clear_keys(&mut clean_client, &keys));
+    rt.block_on(clear_keys(&mut clean_client, keys));
 
     (rt, clean_client, toxic_client)
 }
