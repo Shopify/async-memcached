@@ -9,6 +9,8 @@ use nom::{
     IResult,
 };
 
+use std::num::NonZero;
+
 use super::{parse_u32, ErrorKind, MetaValue, Response, Status, Value};
 use crate::Error;
 
@@ -32,7 +34,6 @@ pub fn parse_meta_get_status(buf: &[u8]) -> IResult<&[u8], Response> {
 
 pub fn parse_meta_get_response(buf: &[u8]) -> Result<Option<(usize, Response)>, ErrorKind> {
     let bufn = buf.len();
-
     let result = parse_meta_get_data_value(buf);
 
     match result {
@@ -234,10 +235,23 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
 }
 
 pub fn take_until_size(buf: &[u8], byte_size: u32) -> IResult<&[u8], &[u8]> {
-    let remaining = &buf[byte_size as usize..];
-    let (remaining, _) = tag("\r\n")(remaining)?; // consume the trailing \r\n to ensure the buffer is empty
+    let size = byte_size as usize;
 
-    Ok((remaining, &buf[..byte_size as usize]))
+    // Check if the buffer has enough bytes for the data and the trailing "\r\n"
+    if buf.len() < size {
+        // Not enough data yet; request more
+        return Err(nom::Err::Incomplete(nom::Needed::Size(
+            NonZero::new(size).unwrap(),
+        )));
+    }
+
+    // Slice the buffer to extract the data
+    let (extracted, remaining) = buf.split_at(size);
+
+    // Ensure the remaining buffer starts with "\r\n"
+    let (remaining, _) = tag("\r\n")(remaining)?;
+
+    Ok((remaining, extracted))
 }
 
 fn parse_meta_flag_values_as_slice(input: &[u8]) -> IResult<&[u8], Vec<(u8, &[u8])>> {

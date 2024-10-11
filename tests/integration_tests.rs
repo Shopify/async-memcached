@@ -5,7 +5,7 @@ use serial_test::{parallel, serial};
 // NOTE: Each test should run with keys unique to that test to avoid async conflicts.  Because these tests run concurrently,
 // it's possible to delete/overwrite keys created by another test before they're read.
 
-const LARGE_PAYLOAD_SIZE: usize = 1024 * 1024; // 1 MB, default memcached max value size
+const LARGE_PAYLOAD_SIZE: usize = 1000 * 1024; // 1 MB, default memcached max value size
 const MAX_KEY_LENGTH: usize = 250; // 250 bytes, default memcached max key length
 
 async fn setup_client(keys: &[&str]) -> Client {
@@ -117,6 +117,29 @@ async fn test_meta_get_with_only_v_flag() {
     let mut client = setup_client(&[key]).await;
 
     client.set(key, value, None, None).await.unwrap();
+
+    let flags = ["v"];
+    let result = client.meta_get(key, Some(&flags)).await.unwrap();
+
+    assert!(result.is_some());
+    let result_meta_value = result.unwrap();
+
+    assert_eq!(
+        String::from_utf8(result_meta_value.data.unwrap()).unwrap(),
+        value
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_get_with_large_key_and_value_item() {
+    let key = "a".repeat(MAX_KEY_LENGTH);
+    let value = "b".repeat(LARGE_PAYLOAD_SIZE);
+
+    let mut client = setup_client(&[&key]).await;
+
+    client.set(&key, &value, None, None).await.unwrap();
 
     let flags = ["v"];
     let result = client.meta_get(key, Some(&flags)).await.unwrap();

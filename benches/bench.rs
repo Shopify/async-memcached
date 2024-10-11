@@ -4,6 +4,7 @@ use tokio::runtime::Runtime;
 
 use std::env;
 
+const MAX_KEY_LENGTH: usize = 250;
 const LARGE_PAYLOAD_SIZE: usize = 1000 * 1024; // Memcached's ~default maximum payload size
 
 async fn setup_client() -> Client {
@@ -14,7 +15,7 @@ async fn setup_client() -> Client {
         .expect("failed to create client")
 }
 
-fn bench_get(c: &mut Criterion) {
+fn bench_get_small(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
 
     rt.block_on(async {
@@ -22,19 +23,46 @@ fn bench_get(c: &mut Criterion) {
         client.set("foo", "bar", None, None).await.unwrap();
     });
 
-    c.bench_function("get_small", |b| {
-        b.to_async(&rt).iter_custom(|iters| async move {
+    c.bench_function("bench ascii get small key and small value", |b| {
+        b.to_async(&rt).iter_custom(move |iters| async move {
             let mut client = setup_client().await;
             let start = std::time::Instant::now();
             for _ in 0..iters {
                 let _ = client.get("foo").await;
             }
             start.elapsed()
-        });
+        })
     });
 }
 
-fn bench_meta_get(c: &mut Criterion) {
+fn bench_get_large(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+
+    let key = "a".repeat(MAX_KEY_LENGTH);
+    let value = "b".repeat(LARGE_PAYLOAD_SIZE);
+
+    rt.block_on(async {
+        let mut client = setup_client().await;
+        client.set(&key, &value, None, None).await.unwrap();
+    });
+
+    c.bench_function("bench ascii get", |b| {
+        let key_clone = key.clone();
+        b.to_async(&rt).iter_custom(move |iters| {
+            let key = key_clone.clone();
+            async move {
+                let mut client = setup_client().await;
+                let start = std::time::Instant::now();
+                for _ in 0..iters {
+                    let _ = client.get(&key).await;
+                }
+                start.elapsed()
+            }
+        })
+    });
+}
+
+fn bench_meta_get_small(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
 
     rt.block_on(async {
@@ -42,37 +70,71 @@ fn bench_meta_get(c: &mut Criterion) {
         client.set("foo", "bar", None, None).await.unwrap();
     });
 
-    c.bench_function("bench meta_get", |b| {
-        b.to_async(&rt).iter_custom(|iters| async move {
+    c.bench_function("bench meta_get with small key and small value", |b| {
+        b.to_async(&rt).iter_custom(move |iters| async move {
             let mut client = setup_client().await;
             let start = std::time::Instant::now();
             for _ in 0..iters {
                 let _ = client.meta_get("foo", Some(&["v", "h", "t", "l"])).await;
             }
             start.elapsed()
-        });
+        })
+    });
+}
+
+fn bench_meta_get_large(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+
+    let key = "a".repeat(MAX_KEY_LENGTH);
+    let value = "b".repeat(LARGE_PAYLOAD_SIZE);
+
+    rt.block_on(async {
+        let mut client = setup_client().await;
+        client.set(&key, &value, None, None).await.unwrap();
+    });
+
+    c.bench_function("bench meta_get with large key and large value", |b| {
+        let key_clone = key.clone();
+        b.to_async(&rt).iter_custom(move |iters| {
+            let key = key_clone.clone();
+            async move {
+                let mut client = setup_client().await;
+                let start = std::time::Instant::now();
+                for _ in 0..iters {
+                    let _ = client.meta_get(&key, Some(&["v", "h", "t", "l"])).await;
+                }
+                start.elapsed()
+            }
+        })
     });
 }
 
 fn bench_meta_get_concat(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
 
+    let key = "a".repeat(MAX_KEY_LENGTH);
+    let value = "b".repeat(LARGE_PAYLOAD_SIZE);
+
     rt.block_on(async {
         let mut client = setup_client().await;
-        client.set("foo", "bar", None, None).await.unwrap();
+        client.set(&key, &value, None, None).await.unwrap();
     });
 
     c.bench_function("bench meta_get_concat", |b| {
-        b.to_async(&rt).iter_custom(|iters| async move {
-            let mut client = setup_client().await;
-            let start = std::time::Instant::now();
-            for _ in 0..iters {
-                let _ = client
-                    .meta_get_concat("foo", Some(&["v", "h", "t", "l"]))
-                    .await;
+        let key_clone = key.clone();
+        b.to_async(&rt).iter_custom(move |iters| {
+            let key = key_clone.clone();
+            async move {
+                let mut client = setup_client().await;
+                let start = std::time::Instant::now();
+                for _ in 0..iters {
+                    let _ = client
+                        .meta_get_concat(&key, Some(&["v", "h", "t", "l"]))
+                        .await;
+                }
+                start.elapsed()
             }
-            start.elapsed()
-        });
+        })
     });
 }
 
@@ -211,30 +273,6 @@ fn bench_set_multi_small_strings(c: &mut Criterion) {
     });
 }
 
-fn bench_get_large(c: &mut Criterion) {
-    let rt = Runtime::new().unwrap();
-    let large_payload = "a".repeat(LARGE_PAYLOAD_SIZE);
-
-    rt.block_on(async {
-        let mut client = setup_client().await;
-        client
-            .set("large_foo", large_payload.as_str(), None, None)
-            .await
-            .unwrap();
-    });
-
-    c.bench_function("get_large", |b| {
-        b.to_async(&rt).iter_custom(|iters| async move {
-            let mut client = setup_client().await;
-            let start = std::time::Instant::now();
-            for _ in 0..iters {
-                let _ = client.get("large_foo").await;
-            }
-            start.elapsed()
-        });
-    });
-}
-
 fn bench_get_many_large(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
     let large_payload = "a".repeat(LARGE_PAYLOAD_SIZE);
@@ -347,11 +385,12 @@ fn bench_decrement_no_reply(c: &mut Criterion) {
 
 criterion_group!(
     benches,
-    bench_get,
-    bench_meta_get,
+    bench_get_small,
+    bench_get_large,
+    bench_meta_get_small,
+    bench_meta_get_large,
     bench_meta_get_concat,
     bench_get_multi,
-    bench_get_large,
     bench_get_many_large,
     bench_set_with_small_string,
     bench_set_with_large_string,
