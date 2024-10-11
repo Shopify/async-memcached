@@ -140,13 +140,13 @@ async fn clear_keys(client: &mut Client, keys: &[&str]) {
 
 fn setup_runtime_and_clients(
     toxic_local_url: &String,
-    keys: &Vec<&str>,
+    keys: &[&str],
 ) -> (tokio::runtime::Runtime, Client, Client) {
     let rt = setup_runtime();
     let mut clean_client = rt.block_on(setup_clean_client());
     let toxic_client = rt.block_on(setup_toxic_client(toxic_local_url));
 
-    rt.block_on(clear_keys(&mut clean_client, &keys));
+    rt.block_on(clear_keys(&mut clean_client, keys));
 
     (rt, clean_client, toxic_client)
 }
@@ -249,6 +249,7 @@ mod tests {
                     .expect("should have unwrapped a Result")
                     .expect("should have unwrapped an Option")
                     .data
+                    .unwrap()
             )
             .expect("failed to parse string from bytes"),
             "value1"
@@ -261,6 +262,7 @@ mod tests {
                     .expect("should have unwrapped a Result")
                     .expect("should have unwrapped an Option")
                     .data
+                    .unwrap()
             )
             .expect("failed to parse string from bytes"),
             "value2"
@@ -313,6 +315,7 @@ mod tests {
                         .expect("should have unwrapped a Result")
                         .expect("should have unwrapped an Option")
                         .data
+                        .unwrap()
                 )
                 .expect("failed to parse string from bytes"),
                 _expected_value

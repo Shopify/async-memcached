@@ -242,7 +242,7 @@ async fn test_add_multi_with_a_key_that_already_exists() {
     // the get result for the preset key should be the original value that it was set with
     // not the new value from the add_multi call
     assert_eq!(
-        std::str::from_utf8(&get_result.unwrap().unwrap().data)
+        std::str::from_utf8(&get_result.unwrap().unwrap().data.unwrap())
             .expect("failed to parse string from bytes"),
         "original-value"
     );
@@ -276,6 +276,7 @@ async fn test_set_with_string_value() {
                 .expect("should have unwrapped a Result")
                 .expect("should have unwrapped an Option")
                 .data
+                .unwrap()
         )
         .expect("failed to parse String from bytes"),
         value
@@ -308,6 +309,7 @@ async fn test_set_with_string_ref_value() {
                 .expect("should have unwrapped a Result")
                 .expect("should have unwrapped an Option")
                 .data
+                .unwrap()
         )
         .expect("failed to parse String from bytes"),
         value
@@ -337,6 +339,7 @@ async fn test_set_with_u64_value() {
                 .expect("should have unwrapped a Result")
                 .expect("should have unwrapped an Option")
                 .data
+                .unwrap()
         )
         .expect("couldn't parse data from bytes to integer")
     );
@@ -401,7 +404,7 @@ async fn test_set_fails_with_value_too_large() {
 #[parallel]
 async fn test_get_multi() {
     let keys = vec!["mg-key1", "mg-key2", "mg-key3"];
-    let values = vec!["value1", "value2", "value3"];
+    let values = ["value1", "value2", "value3"];
 
     let mut client = setup_client(&keys).await;
 
@@ -426,7 +429,7 @@ async fn test_get_multi() {
 #[parallel]
 async fn test_get_multi_with_nonexistent_key() {
     let mut keys = vec!["mgne-key1", "mgne-key2", "mgne-key3"];
-    let values = vec!["value1", "value2", "value3"];
+    let values = ["value1", "value2", "value3"];
 
     let original_keys_length = keys.len();
 
@@ -462,7 +465,7 @@ async fn test_get_multi_with_nonexistent_key() {
 #[parallel]
 async fn test_get_multi_skips_key_too_long() {
     let mut keys = vec!["mgktl-key1", "mgktl-key2", "mgktl-key3"];
-    let values = vec!["value1", "value2", "value3"];
+    let values = ["value1", "value2", "value3"];
 
     let mut client = setup_client(&keys).await;
 
@@ -497,7 +500,7 @@ async fn test_get_multi_skips_key_too_long() {
 #[parallel]
 async fn test_get_many_aliases_get_multi_properly() {
     let keys = vec!["get-many-key1", "get-many-key2", "get-many-key3"];
-    let values = vec!["value1", "value2", "value3"];
+    let values = ["value1", "value2", "value3"];
 
     let mut client = setup_client(&keys).await;
 
@@ -549,7 +552,7 @@ async fn test_delete() {
 
     match get_result {
         Some(get_value) => assert_eq!(
-            String::from_utf8(get_value.data).expect("failed to parse a string"),
+            String::from_utf8(get_value.data.unwrap()).expect("failed to parse a string"),
             value.to_string()
         ),
         None => panic!("failed to get {}", key),
@@ -591,7 +594,7 @@ async fn test_delete_no_reply() {
 
     match get_result {
         Some(get_value) => assert_eq!(
-            String::from_utf8(get_value.data).expect("failed to parse a string"),
+            String::from_utf8(get_value.data.unwrap()).expect("failed to parse a string"),
             value
         ),
         None => panic!("failed to get {}", key),
@@ -649,6 +652,7 @@ async fn test_set_multi_with_string_values() {
                 .expect("should have unwrapped a Result")
                 .expect("should have unwrapped an Option")
                 .data
+                .unwrap()
         )
         .expect("failed to parse string from bytes"),
         "value2"
@@ -746,7 +750,7 @@ async fn test_set_multi_with_string_values_that_exceed_max_size() {
     // Check a small value to make sure it was cached properly - key0 is never chosen to be a large value
     let small_result = client.get("multi-key0").await;
     assert!(matches!(
-        std::str::from_utf8(&small_result.unwrap().unwrap().data)
+        std::str::from_utf8(&small_result.unwrap().unwrap().data.unwrap())
             .expect("failed to parse string from bytes"),
         "value0"
     ));
@@ -772,7 +776,7 @@ async fn test_set_multi_with_string_values_that_exceed_max_size() {
             );
             let get_result = client.get(key.as_str()).await.unwrap().unwrap();
             assert_eq!(
-                std::str::from_utf8(&get_result.data).unwrap(),
+                std::str::from_utf8(&get_result.data.unwrap()).unwrap(),
                 format!("value{}", i),
                 "Mismatch for key {}",
                 key
@@ -925,7 +929,7 @@ async fn test_increments_existing_key_with_no_reply() {
 
     assert_eq!(
         value + amount,
-        btoi::btoi::<u64>(&result.unwrap().unwrap().data)
+        btoi::btoi::<u64>(&result.unwrap().unwrap().data.unwrap())
             .expect("couldn't parse data from bytes to integer")
     );
 }
@@ -1005,7 +1009,7 @@ async fn test_decrements_existing_key_with_no_reply() {
 
     assert_eq!(
         value - amount,
-        btoi::btoi::<u64>(&result.unwrap().unwrap().data)
+        btoi::btoi::<u64>(&result.unwrap().unwrap().data.unwrap())
             .expect("couldn't parse data from bytes to integer")
     );
 }

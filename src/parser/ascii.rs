@@ -1,11 +1,7 @@
-use btoi::{btoi, btou};
 use nom::{
     branch::alt,
-    bytes::streaming::{tag, take, take_until, take_while1, take_while_m_n},
-    character::{
-        is_digit,
-        streaming::{crlf, newline},
-    },
+    bytes::streaming::{tag, take, take_until, take_while1},
+    character::streaming::{crlf, newline},
     combinator::{map, map_res, opt, value},
     multi::fold_many0,
     sequence::{preceded, terminated, tuple},
@@ -13,7 +9,10 @@ use nom::{
 };
 use std::str::Utf8Error;
 
-use super::{ErrorKind, KeyMetadata, MetadumpResponse, Response, StatsResponse, Status, Value};
+use super::{
+    is_key_char, parse_bool, parse_i64, parse_incrdecr, parse_u32, parse_u64, ErrorKind,
+    KeyMetadata, MetadumpResponse, Response, StatsResponse, Status, Value,
+};
 
 pub fn parse_ascii_status(buf: &[u8]) -> IResult<&[u8], Response> {
     terminated(
@@ -46,34 +45,6 @@ fn parse_ascii_error(buf: &[u8]) -> IResult<&[u8], Response> {
     map(parser, |e| Response::Status(Status::Error(e)))(buf)
 }
 
-fn parse_ascii_u32(buf: &[u8]) -> IResult<&[u8], u32> {
-    map_res(take_while_m_n(1, 10, is_digit), btou)(buf)
-}
-
-fn parse_ascii_u64(buf: &[u8]) -> IResult<&[u8], u64> {
-    map_res(take_while_m_n(1, 20, is_digit), btou)(buf)
-}
-
-fn parse_ascii_i64(buf: &[u8]) -> IResult<&[u8], i64> {
-    map_res(take_while_m_n(1, 20, is_signed_digit), btoi)(buf)
-}
-
-fn parse_bool(buf: &[u8]) -> IResult<&[u8], bool> {
-    alt((value(true, tag(b"yes")), value(false, tag(b"no"))))(buf)
-}
-
-fn parse_ascii_incrdecr(buf: &[u8]) -> IResult<&[u8], Response> {
-    terminated(map(parse_ascii_u64, Response::IncrDecr), crlf)(buf)
-}
-
-fn is_key_char(chr: u8) -> bool {
-    chr > 32 && chr < 127
-}
-
-fn is_signed_digit(chr: u8) -> bool {
-    chr == 45 || (48..=57).contains(&chr)
-}
-
 fn parse_ascii_value(buf: &[u8]) -> IResult<&[u8], Value> {
     let kf = take_while1(is_key_char);
     let (buf, (_, key, _, flags, _, len, _, cas, _)) = tuple((
@@ -82,11 +53,11 @@ fn parse_ascii_value(buf: &[u8]) -> IResult<&[u8], Value> {
         tag("VALUE "),
         kf,
         tag(" "),
-        parse_ascii_u32,
+        parse_u32,
         tag(" "),
-        parse_ascii_u64,
+        parse_u64,
         opt(tag(" ")),
-        opt(parse_ascii_u64),
+        opt(parse_u64),
         crlf,
     ))(buf)?;
     let (buf, data) = terminated(take(len), crlf)(buf)?;
@@ -95,8 +66,9 @@ fn parse_ascii_value(buf: &[u8]) -> IResult<&[u8], Value> {
         Value {
             key: key.to_vec(),
             cas,
-            flags,
-            data: data.to_vec(),
+            flags: Some(flags),
+            data: Some(data.to_vec()),
+            meta_values: None,
         },
     ))
 }
@@ -123,7 +95,7 @@ pub fn parse_ascii_response(buf: &[u8]) -> Result<Option<(usize, Response)>, Err
     let result = alt((
         parse_ascii_status,
         parse_ascii_error,
-        parse_ascii_incrdecr,
+        parse_incrdecr,
         parse_ascii_data,
     ))(buf);
 
@@ -161,17 +133,17 @@ fn parse_lru_crawler_metadata(buf: &[u8]) -> IResult<&[u8], MetadumpResponse> {
         tag("key="),
         take_while1(is_key_char),
         tag(" exp="),
-        parse_ascii_i64,
+        parse_i64,
         tag(" la="),
-        parse_ascii_u64,
+        parse_u64,
         tag(" cas="),
-        parse_ascii_u64,
+        parse_u64,
         tag(" fetch="),
         parse_bool,
         tag(" cls="),
-        parse_ascii_u32,
+        parse_u32,
         tag(" size="),
-        parse_ascii_u32,
+        parse_u32,
         newline,
     ))(buf)?;
 
@@ -252,8 +224,8 @@ pub fn parse_ascii_stats_response(buf: &[u8]) -> Result<Option<(usize, StatsResp
 #[cfg(test)]
 mod tests {
     use super::{
-        parse_ascii_metadump_response, parse_ascii_response, parse_ascii_stats_response, ErrorKind,
-        KeyMetadata, MetadumpResponse, Response, StatsResponse, Status, Value,
+        parse_ascii_metadump_response, parse_ascii_response, parse_ascii_stats_response, parse_u32,
+        ErrorKind, KeyMetadata, MetadumpResponse, Response, StatsResponse, Status, Value,
     };
     use lazy_static::lazy_static;
 
@@ -280,13 +252,13 @@ mod tests {
                 (b"42\r\n", 4, Response::IncrDecr(42)),
                 (b"END\r\n", 5, Response::Data(None)),
                 (b"VALUE foo 42 11\r\nhello world\r\nEND\r\n", 35, Response::Data(Some(
-                    vec![Value { key: FOO_KEY.to_vec(), flags: 42, cas: None, data: HELLO_WORLD_DATA.to_vec() }]
+                    vec![Value { key: FOO_KEY.to_vec(), flags: Some(42), cas: None, data: Some(HELLO_WORLD_DATA.to_vec()), meta_values: None }]
                 ))),
                 (b"VALUE foo 42 11\r\nhello world\r\nVALUE bar 43 11 15\r\nhello world\r\nEND\r\n", 68,
                     Response::Data(Some(
                         vec![
-                            Value { key: FOO_KEY.to_vec(), flags: 42, cas: None, data: HELLO_WORLD_DATA.to_vec() },
-                            Value { key: BAR_KEY.to_vec(), flags: 43, cas: Some(15), data: HELLO_WORLD_DATA.to_vec() },
+                            Value { key: FOO_KEY.to_vec(), flags: Some(42), cas: None, data: Some(HELLO_WORLD_DATA.to_vec()), meta_values: None },
+                            Value { key: BAR_KEY.to_vec(), flags: Some(43), cas: Some(15), data: Some(HELLO_WORLD_DATA.to_vec()), meta_values: None },
                         ]
                     ))
                 ),
@@ -414,5 +386,40 @@ mod tests {
             assert_eq!(&result, expected);
             assert_eq!(n, *data_read);
         }
+    }
+
+    #[test]
+    fn test_parse_u32() {
+        use nom::Err;
+
+        let test_cases = [("0", 0), ("1", 1), ("42", 42), ("4294967295", u32::MAX)];
+
+        for (input, expected) in test_cases.iter() {
+            match parse_u32(input.as_bytes()) {
+                Ok((remaining, result)) => {
+                    assert_eq!(result, *expected);
+                    assert!(remaining.is_empty());
+                }
+                Err(Err::Incomplete(_)) => {
+                    // This is expected for a streaming parser
+                    // We can try again with an extra character to signal end of input
+                    let mut extended_input = input.to_string();
+                    extended_input.push(' ');
+                    match parse_u32(extended_input.as_bytes()) {
+                        Ok((remaining, result)) => {
+                            assert_eq!(result, *expected);
+                            assert_eq!(remaining, b" ");
+                        }
+                        Err(e) => panic!("Failed on extended input {}: {:?}", extended_input, e),
+                    }
+                }
+                Err(e) => panic!("Unexpected error for input {}: {:?}", input, e),
+            }
+        }
+
+        // Test error cases
+        assert!(matches!(parse_u32(b""), Err(Err::Incomplete(_))));
+        assert!(parse_u32(b"4294967296 ").is_err()); // Overflow
+        assert!(parse_u32(b"abc ").is_err());
     }
 }
