@@ -93,12 +93,9 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
             let (input, _) = crlf(input)?; // removes the leading crlf from the data block
             let (input, data) = take_until_size(input, size)?; // parses the data from the input
 
-            let meta_value = construct_meta_value_from_flag_array(
-                flag_array,
-                Some(data),
-                Some(Status::Value),
-            )
-            .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?; // Throw Fail as a generic nom error
+            let meta_value =
+                construct_meta_value_from_flag_array(flag_array, Some(data), Some(Status::Value))
+                    .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?; // Throw Fail as a generic nom error
 
             Ok((input, MetaResponse::Data(Some(vec![meta_value]))))
         }
@@ -115,12 +112,8 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
 
             // data is empty in this case
             let meta_value =
-                construct_meta_value_from_flag_array(
-                    meta_values_array,
-                    None,
-                    Some(Status::Exists),
-                )
-                .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
+                construct_meta_value_from_flag_array(meta_values_array, None, Some(Status::Exists))
+                    .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
 
             Ok((input, MetaResponse::Data(Some(vec![meta_value]))))
         }
@@ -134,13 +127,12 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
                 return Ok((input, MetaResponse::Status(Status::NotFound)));
             }
 
-            let meta_value =
-                construct_meta_value_from_flag_array(
-                    meta_values_array,
-                    None,
-                    Some(Status::NotFound),
-                )
-                .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
+            let meta_value = construct_meta_value_from_flag_array(
+                meta_values_array,
+                None,
+                Some(Status::NotFound),
+            )
+            .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
 
             Ok((input, MetaResponse::Data(Some(vec![meta_value]))))
         }
@@ -189,11 +181,12 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
             }
 
             // data is empty in this case
-            let meta_value =
-                construct_meta_value_from_flag_array(
-                    meta_values_array, None, Some(Status::NotStored),
-                )
-                    .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
+            let meta_value = construct_meta_value_from_flag_array(
+                meta_values_array,
+                None,
+                Some(Status::NotStored),
+            )
+            .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
 
             Ok((input, MetaResponse::Data(Some(vec![meta_value]))))
         }
@@ -210,9 +203,7 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
 
             // data is empty in this case
             let meta_value =
-                construct_meta_value_from_flag_array(
-                    meta_values_array, None, Some(Status::Exists),
-                )
+                construct_meta_value_from_flag_array(meta_values_array, None, Some(Status::Exists))
                     .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
 
             Ok((input, MetaResponse::Data(Some(vec![meta_value]))))
@@ -229,11 +220,12 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
             }
 
             // data is empty in this case
-            let meta_value =
-                construct_meta_value_from_flag_array(
-                    meta_values_array, None, Some(Status::NotFound),
-                )
-                    .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
+            let meta_value = construct_meta_value_from_flag_array(
+                meta_values_array,
+                None,
+                Some(Status::NotFound),
+            )
+            .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
 
             Ok((input, MetaResponse::Data(Some(vec![meta_value]))))
         }
@@ -281,11 +273,7 @@ fn parse_meta_flag_values_as_slice(input: &[u8]) -> IResult<&[u8], Vec<(u8, Opti
 }
 
 // TODO: refactor with new struct MetaValue
-fn map_meta_flag(
-    flag: u8,
-    token: &[u8],
-    meta_value: &mut MetaValue,
-) -> Result<(), crate::Error> {
+fn map_meta_flag(flag: u8, token: &[u8], meta_value: &mut MetaValue) -> Result<(), crate::Error> {
     match flag {
         b'c' => {
             meta_value.cas = Some(

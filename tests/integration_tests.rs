@@ -1,4 +1,4 @@
-use async_memcached::{Client, Error, ErrorKind, Status};
+use async_memcached::{AsciiProtocol, Client, Error, ErrorKind, MetaProtocol, Status};
 use rand::seq::IteratorRandom;
 use serial_test::{parallel, serial};
 
@@ -179,11 +179,10 @@ async fn test_meta_get_with_many_flags() {
         value
     );
 
-    let meta_flag_values = result_meta_value.meta_values.unwrap();
-    assert!(meta_flag_values.hit_before.unwrap());
-    assert_eq!(meta_flag_values.last_accessed.unwrap(), 0);
-    assert!(meta_flag_values.ttl_remaining.unwrap() > 0);
-    assert_eq!(meta_flag_values.opaque_token.unwrap(), "9001".as_bytes());
+    assert!(result_meta_value.hit_before.unwrap());
+    assert_eq!(result_meta_value.last_accessed.unwrap(), 0);
+    assert!(result_meta_value.ttl_remaining.unwrap() > 0);
+    assert_eq!(result_meta_value.opaque_token.unwrap(), "9001".as_bytes());
 }
 
 #[ignore = "Relies on a running memcached server"]
@@ -215,11 +214,13 @@ async fn test_meta_get_with_many_flags_and_no_value() {
 
     assert_eq!(meta_get_result_value.data, None);
 
-    let meta_flag_values = meta_get_result_value.meta_values.unwrap();
-    assert!(meta_flag_values.hit_before.unwrap());
-    assert_eq!(meta_flag_values.last_accessed.unwrap(), 0);
-    assert!(meta_flag_values.ttl_remaining.unwrap() > 0);
-    assert_eq!(meta_flag_values.opaque_token.unwrap(), "9001".as_bytes());
+    assert!(meta_get_result_value.hit_before.unwrap());
+    assert_eq!(meta_get_result_value.last_accessed.unwrap(), 0);
+    assert!(meta_get_result_value.ttl_remaining.unwrap() > 0);
+    assert_eq!(
+        meta_get_result_value.opaque_token.unwrap(),
+        "9001".as_bytes()
+    );
 }
 
 #[ignore = "Relies on a running memcached server"]
@@ -245,8 +246,8 @@ async fn test_meta_get_not_found_with_opaque_flag() {
     let result = client.meta_get(key, Some(&flags)).await.unwrap();
 
     assert_eq!(
-        result.unwrap().meta_values.unwrap().opaque_token,
-        Some("9001".as_bytes().to_vec())
+        result.unwrap().opaque_token.unwrap(),
+        "9001".as_bytes().to_vec()
     );
 }
 
@@ -260,7 +261,7 @@ async fn test_meta_get_not_found_with_k_flag() {
 
     let result = client.meta_get(key, Some(&flags)).await.unwrap();
 
-    assert_eq!(result.unwrap().key, key.as_bytes().to_vec());
+    assert_eq!(result.unwrap().key, Some(key.as_bytes().to_vec()));
 }
 
 #[ignore = "Relies on a running memcached server"]
@@ -698,10 +699,9 @@ async fn test_meta_set_with_opaque_token() {
     );
 
     // Verify the metaflags
-    let meta_flag_values = result_value.meta_values.unwrap();
-    assert_eq!(meta_flag_values.hit_before, Some(true));
-    assert_eq!(meta_flag_values.last_accessed, Some(0));
-    assert_eq!(meta_flag_values.ttl_remaining, Some(3600));
+    assert!(result_value.hit_before.unwrap());
+    assert_eq!(result_value.last_accessed, Some(0));
+    assert_eq!(result_value.ttl_remaining, Some(3600));
 }
 
 #[ignore = "Relies on a running memcached server"]
@@ -722,7 +722,7 @@ async fn test_meta_set_with_k_flag() {
     );
 
     let set_value = set_result.unwrap().unwrap();
-    assert_eq!(set_value.key, key.as_bytes());
+    assert_eq!(set_value.key, Some(key.as_bytes().to_vec()));
 
     // Fetch the key with .get() to ensure that the item has been hit before
     let get_result = client.get(key).await.unwrap();
@@ -743,10 +743,9 @@ async fn test_meta_set_with_k_flag() {
     );
 
     // Verify the metaflags
-    let meta_flag_values = result_value.meta_values.unwrap();
-    assert_eq!(meta_flag_values.hit_before, Some(true));
-    assert_eq!(meta_flag_values.last_accessed, Some(0));
-    assert_eq!(meta_flag_values.ttl_remaining, Some(3600));
+    assert!(result_value.hit_before.unwrap());
+    assert_eq!(result_value.last_accessed, Some(0));
+    assert_eq!(result_value.ttl_remaining, Some(3600));
 }
 
 #[ignore = "Relies on a running memcached server"]
@@ -898,10 +897,8 @@ async fn test_meta_set_invalidate_on_expired_cas() {
 
     // CAS value should be reset to a new atomic counter value when the key is invalidated
     assert!(get_value.cas.unwrap() != 99999);
-
-    let meta_values = get_value.meta_values.unwrap();
-    assert!(meta_values.is_recache_winner.unwrap());
-    assert!(meta_values.is_stale.unwrap());
+    assert!(get_value.is_recache_winner.unwrap());
+    assert!(get_value.is_stale.unwrap());
 }
 
 #[ignore = "Relies on a running memcached server"]
@@ -1183,10 +1180,7 @@ async fn test_meta_set_nonexistent_key_in_append_mode_with_autovivify() {
         .unwrap()
         .unwrap();
     assert_eq!(get_result_value.flags.unwrap(), 24);
-    assert_eq!(
-        get_result_value.meta_values.unwrap().ttl_remaining.unwrap(),
-        3600
-    );
+    assert_eq!(get_result_value.ttl_remaining.unwrap(), 3600);
     assert_eq!(
         std::str::from_utf8(&get_result_value.data.unwrap()).unwrap(),
         original_value

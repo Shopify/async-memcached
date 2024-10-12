@@ -1,4 +1,4 @@
-use async_memcached::Client;
+use async_memcached::{AsciiProtocol, Client};
 
 use toxiproxy_rust::{
     client::Client as ToxiproxyClient,
