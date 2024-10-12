@@ -117,8 +117,8 @@ pub enum Response {
 pub enum MetaResponse {
     /// The status of a given operation, which may or may not have succeeded.
     Status(Status),
-    /// Data response, which is only returned for when requested via the 'v' flag.
-    Data(Option<Vec<MetaValue>>),
+    /// Data response, which is only returned for when requested via the 'v.
+    Data(Option<MetaValue>),
     // /// Resulting value of a key after an increment/decrement operation.
     // IncrDecr(u64),
 }
