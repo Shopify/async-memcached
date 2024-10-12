@@ -18,14 +18,10 @@ async fn setup_client() -> Client {
 fn bench_get_small(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
 
-    rt.block_on(async {
-        let mut client = setup_client().await;
-        client.set("foo", "bar", None, None).await.unwrap();
-    });
-
-    c.bench_function("bench ascii get small key and small value", |b| {
+    c.bench_function("bench ascii get with small key and small value", |b| {
         b.to_async(&rt).iter_custom(move |iters| async move {
             let mut client = setup_client().await;
+            client.set("foo", "bar", None, None).await.unwrap();
             let start = std::time::Instant::now();
             for _ in 0..iters {
                 let _ = client.get("foo").await;
@@ -38,20 +34,13 @@ fn bench_get_small(c: &mut Criterion) {
 fn bench_get_large(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
 
-    let key = "a".repeat(MAX_KEY_LENGTH);
-    let value = "b".repeat(LARGE_PAYLOAD_SIZE);
-
-    rt.block_on(async {
-        let mut client = setup_client().await;
-        client.set(&key, &value, None, None).await.unwrap();
-    });
-
-    c.bench_function("bench ascii get", |b| {
-        let key_clone = key.clone();
+    c.bench_function("bench ascii get with large key and large value", |b| {
         b.to_async(&rt).iter_custom(move |iters| {
-            let key = key_clone.clone();
+            let key = "a".repeat(MAX_KEY_LENGTH);
+            let value = "b".repeat(LARGE_PAYLOAD_SIZE);
             async move {
                 let mut client = setup_client().await;
+                client.set(&key, &value, None, None).await.unwrap();
                 let start = std::time::Instant::now();
                 for _ in 0..iters {
                     let _ = client.get(&key).await;
@@ -65,14 +54,10 @@ fn bench_get_large(c: &mut Criterion) {
 fn bench_meta_get_small(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
 
-    rt.block_on(async {
-        let mut client = setup_client().await;
-        client.set("foo", "bar", None, None).await.unwrap();
-    });
-
     c.bench_function("bench meta_get with small key and small value", |b| {
         b.to_async(&rt).iter_custom(move |iters| async move {
             let mut client = setup_client().await;
+            client.set("foo", "bar", None, None).await.unwrap();
             let start = std::time::Instant::now();
             for _ in 0..iters {
                 let _ = client.meta_get("foo", Some(&["v", "h", "t", "l"])).await;
@@ -85,27 +70,21 @@ fn bench_meta_get_small(c: &mut Criterion) {
 fn bench_meta_get_large(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
 
-    let key = "a".repeat(MAX_KEY_LENGTH);
-    let value = "b".repeat(LARGE_PAYLOAD_SIZE);
-
-    rt.block_on(async {
-        let mut client = setup_client().await;
-        client.set(&key, &value, None, None).await.unwrap();
-    });
-
     c.bench_function("bench meta_get with large key and large value", |b| {
-        let key_clone = key.clone();
-        b.to_async(&rt).iter_custom(move |iters| {
-            let key = key_clone.clone();
-            async move {
-                let mut client = setup_client().await;
-                let start = std::time::Instant::now();
-                for _ in 0..iters {
-                    let _ = client.meta_get(&key, Some(&["v", "h", "t", "l"])).await;
-                }
-                start.elapsed()
+        b.to_async(&rt).iter_custom(move |iters| async move {
+            let key = "a".repeat(MAX_KEY_LENGTH);
+            let value = "b".repeat(LARGE_PAYLOAD_SIZE);
+
+            let mut client = setup_client().await;
+
+            client.set(&key, &value, None, None).await.unwrap();
+
+            let start = std::time::Instant::now();
+            for _ in 0..iters {
+                let _ = client.meta_get(&key, Some(&["v", "h", "t", "l"])).await;
             }
-        })
+            start.elapsed()
+        });
     });
 }
 
