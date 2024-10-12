@@ -103,6 +103,21 @@ fn bench_set_with_small_string(c: &mut Criterion) {
     });
 }
 
+fn bench_set_with_u64(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+
+    c.bench_function("set_with_u64", |b| {
+        b.to_async(&rt).iter_custom(|iters| async move {
+            let mut client = setup_client().await;
+            let start = std::time::Instant::now();
+            for _ in 0..iters {
+                let _ = client.set("foo", 1_u64, None, None).await;
+            }
+            start.elapsed()
+        });
+    });
+}
+
 fn bench_set_with_large_string(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
 
@@ -121,18 +136,39 @@ fn bench_set_with_large_string(c: &mut Criterion) {
     });
 }
 
-fn bench_set_with_u64(c: &mut Criterion) {
+fn bench_meta_set_small(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
 
-    c.bench_function("set_with_u64", |b| {
+    c.bench_function("meta_set_with_small_key_and_value", |b| {
         b.to_async(&rt).iter_custom(|iters| async move {
             let mut client = setup_client().await;
+
             let start = std::time::Instant::now();
             for _ in 0..iters {
-                let _ = client.set("foo", 1_u64, None, None).await;
+                let _ = client.meta_set("foo", "bar", None).await;
             }
             start.elapsed()
         });
+    });
+}
+
+fn bench_meta_set_large(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+
+    c.bench_function("bench meta_set with large key and large value", |b| {
+        b.to_async(&rt).iter_custom(move |iters| {
+            let key = "a".repeat(MAX_KEY_LENGTH);
+            let value = "b".repeat(LARGE_PAYLOAD_SIZE);
+
+            async move {
+                let mut client = setup_client().await;
+                let start = std::time::Instant::now();
+                for _ in 0..iters {
+                    let _ = client.meta_set(&key, &value, None).await;
+                }
+                start.elapsed()
+            }
+        })
     });
 }
 
@@ -342,7 +378,9 @@ criterion_group!(
     bench_get_multi,
     bench_get_many_large,
     bench_set_with_small_string,
+    bench_meta_set_small,
     bench_set_with_large_string,
+    bench_meta_set_large,
     bench_set_with_u64,
     bench_set_multi_small_strings,
     bench_add_with_small_string,
