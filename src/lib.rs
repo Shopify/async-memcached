@@ -24,7 +24,6 @@ mod value_serializer;
 pub use self::value_serializer::AsMemcachedValue;
 
 const MAX_KEY_LENGTH: usize = 250; // reference in memcached documentation: https://github.com/memcached/memcached/blob/5609673ed29db98a377749fab469fe80777de8fd/doc/protocol.txt#L46
-const MAX_VALUE_SIZE: usize = 1000 * 1024; // 1MB, default maximum value size for memcached
 
 /// High-level memcached client.
 ///
@@ -334,20 +333,21 @@ impl Client {
 
     /// Sets the given key.
     ///
-    /// If `ttl` they will default to 0.  If the value is set
-    /// successfully, `Some(Value)` is returned, otherwise [`Error`] is returned.
-    /// NOTE: That the data is some Value is sparsely populated, containing only requested data by meta_flags
-    /// The meta set command a generic command for storing data to memcached. Based
-    /// on the flags supplied, it can replace all storage commands (see token M) as
-    /// well as adds new options.
+    /// If the value is set successfully, `Some(Value)` is returned, otherwise [`Error`] is returned.
+    /// NOTE: That the data in this Value is sparsely populated, containing only requested data by meta_flags
+    /// The meta set command is a generic command for storing data to memcached. Based on the flags supplied,
+    /// it can replace all storage commands (see token M) as well as adds new options.
     //
-    // ms <key> <datalen> <flags>*\r\n
+    // Command format:
+    // ms <key> <datalen> <meta_flags>*\r\n<data_block>\r\n
     //
-    // - <key> means one key string.
+    // - <key> is the key string, with a maximum length of 250 bytes.
     // - <datalen> is the length of the payload data.
     //
-    // - <flags> are a set of single character codes ended with a space or newline.
-    //   flags may have strings after the initial character.
+    // - <meta_flags> is an optional slice of string references for meta flags.
+    // Meta flags may have associated tokens after the initial character, e.g. "O123" for opaque.
+    //
+    // - <data_block> is the payload data to be stored, with a maximum size of ~1MB.
     pub async fn meta_set<K, V>(
         &mut self,
         key: K,
@@ -383,63 +383,8 @@ impl Client {
             Response::Status(s) => Err(s.into()),
             Response::Data(d) => d
                 .map(|mut items| {
-                    if items.len() != 1 {
-                        Err(Status::Error(ErrorKind::Protocol(None)).into())
-                    } else {
-                        let mut item = items.remove(0);
-                        item.key = key.as_ref().to_vec();
-                        Ok(item)
-                    }
-                })
-                .transpose(),
-            _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),
-        }
-    }
-
-    /// Concatenated meta set command for benchmarking comparison
-    pub async fn meta_set_concat<K, V>(
-        &mut self,
-        key: K,
-        value: V,
-        meta_flags: Option<&[&str]>,
-    ) -> Result<Option<Value>, Error>
-    where
-        K: AsRef<[u8]>,
-        V: AsMemcachedValue,
-    {
-        let mut command = Vec::with_capacity(MAX_VALUE_SIZE + 2 * MAX_KEY_LENGTH);
-        let kr = key.as_ref();
-        let vr = value.as_bytes();
-
-        command.extend_from_slice(b"ms ");
-        command.extend_from_slice(kr);
-
-        let vlen = vr.len().to_string();
-        command.extend_from_slice(b" ");
-        command.extend_from_slice(vlen.as_ref());
-
-        if let Some(meta_flags) = meta_flags {
-            command.extend_from_slice(b" ");
-            command.extend_from_slice(meta_flags.join(" ").as_bytes());
-        }
-
-        command.extend_from_slice(b"\r\n");
-        self.conn.write_all(&command).await?;
-        self.conn.write_all(vr.as_ref()).await?;
-        self.conn.write_all(b"\r\n").await?;
-        self.conn.flush().await?;
-
-        match self.drive_receive(parse_meta_set_response).await? {
-            Response::Status(s) => Err(s.into()),
-            Response::Data(d) => d
-                .map(|mut items| {
-                    if items.len() != 1 {
-                        Err(Status::Error(ErrorKind::Protocol(None)).into())
-                    } else {
-                        let mut item = items.remove(0);
-                        item.key = key.as_ref().to_vec();
-                        Ok(item)
-                    }
+                    let item = items.remove(0);
+                    Ok(item)
                 })
                 .transpose(),
             _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),
