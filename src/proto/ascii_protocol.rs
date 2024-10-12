@@ -1,8 +1,8 @@
-use crate::{Client, Error, Response, Value, Status};
-use crate::{ErrorKind, AsMemcachedValue};
+use crate::{AsMemcachedValue, ErrorKind};
+use crate::{Client, Error, Response, Status, Value};
 
-use std::future::Future;
 use fxhash::FxHashMap;
+use std::future::Future;
 use tokio::io::AsyncWriteExt;
 
 /// Trait defining ASCII protocol-specific methods for the Client.
@@ -12,7 +12,8 @@ pub trait AsciiProtocol {
     /// If the key is found, `Some(MemcachedValue)` is returned, describing the metadata and data of the key.
     ///
     /// Otherwise, [`Error`] is returned.
-    fn get<K: AsRef<[u8]>>(&mut self, key: K) -> impl Future<Output = Result<Option<Value>, Error>>;
+    fn get<K: AsRef<[u8]>>(&mut self, key: K)
+        -> impl Future<Output = Result<Option<Value>, Error>>;
 
     /// Gets multiple keys.
     ///
@@ -117,7 +118,11 @@ pub trait AsciiProtocol {
     /// Increments the given key by the specified amount with no reply from the server.
     /// Can overflow from the max value of u64 (18446744073709551615) -> 0.
     /// Always returns () for a complete request, will not return any indication of success or failure.
-    fn increment_no_reply<K>(&mut self, key: K, amount: u64) -> impl Future<Output = Result<(), Error>>
+    fn increment_no_reply<K>(
+        &mut self,
+        key: K,
+        amount: u64,
+    ) -> impl Future<Output = Result<(), Error>>
     where
         K: AsRef<[u8]>;
 
@@ -132,7 +137,11 @@ pub trait AsciiProtocol {
     /// Decrements the given key by the specified amount with no reply from the server.
     /// Will not decrement the counter below 0.
     /// Always returns () for a complete request, will not return any indication of success or failure.
-    fn decrement_no_reply<K>(&mut self, key: K, amount: u64) -> impl Future<Output = Result<(), Error>>
+    fn decrement_no_reply<K>(
+        &mut self,
+        key: K,
+        amount: u64,
+    ) -> impl Future<Output = Result<(), Error>>
     where
         K: AsRef<[u8]>;
 }

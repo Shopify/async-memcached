@@ -1,7 +1,7 @@
-use crate::{Client, Error, Status, ErrorKind, AsMemcachedValue};
+use crate::{AsMemcachedValue, Client, Error, ErrorKind, Status};
 
-use crate::parser::{MetaResponse, MetaValue};
 use crate::parser::{parse_meta_get_response, parse_meta_set_response};
+use crate::parser::{MetaResponse, MetaValue};
 
 use std::future::Future;
 

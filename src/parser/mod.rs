@@ -10,7 +10,9 @@ use nom::{
 use std::fmt;
 
 mod ascii_parser;
-pub use ascii_parser::{parse_ascii_metadump_response, parse_ascii_response, parse_ascii_stats_response};
+pub use ascii_parser::{
+    parse_ascii_metadump_response, parse_ascii_response, parse_ascii_stats_response,
+};
 
 mod meta_parser;
 pub use meta_parser::{parse_meta_get_response, parse_meta_set_response};

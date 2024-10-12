@@ -1,4 +1,4 @@
-use async_memcached::{Client, Error, ErrorKind, Status, AsciiProtocol, MetaProtocol};
+use async_memcached::{AsciiProtocol, Client, Error, ErrorKind, MetaProtocol, Status};
 use rand::seq::IteratorRandom;
 use serial_test::{parallel, serial};
 
@@ -223,7 +223,10 @@ async fn test_meta_get_with_many_flags_and_no_value() {
     assert!(meta_get_result_value.hit_before.unwrap());
     assert_eq!(meta_get_result_value.last_accessed.unwrap(), 0);
     assert!(meta_get_result_value.ttl_remaining.unwrap() > 0);
-    assert_eq!(meta_get_result_value.opaque_token.unwrap(), "9001".as_bytes());
+    assert_eq!(
+        meta_get_result_value.opaque_token.unwrap(),
+        "9001".as_bytes()
+    );
 }
 
 #[ignore = "Relies on a running memcached server"]
