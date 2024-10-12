@@ -24,7 +24,6 @@ mod value_serializer;
 pub use self::value_serializer::AsMemcachedValue;
 
 const MAX_KEY_LENGTH: usize = 250; // reference in memcached documentation: https://github.com/memcached/memcached/blob/5609673ed29db98a377749fab469fe80777de8fd/doc/protocol.txt#L46
-const MAX_VALUE_SIZE: usize = 1000 * 1024; // 1MB, default maximum value size for memcached
 
 /// High-level memcached client.
 ///
@@ -351,57 +350,6 @@ impl Client {
         }
 
         self.conn.write_all(b"\r\n").await?;
-        self.conn.write_all(vr.as_ref()).await?;
-        self.conn.write_all(b"\r\n").await?;
-        self.conn.flush().await?;
-
-        match self.drive_receive(parse_meta_set_response).await? {
-            Response::Status(Status::Stored) => Ok(None),
-            Response::Status(s) => Err(s.into()),
-            Response::Data(d) => d
-                .map(|mut items| {
-                    if items.len() != 1 {
-                        Err(Status::Error(ErrorKind::Protocol(None)).into())
-                    } else {
-                        let mut item = items.remove(0);
-                        item.key = key.as_ref().to_vec();
-                        Ok(item)
-                    }
-                })
-                .transpose(),
-            _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),
-        }
-    }
-
-    /// Concatenated meta set command for benchmarking comparison
-    pub async fn meta_set_concat<K, V>(
-        &mut self,
-        key: K,
-        value: V,
-        meta_flags: Option<&[&str]>,
-    ) -> Result<Option<Value>, Error>
-    where
-        K: AsRef<[u8]>,
-        V: AsMemcachedValue,
-    {
-        let mut command = Vec::with_capacity(MAX_VALUE_SIZE + 2 * MAX_KEY_LENGTH);
-        let kr = key.as_ref();
-        let vr = value.as_bytes();
-
-        command.extend_from_slice(b"ms ");
-        command.extend_from_slice(kr);
-
-        let vlen = vr.len().to_string();
-        command.extend_from_slice(b" ");
-        command.extend_from_slice(vlen.as_ref());
-
-        if let Some(meta_flags) = meta_flags {
-            command.extend_from_slice(b" ");
-            command.extend_from_slice(meta_flags.join(" ").as_bytes());
-        }
-
-        command.extend_from_slice(b"\r\n");
-        self.conn.write_all(&command).await?;
         self.conn.write_all(vr.as_ref()).await?;
         self.conn.write_all(b"\r\n").await?;
         self.conn.flush().await?;
