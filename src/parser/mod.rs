@@ -14,7 +14,7 @@ pub use ascii::{parse_ascii_metadump_response, parse_ascii_response, parse_ascii
 
 mod meta;
 #[allow(unused_imports)]
-pub use meta::parse_meta_response;
+pub use meta::parse_meta_get_response;
 
 /// A value from memcached.
 #[derive(Clone, Debug, PartialEq)]
@@ -24,9 +24,9 @@ pub struct Value {
     /// CAS identifier.
     pub cas: Option<u64>,
     /// Flags for this key.
+    /// Defaults to 0.
     /// NOTE: This is the client bitflags, not meta flags
     /// which is an opaque number passed by the client
-    /// Defaults to 0.
     pub flags: Option<u32>,
     /// Data for this key.
     pub data: Option<Vec<u8>>,

@@ -13,9 +13,12 @@ pub use self::error::Error;
 
 mod parser;
 use self::parser::{
-    parse_ascii_metadump_response, parse_ascii_response, parse_ascii_stats_response, Response,
+    parse_ascii_metadump_response, parse_ascii_response, parse_ascii_stats_response,
+    parse_meta_get_response,
 };
-pub use self::parser::{ErrorKind, KeyMetadata, MetadumpResponse, StatsResponse, Status, Value};
+pub use self::parser::{
+    ErrorKind, KeyMetadata, MetadumpResponse, Response, StatsResponse, Status, Value,
+};
 
 mod value_serializer;
 pub use self::value_serializer::AsMemcachedValue;
@@ -212,6 +215,50 @@ impl Client {
         K: AsRef<[u8]>,
     {
         self.get_multi(keys).await
+    }
+
+    // Gets the given key with additional metadata.
+    ///
+    /// If the key is found, `Some(Value)` is returned, describing the metadata and data of the key.
+    ///
+    /// Otherwise, `None` is returned.
+    ///
+    /// Supported meta flags:
+    /// - h: return whether item has been hit before as a 0 or 1
+    /// - l: return time since item was last accessed in seconds
+    /// - t: return item TTL remaining in seconds (-1 for unlimited)
+    pub async fn meta_get<K: AsRef<[u8]>>(
+        &mut self,
+        key: K,
+        meta_flags: Option<&[&str]>,
+    ) -> Result<Option<Value>, Error> {
+        self.conn.write_all(b"mg ").await?;
+        self.conn
+            .write_all(Self::validate_key_length(key.as_ref())?)
+            .await?;
+        self.conn.write_all(b" ").await?;
+        if let Some(flags) = meta_flags {
+            self.conn.write_all(flags.join(" ").as_bytes()).await?;
+        }
+        self.conn.write_all(b"\r\n").await?;
+        self.conn.flush().await?;
+
+        match self.drive_receive(parse_meta_get_response).await? {
+            Response::Status(Status::NotFound) => Ok(None),
+            Response::Status(s) => Err(s.into()),
+            Response::Data(d) => d
+                .map(|mut items| {
+                    if items.len() != 1 {
+                        Err(Status::Error(ErrorKind::Protocol(None)).into())
+                    } else {
+                        let mut item = items.remove(0);
+                        item.key = key.as_ref().to_vec();
+                        Ok(item)
+                    }
+                })
+                .transpose(),
+            _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),
+        }
     }
 
     /// Sets the given key.
