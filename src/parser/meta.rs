@@ -14,7 +14,6 @@ use std::num::NonZero;
 use super::{parse_u32, ErrorKind, MetaValue, Response, Status, Value};
 use crate::Error;
 
-#[allow(dead_code)]
 pub fn parse_meta_set_status(buf: &[u8]) -> IResult<&[u8], Response> {
     alt((
         value(Response::Status(Status::Stored), tag(b"HD")),

@@ -1338,7 +1338,7 @@ async fn test_get_many_aliases_get_multi_properly() {
         assert!(result.is_ok(), "failed to set {}, {:?}", key, result);
     }
 
-    #[allow(deprecated)] // specifically testing deprecated method
+    #[allow(deprecated, reason = "specifically testing deprecated method")]
     let result = client.get_many(&keys).await;
 
     assert!(
