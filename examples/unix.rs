@@ -1,4 +1,4 @@
-use async_memcached::Client;
+use async_memcached::{AsciiProtocol, Client};
 
 #[tokio::main]
 async fn main() {

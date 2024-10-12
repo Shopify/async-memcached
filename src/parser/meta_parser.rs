@@ -11,28 +11,27 @@ use nom::{
 
 use std::num::NonZero;
 
-use super::{parse_u32, ErrorKind, MetaValue, Response, Status, Value};
+use super::{parse_u32, ErrorKind, MetaResponse, MetaValue, Status};
 use crate::Error;
 
-#[allow(dead_code)]
-pub fn parse_meta_set_status(buf: &[u8]) -> IResult<&[u8], Response> {
+pub fn parse_meta_get_status(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
     alt((
-        value(Response::Status(Status::Stored), tag(b"HD")),
-        value(Response::Status(Status::NotStored), tag(b"NS")),
-        value(Response::Status(Status::Exists), tag(b"EX")),
-        value(Response::Status(Status::NotFound), tag(b"NF")),
+        value(MetaResponse::Status(Status::Value), tag(b"VA ")),
+        value(MetaResponse::Status(Status::Exists), tag(b"HD")),
+        value(MetaResponse::Status(Status::NotFound), tag(b"EN")),
     ))(buf)
 }
 
-pub fn parse_meta_get_status(buf: &[u8]) -> IResult<&[u8], Response> {
+pub fn parse_meta_set_status(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
     alt((
-        value(Response::Status(Status::Value), tag(b"VA ")),
-        value(Response::Status(Status::Exists), tag(b"HD")),
-        value(Response::Status(Status::NotFound), tag(b"EN")),
+        value(MetaResponse::Status(Status::Stored), tag(b"HD")),
+        value(MetaResponse::Status(Status::NotStored), tag(b"NS")),
+        value(MetaResponse::Status(Status::Exists), tag(b"EX")),
+        value(MetaResponse::Status(Status::NotFound), tag(b"NF")),
     ))(buf)
 }
 
-pub fn parse_meta_get_response(buf: &[u8]) -> Result<Option<(usize, Response)>, ErrorKind> {
+pub fn parse_meta_get_response(buf: &[u8]) -> Result<Option<(usize, MetaResponse)>, ErrorKind> {
     let bufn = buf.len();
     let result = parse_meta_get_data_value(buf);
 
@@ -48,7 +47,7 @@ pub fn parse_meta_get_response(buf: &[u8]) -> Result<Option<(usize, Response)>, 
     }
 }
 
-pub fn parse_meta_set_response(buf: &[u8]) -> Result<Option<(usize, Response)>, ErrorKind> {
+pub fn parse_meta_set_response(buf: &[u8]) -> Result<Option<(usize, MetaResponse)>, ErrorKind> {
     let bufn = buf.len();
 
     let result = parse_meta_set_data_value(buf);
@@ -83,62 +82,59 @@ pub fn parse_meta_set_response(buf: &[u8]) -> Result<Option<(usize, Response)>, 
 //         t: 2179,
 //     }),
 // }
-fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
+fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
     let (input, status) = parse_meta_get_status(buf)?; // removes <CD> response code from the input
 
     match status {
         // match arm for "VA " response when v flag is used
-        Response::Status(Status::Value) => {
+        MetaResponse::Status(Status::Value) => {
             let (input, size) = parse_u32(input)?; // parses the size of the data from the input
-            let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?; // parses the flags from the input
+            let (input, flag_array) = parse_meta_flag_values_as_slice(input)?; // parses the flags from the input
             let (input, _) = crlf(input)?; // removes the leading crlf from the data block
             let (input, data) = take_until_size(input, size)?; // parses the data from the input
 
-            let value = construct_value_from_meta_values(
-                meta_values_array,
-                Some(data),
-                Some(Status::Value),
-            )
-            .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?; // Throw Fail as a generic nom error
+            let meta_value =
+                construct_meta_value_from_flag_array(flag_array, Some(data), Some(Status::Value))
+                    .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?; // Throw Fail as a generic nom error
 
-            Ok((input, Response::Data(Some(vec![value]))))
+            Ok((input, MetaResponse::Data(Some(vec![meta_value]))))
         }
         // match arm for "HD" response when v flag is omitted
-        Response::Status(Status::Exists) => {
+        MetaResponse::Status(Status::Exists) => {
             // no value (data block) or size in this case, potentially just flags
             let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?;
             let (input, _) = crlf(input)?; // consume the trailing crlf and leave the buffer empty
 
             // early return if there were no flags passed in (no-op)
             if meta_values_array.is_empty() {
-                return Ok((input, Response::Data(None)));
+                return Ok((input, MetaResponse::Data(None)));
             }
 
             // data is empty in this case
-            let data = None;
-            let value =
-                construct_value_from_meta_values(meta_values_array, data, Some(Status::Exists))
+            let meta_value =
+                construct_meta_value_from_flag_array(meta_values_array, None, Some(Status::Exists))
                     .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
 
-            Ok((input, Response::Data(Some(vec![value]))))
+            Ok((input, MetaResponse::Data(Some(vec![meta_value]))))
         }
         // match arm for "EN" response
-        Response::Status(Status::NotFound) => {
+        MetaResponse::Status(Status::NotFound) => {
             let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?;
             let (input, _) = crlf(input)?; // consume the trailing crlf and leave the buffer empty
 
             // return early if there were no flags passed in (miss without opaque or k flag)
             if meta_values_array.is_empty() {
-                return Ok((input, Response::Status(Status::NotFound)));
+                return Ok((input, MetaResponse::Status(Status::NotFound)));
             }
 
-            // data is empty in this case
-            let data = None;
-            let value =
-                construct_value_from_meta_values(meta_values_array, data, Some(Status::NotFound))
-                    .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
+            let meta_value = construct_meta_value_from_flag_array(
+                meta_values_array,
+                None,
+                Some(Status::NotFound),
+            )
+            .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
 
-            Ok((input, Response::Data(Some(vec![value]))))
+            Ok((input, MetaResponse::Data(Some(vec![meta_value]))))
         }
         _ => {
             // unexpected response code, should never happen, bail
@@ -150,11 +146,11 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
     }
 }
 
-fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
+fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
     let (input, status) = parse_meta_set_status(buf)?;
     match status {
         // match arm for "HD" response
-        Response::Status(Status::Stored) => {
+        MetaResponse::Status(Status::Stored) => {
             // no value (data block) or size in this case, potentially just flags
             let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)
                 .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
@@ -162,19 +158,18 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
 
             // early return if there were no flags passed in
             if meta_values_array.is_empty() {
-                return Ok((input, Response::Status(Status::Stored)));
+                return Ok((input, MetaResponse::Status(Status::Stored)));
             }
 
             // data is empty in this case
-            let data = None;
-            let value =
-                construct_value_from_meta_values(meta_values_array, data, Some(Status::Stored))
+            let meta_value =
+                construct_meta_value_from_flag_array(meta_values_array, None, Some(Status::Stored))
                     .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
 
-            Ok((input, Response::Data(Some(vec![value]))))
+            Ok((input, MetaResponse::Data(Some(vec![meta_value]))))
         }
         // match arm for "NS" response
-        Response::Status(Status::NotStored) => {
+        MetaResponse::Status(Status::NotStored) => {
             // no value (data block) or size in this case, potentially just flags
             let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)
                 .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
@@ -182,54 +177,57 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
 
             // early return if there were no flags passed in
             if meta_values_array.is_empty() {
-                return Ok((input, Response::Status(Status::NotStored)));
+                return Ok((input, MetaResponse::Status(Status::NotStored)));
             }
 
             // data is empty in this case
-            let data = None;
-            let value =
-                construct_value_from_meta_values(meta_values_array, data, Some(Status::NotStored))
-                    .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
+            let meta_value = construct_meta_value_from_flag_array(
+                meta_values_array,
+                None,
+                Some(Status::NotStored),
+            )
+            .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
 
-            Ok((input, Response::Data(Some(vec![value]))))
+            Ok((input, MetaResponse::Data(Some(vec![meta_value]))))
         }
         // match arm for "EX" response
-        Response::Status(Status::Exists) => {
+        MetaResponse::Status(Status::Exists) => {
             // no value (data block) or size in this case, potentially just flags
             let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?;
             let (input, _) = crlf(input)?; // consume the trailing crlf and leave the buffer empty
 
             // early return if there were no flags passed in
             if meta_values_array.is_empty() {
-                return Ok((input, Response::Status(Status::Exists)));
+                return Ok((input, MetaResponse::Status(Status::Exists)));
             }
 
             // data is empty in this case
-            let data = None;
-            let value =
-                construct_value_from_meta_values(meta_values_array, data, Some(Status::Exists))
+            let meta_value =
+                construct_meta_value_from_flag_array(meta_values_array, None, Some(Status::Exists))
                     .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
 
-            Ok((input, Response::Data(Some(vec![value]))))
+            Ok((input, MetaResponse::Data(Some(vec![meta_value]))))
         }
         // match arm for "NF" response
-        Response::Status(Status::NotFound) => {
+        MetaResponse::Status(Status::NotFound) => {
             // no value (data block) or size in this case, potentially just flags
             let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?;
             let (input, _) = crlf(input)?; // consume the trailing crlf and leave the buffer empty
 
             // early return if there were no flags passed in
             if meta_values_array.is_empty() {
-                return Ok((input, Response::Status(Status::NotFound)));
+                return Ok((input, MetaResponse::Status(Status::NotFound)));
             }
 
             // data is empty in this case
-            let data = None;
-            let value =
-                construct_value_from_meta_values(meta_values_array, data, Some(Status::NotFound))
-                    .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
+            let meta_value = construct_meta_value_from_flag_array(
+                meta_values_array,
+                None,
+                Some(Status::NotFound),
+            )
+            .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
 
-            Ok((input, Response::Data(Some(vec![value]))))
+            Ok((input, MetaResponse::Data(Some(vec![meta_value]))))
         }
         _ => Err(nom::Err::Error(nom::error::Error::new(
             input,
@@ -274,16 +272,12 @@ fn parse_meta_flag_values_as_slice(input: &[u8]) -> IResult<&[u8], Vec<(u8, Opti
     }
 }
 
-fn map_meta_flag(
-    flag: u8,
-    meta_value: &[u8],
-    value: &mut Value,
-    meta_values: &mut MetaValue,
-) -> Result<(), crate::Error> {
+// TODO: refactor with new struct MetaValue
+fn map_meta_flag(flag: u8, token: &[u8], meta_value: &mut MetaValue) -> Result<(), crate::Error> {
     match flag {
         b'c' => {
-            value.cas = Some(
-                std::str::from_utf8(meta_value)
+            meta_value.cas = Some(
+                std::str::from_utf8(token)
                     .map_err(|_| {
                         Error::Protocol(Status::Error(ErrorKind::Generic(
                             "Failed to parse c flag".to_string(),
@@ -298,8 +292,8 @@ fn map_meta_flag(
             );
         }
         b'f' => {
-            value.flags = Some(
-                std::str::from_utf8(meta_value)
+            meta_value.flags = Some(
+                std::str::from_utf8(token)
                     .map_err(|_| {
                         Error::Protocol(Status::Error(ErrorKind::Generic(
                             "Failed to parse f flag".to_string(),
@@ -314,14 +308,14 @@ fn map_meta_flag(
             )
         }
         b'h' => {
-            meta_values.hit_before = Some(meta_value != b"0");
+            meta_value.hit_before = Some(token != b"0");
         }
         b'k' => {
-            value.key = meta_value.to_vec();
+            meta_value.key = Some(token.to_vec());
         }
         b'l' => {
-            meta_values.last_accessed = Some(
-                std::str::from_utf8(meta_value)
+            meta_value.last_accessed = Some(
+                std::str::from_utf8(token)
                     .map_err(|_| {
                         Error::Protocol(Status::Error(ErrorKind::Generic(
                             "Failed to parse l flag".to_string(),
@@ -336,11 +330,11 @@ fn map_meta_flag(
             )
         }
         b'O' => {
-            meta_values.opaque_token = Some(meta_value.to_vec());
+            meta_value.opaque_token = Some(token.to_vec());
         }
         b's' => {
-            meta_values.size = Some(
-                std::str::from_utf8(meta_value)
+            meta_value.size = Some(
+                std::str::from_utf8(token)
                     .map_err(|_| {
                         Error::Protocol(Status::Error(ErrorKind::Generic(
                             "Failed to parse s flag".to_string(),
@@ -355,8 +349,8 @@ fn map_meta_flag(
             )
         }
         b't' => {
-            meta_values.ttl_remaining = Some(
-                std::str::from_utf8(meta_value)
+            meta_value.ttl_remaining = Some(
+                std::str::from_utf8(token)
                     .map_err(|_| {
                         Error::Protocol(Status::Error(ErrorKind::Generic(
                             "Failed to parse t flag".to_string(),
@@ -370,45 +364,44 @@ fn map_meta_flag(
                     })?,
             )
         }
-        b'W' => meta_values.is_recache_winner = Some(true),
-        b'Z' => meta_values.is_recache_winner = Some(false),
-        b'X' => meta_values.is_stale = Some(true),
+        b'W' => meta_value.is_recache_winner = Some(true),
+        b'Z' => meta_value.is_recache_winner = Some(false),
+        b'X' => meta_value.is_stale = Some(true),
         _ => {}
     }
 
     Ok(())
 }
 
-fn construct_value_from_meta_values(
-    meta_values_array: Vec<(u8, Option<&[u8]>)>,
+fn construct_meta_value_from_flag_array(
+    flag_array: Vec<(u8, Option<&[u8]>)>,
     data: Option<&[u8]>,
     status: Option<Status>,
-) -> Result<Value, Error> {
-    let mut meta_values = MetaValue {
+) -> Result<MetaValue, Error> {
+    let mut meta_value = MetaValue {
         status,
+        data: data.map(|d| d.to_vec()),
         ..Default::default()
     };
 
-    let meta_values_array: Vec<(u8, &[u8])> = meta_values_array
+    let flag_array: Vec<(u8, &[u8])> = flag_array
         .iter()
         .map(|(flag, value)| (*flag, value.unwrap_or_default()))
         .collect();
 
-    let mut value = Value {
-        key: Vec::new(),
-        cas: None,
-        flags: Some(0),
-        data: data.map(|d| d.to_vec()),
-        meta_values: None,
-    };
+    // let mut meta_value = MetaValue {
+    //     key: None,
+    //     cas: None,
+    //     flags: Some(0),
+    //     data: data,
+    //     meta_values: None,
+    // };
 
-    for (flag, meta_value) in meta_values_array {
-        map_meta_flag(flag, meta_value, &mut value, &mut meta_values)?;
+    for (flag, token) in flag_array {
+        map_meta_flag(flag, token, &mut meta_value)?;
     }
 
-    value.meta_values = Some(meta_values);
-
-    Ok(value)
+    Ok(meta_value)
 }
 
 #[cfg(test)]
@@ -536,20 +529,18 @@ mod tests {
         assert_eq!(remaining, b"");
 
         match response {
-            Response::Data(Some(values)) => {
-                assert_eq!(values.len(), 1);
-                let value = values.first().unwrap();
+            MetaResponse::Data(Some(meta_values)) => {
+                assert_eq!(meta_values.len(), 1);
+                let meta_value = &meta_values[0];
                 assert_eq!(
-                    str::from_utf8(value.data.as_ref().unwrap()).unwrap(),
+                    str::from_utf8(meta_value.data.as_ref().unwrap()).unwrap(),
                     "test-value"
                 );
-                assert_eq!(value.flags, Some(9001));
-                assert_eq!(value.cas, None);
-
-                let meta_values = value.meta_values.as_ref().unwrap();
-                assert_eq!(meta_values.hit_before, Some(true));
-                assert_eq!(meta_values.last_accessed, Some(56));
-                assert_eq!(meta_values.ttl_remaining, Some(2179));
+                assert_eq!(meta_value.flags, Some(9001));
+                assert_eq!(meta_value.cas, None);
+                assert_eq!(meta_value.hit_before, Some(true));
+                assert_eq!(meta_value.last_accessed, Some(56));
+                assert_eq!(meta_value.ttl_remaining, Some(2179));
             }
             _ => panic!("Expected Response::Data, got something else"),
         }
@@ -563,21 +554,19 @@ mod tests {
         assert_eq!(remaining, b"");
 
         match response {
-            Response::Data(Some(values)) => {
-                assert_eq!(values.len(), 1);
-                let value = values.first().unwrap();
+            MetaResponse::Data(Some(meta_values)) => {
+                assert_eq!(meta_values.len(), 1);
+                let meta_value = &meta_values[0];
                 assert_eq!(
-                    str::from_utf8(value.data.as_ref().unwrap()).unwrap(),
+                    str::from_utf8(meta_value.data.as_ref().unwrap()).unwrap(),
                     "test-value"
                 );
-                assert_eq!(value.flags, Some(0));
-                assert_eq!(value.cas, None);
-
-                let meta_values = value.meta_values.as_ref().unwrap();
-                assert_eq!(meta_values.hit_before, Some(true));
-                assert_eq!(meta_values.last_accessed, Some(56));
-                assert_eq!(meta_values.ttl_remaining, Some(2179));
-                assert_eq!(meta_values.opaque_token, Some(b"opaque-token".to_vec()));
+                assert_eq!(meta_value.flags, Some(0));
+                assert_eq!(meta_value.cas, None);
+                assert_eq!(meta_value.hit_before, Some(true));
+                assert_eq!(meta_value.last_accessed, Some(56));
+                assert_eq!(meta_value.ttl_remaining, Some(2179));
+                assert_eq!(meta_value.opaque_token, Some(b"opaque-token".to_vec()));
             }
             _ => panic!("Expected Response::Data, got something else"),
         }
@@ -591,15 +580,15 @@ mod tests {
         assert_eq!(remaining, b"");
 
         match response {
-            Response::Data(Some(values)) => {
-                assert_eq!(values.len(), 1);
-                let value = values.first().unwrap();
+            MetaResponse::Data(Some(meta_values)) => {
+                assert_eq!(meta_values.len(), 1);
+                let meta_value = &meta_values[0];
                 assert_eq!(
-                    str::from_utf8(value.data.as_ref().unwrap()).unwrap(),
+                    str::from_utf8(meta_value.data.as_ref().unwrap()).unwrap(),
                     "test-value"
                 );
-                assert_eq!(value.flags, Some(0));
-                assert_eq!(value.cas, None);
+                assert_eq!(meta_value.flags, Some(0));
+                assert_eq!(meta_value.cas, None);
             }
             _ => panic!("Expected Response::Data, got something else"),
         }
@@ -612,7 +601,7 @@ mod tests {
 
         assert_eq!(remaining, b"");
 
-        assert_eq!(response, Response::Data(None));
+        assert_eq!(response, MetaResponse::Data(None));
     }
 
     #[test]
@@ -623,16 +612,14 @@ mod tests {
         assert_eq!(remaining, b"");
 
         match response {
-            Response::Data(Some(values)) => {
-                assert_eq!(values.len(), 1);
-                let value = &values[0];
-                assert_eq!(value.data, None);
-                assert_eq!(value.flags, Some(0));
-                assert_eq!(value.cas, Some(1));
-
-                let meta_values = value.meta_values.as_ref().unwrap();
-                assert_eq!(meta_values.hit_before, Some(true));
-                assert_eq!(meta_values.last_accessed, Some(123));
+            MetaResponse::Data(Some(meta_values)) => {
+                assert_eq!(meta_values.len(), 1);
+                let meta_value = &meta_values[0];
+                assert_eq!(meta_value.data, None);
+                assert_eq!(meta_value.flags, Some(0));
+                assert_eq!(meta_value.cas, Some(1));
+                assert_eq!(meta_value.hit_before, Some(true));
+                assert_eq!(meta_value.last_accessed, Some(123));
             }
             _ => panic!("Expected Response::Data, got something else"),
         }
@@ -646,21 +633,19 @@ mod tests {
         assert_eq!(remaining, b"");
 
         match response {
-            Response::Data(Some(values)) => {
-                assert_eq!(values.len(), 1);
-                let value = &values[0];
+            MetaResponse::Data(Some(meta_values)) => {
+                assert_eq!(meta_values.len(), 1);
+                let meta_value = &meta_values[0];
                 assert_eq!(
-                    str::from_utf8(value.data.as_ref().unwrap()).unwrap(),
+                    str::from_utf8(meta_value.data.as_ref().unwrap()).unwrap(),
                     "test-value"
                 );
-                assert_eq!(value.flags, Some(0));
-                assert_eq!(value.cas, None);
-
-                let meta_values = value.meta_values.as_ref().unwrap();
-                assert_eq!(meta_values.hit_before, Some(true));
-                assert_eq!(meta_values.last_accessed, Some(56));
-                assert_eq!(meta_values.ttl_remaining, Some(2179));
-                assert_eq!(meta_values.opaque_token, Some(b"opaque-token".to_vec()));
+                assert_eq!(meta_value.flags, Some(0));
+                assert_eq!(meta_value.cas, None);
+                assert_eq!(meta_value.hit_before, Some(true));
+                assert_eq!(meta_value.last_accessed, Some(56));
+                assert_eq!(meta_value.ttl_remaining, Some(2179));
+                assert_eq!(meta_value.opaque_token, Some(b"opaque-token".to_vec()));
             }
             _ => panic!("Expected Response::Data, got something else"),
         }
@@ -674,21 +659,19 @@ mod tests {
         assert_eq!(remaining, b"");
 
         match response {
-            Response::Data(Some(values)) => {
-                assert_eq!(values.len(), 1);
-                let value = &values[0];
-                assert_eq!(value.key, b"test-key");
+            MetaResponse::Data(Some(meta_values)) => {
+                assert_eq!(meta_values.len(), 1);
+                let meta_value = &meta_values[0];
+                assert_eq!(meta_value.key, Some(b"test-key".to_vec()));
                 assert_eq!(
-                    str::from_utf8(value.data.as_ref().unwrap()).unwrap(),
+                    str::from_utf8(meta_value.data.as_ref().unwrap()).unwrap(),
                     "test-value"
                 );
-                assert_eq!(value.flags, Some(0));
-                assert_eq!(value.cas, None);
-
-                let meta_values = value.meta_values.as_ref().unwrap();
-                assert_eq!(meta_values.hit_before, Some(true));
-                assert_eq!(meta_values.last_accessed, Some(56));
-                assert_eq!(meta_values.ttl_remaining, Some(2179));
+                assert_eq!(meta_value.flags, Some(0));
+                assert_eq!(meta_value.cas, None);
+                assert_eq!(meta_value.hit_before, Some(true));
+                assert_eq!(meta_value.last_accessed, Some(56));
+                assert_eq!(meta_value.ttl_remaining, Some(2179));
             }
             _ => panic!("Expected Response::Data, got something else"),
         }
@@ -699,7 +682,7 @@ mod tests {
         let input = b"EN\r\n";
         let (remaining, response) = parse_meta_get_data_value(input).unwrap();
         assert_eq!(remaining, b"");
-        assert_eq!(response, Response::Status(Status::NotFound));
+        assert_eq!(response, MetaResponse::Status(Status::NotFound));
     }
 
     #[test]
@@ -710,16 +693,14 @@ mod tests {
         assert_eq!(remaining, b"");
 
         match response {
-            Response::Data(Some(values)) => {
-                assert_eq!(values.len(), 1);
-                let value = values.first().unwrap();
-                assert_eq!(value.key, b"");
-                assert_eq!(value.data, None);
-                assert_eq!(value.flags, Some(0));
-                assert_eq!(value.cas, None);
-
-                let meta_values = value.meta_values.as_ref().unwrap();
-                assert_eq!(meta_values.opaque_token, Some(b"opaque-token".to_vec()));
+            MetaResponse::Data(Some(meta_values)) => {
+                assert_eq!(meta_values.len(), 1);
+                let meta_value = &meta_values[0];
+                assert_eq!(meta_value.key, Some(b"".to_vec()));
+                assert_eq!(meta_value.data, None);
+                assert_eq!(meta_value.flags, Some(0));
+                assert_eq!(meta_value.cas, None);
+                assert_eq!(meta_value.opaque_token, Some(b"opaque-token".to_vec()));
             }
             _ => panic!("Expected Response::Data, got something else"),
         }
@@ -732,16 +713,14 @@ mod tests {
         assert_eq!(remaining, b"");
 
         match response {
-            Response::Data(Some(values)) => {
-                assert_eq!(values.len(), 1);
-                let value = values.first().unwrap();
-                assert_eq!(value.key, b"test-key");
-                assert_eq!(value.data, None);
-                assert_eq!(value.flags, Some(0));
-                assert_eq!(value.cas, None);
-
-                let meta_values = value.meta_values.as_ref().unwrap();
-                assert_eq!(meta_values.status, Some(Status::NotFound));
+            MetaResponse::Data(Some(meta_values)) => {
+                assert_eq!(meta_values.len(), 1);
+                let meta_value = &meta_values[0];
+                assert_eq!(meta_value.key, Some(b"test-key".to_vec()));
+                assert_eq!(meta_value.data, None);
+                assert_eq!(meta_value.flags, Some(0));
+                assert_eq!(meta_value.cas, None);
+                assert_eq!(meta_value.status, Some(Status::NotFound));
             }
             _ => panic!("Expected Response::Data, got something else"),
         }
@@ -768,20 +747,18 @@ mod tests {
             str::from_utf8(remaining).unwrap()
         );
         match response {
-            Response::Data(Some(values)) => {
-                assert_eq!(values.len(), 1);
-                let value = &values[0];
+            MetaResponse::Data(Some(meta_values)) => {
+                assert_eq!(meta_values.len(), 1);
+                let meta_value = &meta_values[0];
                 assert_eq!(
-                    str::from_utf8(value.data.as_ref().unwrap()).unwrap(),
+                    str::from_utf8(meta_value.data.as_ref().unwrap()).unwrap(),
                     "test-\r\nvalue"
                 );
-                assert_eq!(value.flags, Some(0));
-                assert_eq!(value.cas, None);
-
-                let meta_values = value.meta_values.as_ref().unwrap();
-                assert_eq!(meta_values.hit_before, Some(true));
-                assert_eq!(meta_values.last_accessed, Some(56));
-                assert_eq!(meta_values.ttl_remaining, Some(2179));
+                assert_eq!(meta_value.flags, Some(0));
+                assert_eq!(meta_value.cas, None);
+                assert_eq!(meta_value.hit_before, Some(true));
+                assert_eq!(meta_value.last_accessed, Some(56));
+                assert_eq!(meta_value.ttl_remaining, Some(2179));
             }
             _ => panic!("Expected Response::Data, got something else"),
         }
@@ -800,20 +777,18 @@ mod tests {
             str::from_utf8(remaining).unwrap()
         );
         match response {
-            Response::Data(Some(values)) => {
-                assert_eq!(values.len(), 1);
-                let value = &values[0];
+            MetaResponse::Data(Some(meta_values)) => {
+                assert_eq!(meta_values.len(), 1);
+                let meta_value = &meta_values[0];
                 assert_eq!(
-                    str::from_utf8(value.data.as_ref().unwrap()).unwrap(),
+                    str::from_utf8(meta_value.data.as_ref().unwrap()).unwrap(),
                     "test\r-\nvalue"
                 );
-                assert_eq!(value.flags, Some(0));
-                assert_eq!(value.cas, None);
-
-                let meta_values = value.meta_values.as_ref().unwrap();
-                assert_eq!(meta_values.hit_before, Some(true));
-                assert_eq!(meta_values.last_accessed, Some(56));
-                assert_eq!(meta_values.ttl_remaining, Some(2179));
+                assert_eq!(meta_value.flags, Some(0));
+                assert_eq!(meta_value.cas, None);
+                assert_eq!(meta_value.hit_before, Some(true));
+                assert_eq!(meta_value.last_accessed, Some(56));
+                assert_eq!(meta_value.ttl_remaining, Some(2179));
             }
             _ => panic!("Expected Response::Data, got something else"),
         }
@@ -832,20 +807,18 @@ mod tests {
             str::from_utf8(remaining).unwrap()
         );
         match response {
-            Response::Data(Some(values)) => {
-                assert_eq!(values.len(), 1);
-                let value = &values[0];
+            MetaResponse::Data(Some(meta_values)) => {
+                assert_eq!(meta_values.len(), 1);
+                let meta_value = &meta_values[0];
                 assert_eq!(
-                    str::from_utf8(value.data.as_ref().unwrap()).unwrap(),
+                    str::from_utf8(meta_value.data.as_ref().unwrap()).unwrap(),
                     "test\n-\rvalue"
                 );
-                assert_eq!(value.flags, Some(0));
-                assert_eq!(value.cas, None);
-
-                let meta_values = value.meta_values.as_ref().unwrap();
-                assert_eq!(meta_values.hit_before, Some(true));
-                assert_eq!(meta_values.last_accessed, Some(56));
-                assert_eq!(meta_values.ttl_remaining, Some(2179));
+                assert_eq!(meta_value.flags, Some(0));
+                assert_eq!(meta_value.cas, None);
+                assert_eq!(meta_value.hit_before, Some(true));
+                assert_eq!(meta_value.last_accessed, Some(56));
+                assert_eq!(meta_value.ttl_remaining, Some(2179));
             }
             _ => panic!("Expected Response::Data, got something else"),
         }
@@ -858,7 +831,7 @@ mod tests {
 
         assert_eq!(remaining, b"");
 
-        assert_eq!(response, Response::Status(Status::Stored));
+        assert_eq!(response, MetaResponse::Status(Status::Stored));
     }
 
     #[test]
@@ -868,7 +841,7 @@ mod tests {
 
         assert_eq!(remaining, b"");
 
-        assert_eq!(response, Response::Status(Status::NotStored));
+        assert_eq!(response, MetaResponse::Status(Status::NotStored));
     }
 
     #[test]
@@ -878,7 +851,7 @@ mod tests {
 
         assert_eq!(remaining, b"");
 
-        assert_eq!(response, Response::Status(Status::Exists));
+        assert_eq!(response, MetaResponse::Status(Status::Exists));
     }
 
     #[test]
@@ -888,7 +861,7 @@ mod tests {
 
         assert_eq!(remaining, b"");
 
-        assert_eq!(response, Response::Status(Status::NotFound));
+        assert_eq!(response, MetaResponse::Status(Status::NotFound));
     }
 
     #[test]
@@ -899,15 +872,13 @@ mod tests {
         assert_eq!(remaining, b"");
 
         match response {
-            Response::Data(Some(values)) => {
-                assert_eq!(values.len(), 1);
-                let value = values.first().unwrap();
-                assert_eq!(value.data, None);
-                assert_eq!(value.flags, Some(0));
-                assert_eq!(value.cas, None);
-
-                let meta_values = value.meta_values.as_ref().unwrap();
-                assert_eq!(meta_values.opaque_token, Some(b"123".to_vec()));
+            MetaResponse::Data(Some(meta_values)) => {
+                assert_eq!(meta_values.len(), 1);
+                let meta_value = &meta_values[0];
+                assert_eq!(meta_value.data, None);
+                assert_eq!(meta_value.flags, Some(0));
+                assert_eq!(meta_value.cas, None);
+                assert_eq!(meta_value.opaque_token, Some(b"123".to_vec()));
             }
             _ => panic!("Expected Response::Data, got something else"),
         }
@@ -921,16 +892,14 @@ mod tests {
         assert_eq!(remaining, b"");
 
         match response {
-            Response::Data(Some(values)) => {
-                assert_eq!(values.len(), 1);
-                let value = values.first().unwrap();
-                assert_eq!(value.key, b"test-key");
-                assert_eq!(value.data, None);
-                assert_eq!(value.flags, Some(0));
-                assert_eq!(value.cas, None);
-
-                let meta_values = value.meta_values.as_ref().unwrap();
-                assert_eq!(meta_values.status, Some(Status::Stored));
+            MetaResponse::Data(Some(meta_values)) => {
+                assert_eq!(meta_values.len(), 1);
+                let meta_value = &meta_values[0];
+                assert_eq!(meta_value.key, Some(b"test-key".to_vec()));
+                assert_eq!(meta_value.data, None);
+                assert_eq!(meta_value.flags, Some(0));
+                assert_eq!(meta_value.cas, None);
+                assert_eq!(meta_value.status, Some(Status::Stored));
             }
             _ => panic!("Expected Response::Data, got something else"),
         }

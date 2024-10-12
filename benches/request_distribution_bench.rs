@@ -1,6 +1,6 @@
 use std::{env, sync::LazyLock};
 
-use async_memcached::Client;
+use async_memcached::{AsciiProtocol, Client};
 use criterion::{criterion_group, criterion_main, Criterion};
 use rand::{rngs::StdRng, seq::SliceRandom, SeedableRng};
 use tokio::runtime::Runtime;
