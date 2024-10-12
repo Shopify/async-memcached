@@ -9,12 +9,12 @@ use nom::{
 };
 use std::fmt;
 
-mod ascii;
-pub use ascii::{parse_ascii_metadump_response, parse_ascii_response, parse_ascii_stats_response};
+mod ascii_parser;
+pub use ascii_parser::{parse_ascii_metadump_response, parse_ascii_response, parse_ascii_stats_response};
 
-mod meta;
+mod meta_parser;
 #[allow(unused_imports)]
-pub use meta::{parse_meta_get_response, parse_meta_set_response};
+pub use meta_parser::{parse_meta_get_response, parse_meta_set_response};
 
 /// A value from memcached.
 #[derive(Clone, Debug, PartialEq)]
