@@ -407,6 +407,7 @@ impl Client {
         self.conn.flush().await?;
 
         match self.drive_receive(parse_meta_set_response).await? {
+            Response::Status(Status::Stored) => Ok(None),
             Response::Status(s) => Err(s.into()),
             Response::Data(d) => d
                 .map(|mut items| {
