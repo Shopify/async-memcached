@@ -1,5 +1,5 @@
-use super::{Client, Error, Response, Value, Status};
-use super::{ErrorKind, AsMemcachedValue};
+use crate::{Client, Error, Response, Value, Status};
+use crate::{ErrorKind, AsMemcachedValue};
 
 use std::future::Future;
 use fxhash::FxHashMap;
