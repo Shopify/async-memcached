@@ -100,7 +100,7 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
             )
             .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?; // Throw Fail as a generic nom error
 
-            Ok((input, MetaResponse::Data(Some(meta_value))))
+            Ok((input, MetaResponse::Data(Some(vec![meta_value]))))
         }
         // match arm for "HD" response when v flag is omitted
         MetaResponse::Status(Status::Exists) => {
@@ -122,7 +122,7 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
                 )
                 .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
 
-            Ok((input, MetaResponse::Data(Some(meta_value))))
+            Ok((input, MetaResponse::Data(Some(vec![meta_value]))))
         }
         // match arm for "EN" response
         MetaResponse::Status(Status::NotFound) => {
@@ -142,7 +142,7 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
                 )
                 .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
 
-            Ok((input, MetaResponse::Data(Some(meta_value))))
+            Ok((input, MetaResponse::Data(Some(vec![meta_value]))))
         }
         _ => {
             // unexpected response code, should never happen, bail
@@ -174,7 +174,7 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
                 construct_meta_value_from_flag_array(meta_values_array, None, Some(Status::Stored))
                     .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
 
-            Ok((input, MetaResponse::Data(Some(meta_value))))
+            Ok((input, MetaResponse::Data(Some(vec![meta_value]))))
         }
         // match arm for "NS" response
         MetaResponse::Status(Status::NotStored) => {
@@ -195,7 +195,7 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
                 )
                     .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
 
-            Ok((input, MetaResponse::Data(Some(meta_value))))
+            Ok((input, MetaResponse::Data(Some(vec![meta_value]))))
         }
         // match arm for "EX" response
         MetaResponse::Status(Status::Exists) => {
@@ -215,7 +215,7 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
                 )
                     .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
 
-            Ok((input, MetaResponse::Data(Some(meta_value))))
+            Ok((input, MetaResponse::Data(Some(vec![meta_value]))))
         }
         // match arm for "NF" response
         MetaResponse::Status(Status::NotFound) => {
@@ -235,7 +235,7 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
                 )
                     .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
 
-            Ok((input, MetaResponse::Data(Some(meta_value))))
+            Ok((input, MetaResponse::Data(Some(vec![meta_value]))))
         }
         _ => Err(nom::Err::Error(nom::error::Error::new(
             input,
@@ -541,7 +541,9 @@ mod tests {
         assert_eq!(remaining, b"");
 
         match response {
-            MetaResponse::Data(Some(meta_value)) => {
+            MetaResponse::Data(Some(meta_values)) => {
+                assert_eq!(meta_values.len(), 1);
+                let meta_value = &meta_values[0];
                 assert_eq!(
                     str::from_utf8(meta_value.data.as_ref().unwrap()).unwrap(),
                     "test-value"
@@ -564,7 +566,9 @@ mod tests {
         assert_eq!(remaining, b"");
 
         match response {
-            MetaResponse::Data(Some(meta_value)) => {
+            MetaResponse::Data(Some(meta_values)) => {
+                assert_eq!(meta_values.len(), 1);
+                let meta_value = &meta_values[0];
                 assert_eq!(
                     str::from_utf8(meta_value.data.as_ref().unwrap()).unwrap(),
                     "test-value"
@@ -588,8 +592,9 @@ mod tests {
         assert_eq!(remaining, b"");
 
         match response {
-            MetaResponse::Data(Some(meta_value)) => {
-                assert_eq!(meta_value.data.as_ref().unwrap().len(), 1);
+            MetaResponse::Data(Some(meta_values)) => {
+                assert_eq!(meta_values.len(), 1);
+                let meta_value = &meta_values[0];
                 assert_eq!(
                     str::from_utf8(meta_value.data.as_ref().unwrap()).unwrap(),
                     "test-value"
@@ -619,7 +624,9 @@ mod tests {
         assert_eq!(remaining, b"");
 
         match response {
-            MetaResponse::Data(Some(meta_value)) => {
+            MetaResponse::Data(Some(meta_values)) => {
+                assert_eq!(meta_values.len(), 1);
+                let meta_value = &meta_values[0];
                 assert_eq!(meta_value.data, None);
                 assert_eq!(meta_value.flags, Some(0));
                 assert_eq!(meta_value.cas, Some(1));
@@ -638,8 +645,9 @@ mod tests {
         assert_eq!(remaining, b"");
 
         match response {
-            MetaResponse::Data(Some(meta_value)) => {
-                assert_eq!(meta_value.data.as_ref().unwrap().len(), 1);
+            MetaResponse::Data(Some(meta_values)) => {
+                assert_eq!(meta_values.len(), 1);
+                let meta_value = &meta_values[0];
                 assert_eq!(
                     str::from_utf8(meta_value.data.as_ref().unwrap()).unwrap(),
                     "test-value"
@@ -663,8 +671,9 @@ mod tests {
         assert_eq!(remaining, b"");
 
         match response {
-            MetaResponse::Data(Some(meta_value)) => {
-                assert_eq!(meta_value.data.as_ref().unwrap().len(), 1);
+            MetaResponse::Data(Some(meta_values)) => {
+                assert_eq!(meta_values.len(), 1);
+                let meta_value = &meta_values[0];
                 assert_eq!(meta_value.key, Some(b"test-key".to_vec()));
                 assert_eq!(
                     str::from_utf8(meta_value.data.as_ref().unwrap()).unwrap(),
@@ -696,8 +705,9 @@ mod tests {
         assert_eq!(remaining, b"");
 
         match response {
-            MetaResponse::Data(Some(meta_value)) => {
-                assert_eq!(meta_value.data.as_ref().unwrap().len(), 1);
+            MetaResponse::Data(Some(meta_values)) => {
+                assert_eq!(meta_values.len(), 1);
+                let meta_value = &meta_values[0];
                 assert_eq!(meta_value.key, Some(b"".to_vec()));
                 assert_eq!(meta_value.data, None);
                 assert_eq!(meta_value.flags, Some(0));
@@ -715,8 +725,9 @@ mod tests {
         assert_eq!(remaining, b"");
 
         match response {
-            MetaResponse::Data(Some(meta_value)) => {
-                assert_eq!(meta_value.data.as_ref().unwrap().len(), 1);
+            MetaResponse::Data(Some(meta_values)) => {
+                assert_eq!(meta_values.len(), 1);
+                let meta_value = &meta_values[0];
                 assert_eq!(meta_value.key, Some(b"test-key".to_vec()));
                 assert_eq!(meta_value.data, None);
                 assert_eq!(meta_value.flags, Some(0));
@@ -748,7 +759,9 @@ mod tests {
             str::from_utf8(remaining).unwrap()
         );
         match response {
-            MetaResponse::Data(Some(meta_value)) => {
+            MetaResponse::Data(Some(meta_values)) => {
+                assert_eq!(meta_values.len(), 1);
+                let meta_value = &meta_values[0];
                 assert_eq!(
                     str::from_utf8(meta_value.data.as_ref().unwrap()).unwrap(),
                     "test-\r\nvalue"
@@ -776,7 +789,9 @@ mod tests {
             str::from_utf8(remaining).unwrap()
         );
         match response {
-            MetaResponse::Data(Some(meta_value)) => {
+            MetaResponse::Data(Some(meta_values)) => {
+                assert_eq!(meta_values.len(), 1);
+                let meta_value = &meta_values[0];
                 assert_eq!(
                     str::from_utf8(meta_value.data.as_ref().unwrap()).unwrap(),
                     "test\r-\nvalue"
@@ -804,7 +819,9 @@ mod tests {
             str::from_utf8(remaining).unwrap()
         );
         match response {
-            MetaResponse::Data(Some(meta_value)) => {
+            MetaResponse::Data(Some(meta_values)) => {
+                assert_eq!(meta_values.len(), 1);
+                let meta_value = &meta_values[0];
                 assert_eq!(
                     str::from_utf8(meta_value.data.as_ref().unwrap()).unwrap(),
                     "test\n-\rvalue"
@@ -867,7 +884,9 @@ mod tests {
         assert_eq!(remaining, b"");
 
         match response {
-            MetaResponse::Data(Some(meta_value)) => {
+            MetaResponse::Data(Some(meta_values)) => {
+                assert_eq!(meta_values.len(), 1);
+                let meta_value = &meta_values[0];
                 assert_eq!(meta_value.data, None);
                 assert_eq!(meta_value.flags, Some(0));
                 assert_eq!(meta_value.cas, None);
@@ -885,7 +904,9 @@ mod tests {
         assert_eq!(remaining, b"");
 
         match response {
-            MetaResponse::Data(Some(meta_value)) => {
+            MetaResponse::Data(Some(meta_values)) => {
+                assert_eq!(meta_values.len(), 1);
+                let meta_value = &meta_values[0];
                 assert_eq!(meta_value.key, Some(b"test-key".to_vec()));
                 assert_eq!(meta_value.data, None);
                 assert_eq!(meta_value.flags, Some(0));

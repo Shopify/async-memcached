@@ -1,13 +1,12 @@
-use super::{Client, Error, MetaValue, Status};
-use super::{ErrorKind, AsMemcachedValue};
+use crate::{Client, Error, Status, ErrorKind, AsMemcachedValue};
+
+use crate::parser::{MetaResponse, MetaValue};
+use crate::parser::{parse_meta_get_response, parse_meta_set_response};
 
 use std::future::Future;
-use crate::parser::MetaResponse;
-// use async_trait;
-use fxhash::FxHashMap;
+
 use tokio::io::AsyncWriteExt;
 
-use crate::parser::meta::parse_meta_response;
 /// Trait defining Meta protocol-specific methods for the Client.
 pub trait MetaProtocol {
     /// Gets the given key with additional metadata.
@@ -71,20 +70,19 @@ impl MetaProtocol for Client {
         self.conn.flush().await?;
 
         match self.drive_receive(parse_meta_get_response).await? {
-            Response::Status(Status::NotFound) => Ok(None),
-            Response::Status(s) => Err(s.into()),
-            Response::Data(d) => d
+            MetaResponse::Status(Status::NotFound) => Ok(None),
+            MetaResponse::Status(s) => Err(s.into()),
+            MetaResponse::Data(d) => d
                 .map(|mut items| {
                     if items.len() != 1 {
                         Err(Status::Error(ErrorKind::Protocol(None)).into())
                     } else {
                         let mut item = items.remove(0);
-                        item.key = key.as_ref().to_vec();
+                        item.key = Some(key.as_ref().to_vec());
                         Ok(item)
                     }
                 })
                 .transpose(),
-            _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),
         }
     }
 
@@ -119,20 +117,19 @@ impl MetaProtocol for Client {
         self.conn.flush().await?;
 
         match self.drive_receive(parse_meta_set_response).await? {
-            Response::Status(Status::Stored) => Ok(None),
-            Response::Status(s) => Err(s.into()),
-            Response::Data(d) => d
+            MetaResponse::Status(Status::Stored) => Ok(None),
+            MetaResponse::Status(s) => Err(s.into()),
+            MetaResponse::Data(d) => d
                 .map(|mut items| {
                     if items.len() != 1 {
                         Err(Status::Error(ErrorKind::Protocol(None)).into())
                     } else {
                         let mut item = items.remove(0);
-                        item.key = key.as_ref().to_vec();
+                        item.key = Some(key.as_ref().to_vec());
                         Ok(item)
                     }
                 })
                 .transpose(),
-            _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),
         }
     }
 }
