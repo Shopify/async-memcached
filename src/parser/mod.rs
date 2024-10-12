@@ -112,6 +112,17 @@ pub enum Response {
     IncrDecr(u64),
 }
 
+/// Response to a memcached meta protocol operation.
+#[derive(Clone, Debug, PartialEq)]
+pub enum MetaResponse {
+    /// The status of a given operation, which may or may not have succeeded.
+    Status(Status),
+    /// Data response, which is only returned for when requested via the 'v' flag.
+    Data(Option<Vec<MetaValue>>),
+    // /// Resulting value of a key after an increment/decrement operation.
+    // IncrDecr(u64),
+}
+
 /// Metadump response.
 #[derive(Clone, Debug, PartialEq)]
 pub enum MetadumpResponse {
