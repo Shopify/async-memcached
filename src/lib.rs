@@ -145,26 +145,32 @@ impl Client {
 
     /// Pipes raw bytes (conforming to the Memcached protocol) to the server and sends the response back.
     pub async fn raw_pipe(&mut self, payload: &[u8]) -> Result<&[u8], Error> {
-        self.buf.clear(); // clear the buffer to ensure no partial data from previous operations
-
         self.conn.write_all(payload).await?;
         self.conn.flush().await?;
 
+        self.buf.clear();
+
         loop {
-            let bytes_read = self.conn.read_buf(&mut self.buf).await?;
-            if bytes_read == 0 {
-                return Err(Error::Io(std::io::Error::new(
-                    std::io::ErrorKind::UnexpectedEof,
-                    "Connection closed without receiving data",
-                )));
-            }
+            let _bytes_read = self.conn.read_buf(&mut self.buf).await?;
+
+            // dbg!(format!(
+            //     "bytes_read: {:?}, buf: {:?}",
+            //     bytes_read, &self.buf
+            // ));
 
             if self.buf.ends_with(b"\r\n") {
                 break;
             }
         }
 
-        Ok(&self.buf)
+        if self.buf.is_empty() {
+            Err(Error::Io(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "Connection closed without receiving data",
+            )))
+        } else {
+            Ok(&self.buf)
+        }
     }
 
     /// Gets the given key.
