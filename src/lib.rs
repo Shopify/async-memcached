@@ -145,18 +145,13 @@ impl Client {
 
     /// Pipes raw bytes (conforming to the Memcached protocol) to the server and sends the response back.
     pub async fn raw_pipe(&mut self, payload: &[u8]) -> Result<&[u8], Error> {
+        self.buf.clear();
+
         self.conn.write_all(payload).await?;
         self.conn.flush().await?;
 
-        self.buf.clear();
-
         loop {
             let _bytes_read = self.conn.read_buf(&mut self.buf).await?;
-
-            // dbg!(format!(
-            //     "bytes_read: {:?}, buf: {:?}",
-            //     bytes_read, &self.buf
-            // ));
 
             if self.buf.ends_with(b"\r\n") {
                 break;
