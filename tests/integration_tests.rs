@@ -1095,3 +1095,17 @@ async fn test_dump_raw_bytes_meta_set_large_value() {
         format!("VA {value_len} f0\r\n{v}\r\n").as_bytes()
     );
 }
+
+#[tokio::test]
+async fn test_version() {
+    let mut client = setup_client(&[]).await;
+
+    let meta_version_command = "version\r\n";
+
+    let result = client.dump_raw_bytes(meta_version_command.as_bytes()).await;
+
+    assert!(result.is_ok());
+    // assert!(!result.unwrap().is_empty());
+    let expected_version = "VERSION 1.6.29\r\n";
+    assert_eq!(result.unwrap(), expected_version.as_bytes());
+}
