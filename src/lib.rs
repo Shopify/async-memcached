@@ -158,6 +158,9 @@ impl Client {
             let _bytes_read = self.conn.read_buf(&mut self.buf).await?;
 
             if self.buf.ends_with(b"\r\n") {
+                if is_quiet && !self.buf.windows(4).any(|w| w == b"MN\r\n") {
+                    continue;
+                }
                 break;
             }
         }
