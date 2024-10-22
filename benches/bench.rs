@@ -5,7 +5,7 @@ use tokio::runtime::Runtime;
 use std::env;
 
 const MAX_KEY_LENGTH: usize = 250;
-const LARGE_PAYLOAD_SIZE: usize = 1000 * 1024; // Memcached's ~default maximum payload size
+const LARGE_PAYLOAD_SIZE: usize = 1024 * 1024 - 310; // Memcached's default maximum payload size ~1MB minus max key length + metadata
 
 async fn setup_client() -> Client {
     let memcached_host = env::var("MEMCACHED_HOST").unwrap_or("127.0.0.1".to_string());

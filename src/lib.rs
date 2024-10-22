@@ -238,6 +238,7 @@ impl Client {
         meta_flags: Option<&[&str]>,
     ) -> Result<Option<Value>, Error> {
         let kr = Self::validate_key_length(key.as_ref())?;
+        let mut quiet_mode = false;
 
         self.conn.write_all(b"mg ").await?;
         self.conn.write_all(kr).await?;
@@ -246,6 +247,7 @@ impl Client {
             self.conn.write_all(flags.join(" ").as_bytes()).await?;
             self.conn.write_all(b"\r\n").await?;
             if flags.contains(&"q") {
+                quiet_mode = true;
                 // Write a no-op command if quiet mode is used so reliably detect cache misses.
                 self.conn.write_all(b"mn\r\n").await?;
             }
@@ -255,7 +257,7 @@ impl Client {
 
         self.conn.flush().await?;
 
-        if meta_flags.is_some() && meta_flags.unwrap().contains(&"q") {
+        if quiet_mode {
             match self.drive_receive(parse_meta_get_response).await? {
                 Response::Status(Status::NoOp) => Ok(None),
                 Response::Status(s) => Err(s.into()),
