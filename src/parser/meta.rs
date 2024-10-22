@@ -21,6 +21,7 @@ pub fn parse_meta_set_status(buf: &[u8]) -> IResult<&[u8], Response> {
         value(Response::Status(Status::NotStored), tag(b"NS")),
         value(Response::Status(Status::Exists), tag(b"EX")),
         value(Response::Status(Status::NotFound), tag(b"NF")),
+        value(Response::Status(Status::NoOp), tag(b"MN")),
     ))(buf)
 }
 
@@ -29,6 +30,7 @@ pub fn parse_meta_get_status(buf: &[u8]) -> IResult<&[u8], Response> {
         value(Response::Status(Status::Value), tag(b"VA ")),
         value(Response::Status(Status::Exists), tag(b"HD")),
         value(Response::Status(Status::NotFound), tag(b"EN")),
+        value(Response::Status(Status::NoOp), tag(b"MN")),
     ))(buf)
 }
 
@@ -91,7 +93,10 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
             let (input, size) = parse_u32(input)?; // parses the size of the data from the input
             let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?; // parses the flags from the input
             let (input, _) = crlf(input)?; // removes the leading crlf from the data block
-            let (input, data) = take_until_size(input, size)?; // parses the data from the input
+            let (mut input, data) = take_until_size(input, size)?; // parses the data from the input
+            if input == b"MN\r\n" {
+                input = b""; // removes the MN\r\n from the buffer if quiet mode was used
+            }
 
             let value = construct_value_from_meta_values(
                 meta_values_array,
@@ -138,6 +143,7 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
 
             Ok((input, Response::Data(Some(vec![value]))))
         }
+        Response::Status(Status::NoOp) => Ok((input, Response::Status(Status::NoOp))),
         _ => {
             // unexpected response code, should never happen, bail
             Err(nom::Err::Error(nom::error::Error::new(

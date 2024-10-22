@@ -294,8 +294,6 @@ async fn test_quiet_mode_meta_get_key_too_long() {
 
     let result = client.meta_get(&key, Some(&flags)).await;
 
-    println!("{:?}", result);
-
     assert!(matches!(
         result,
         Err(Error::Protocol(Status::Error(ErrorKind::KeyTooLong)))
@@ -313,8 +311,6 @@ async fn test_quiet_mode_meta_get_with_k_flag_and_cache_miss() {
     let flags = ["v", "k", "q"];
 
     let result = client.meta_get(key, Some(&flags)).await;
-
-    println!("{:?}", result);
 
     assert!(result.is_ok());
     assert!(result.unwrap().is_none());

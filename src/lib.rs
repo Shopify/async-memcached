@@ -222,6 +222,16 @@ impl Client {
     /// If the key is found, `Some(Value)` is returned, describing the metadata and data of the key.
     ///
     /// Otherwise, `None` is returned.
+    //
+    // Command format:
+    // mg <key> <meta_flags>*\r\n
+    //
+    // - <key> is the key string, with a maximum length of 250 bytes.
+    //
+    // - <meta_flags> is an optional slice of string references for meta flags.
+    // Meta flags may have associated tokens after the initial character, e.g. "O123" for opaque.
+    // Using the "q" flag for quiet mode will append a no-op command to the request ("mn\r\n") so that the client
+    // can proceed properly in the event of a cache miss.
     pub async fn meta_get<K: AsRef<[u8]>>(
         &mut self,
         key: K,
@@ -234,20 +244,41 @@ impl Client {
         self.conn.write_all(b" ").await?;
         if let Some(flags) = meta_flags {
             self.conn.write_all(flags.join(" ").as_bytes()).await?;
+            self.conn.write_all(b"\r\n").await?;
+            if flags.contains(&"q") {
+                // Write a no-op command if quiet mode is used so reliably detect cache misses.
+                self.conn.write_all(b"mn\r\n").await?;
+            }
+        } else {
+            self.conn.write_all(b"\r\n").await?;
         }
-        self.conn.write_all(b"\r\n").await?;
+
         self.conn.flush().await?;
 
-        match self.drive_receive(parse_meta_get_response).await? {
-            Response::Status(Status::NotFound) => Ok(None),
-            Response::Status(s) => Err(s.into()),
-            Response::Data(d) => d
-                .map(|mut items| {
-                    let item = items.remove(0);
-                    Ok(item)
-                })
-                .transpose(),
-            _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),
+        if meta_flags.is_some() && meta_flags.unwrap().contains(&"q") {
+            match self.drive_receive(parse_meta_get_response).await? {
+                Response::Status(Status::NoOp) => Ok(None),
+                Response::Status(s) => Err(s.into()),
+                Response::Data(d) => d
+                    .map(|mut items| {
+                        let item = items.remove(0);
+                        Ok(item)
+                    })
+                    .transpose(),
+                _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),
+            }
+        } else {
+            match self.drive_receive(parse_meta_get_response).await? {
+                Response::Status(Status::NotFound) => Ok(None),
+                Response::Status(s) => Err(s.into()),
+                Response::Data(d) => d
+                    .map(|mut items| {
+                        let item = items.remove(0);
+                        Ok(item)
+                    })
+                    .transpose(),
+                _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),
+            }
         }
     }
 

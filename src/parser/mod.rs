@@ -72,6 +72,8 @@ pub enum Status {
     Deleted,
     /// The key was touched.
     Touched,
+    /// Quiet mode no-op.
+    NoOp,
     /// The key already exists.
     Exists,
     /// The key already exists and value was requested in the meta protocol.
@@ -158,6 +160,7 @@ impl fmt::Display for Status {
             Self::NotStored => write!(f, "not stored"),
             Self::Deleted => write!(f, "deleted"),
             Self::Touched => write!(f, "touched"),
+            Self::NoOp => write!(f, "no-op"),
             Self::Exists => write!(f, "exists"),
             Self::Value => write!(f, "value"),
             Self::NotFound => write!(f, "not found"),
