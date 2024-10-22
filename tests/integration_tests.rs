@@ -6,7 +6,7 @@ use serial_test::{parallel, serial};
 // it's possible to delete/overwrite keys created by another test before they're read.
 
 const MAX_KEY_LENGTH: usize = 250; // 250 bytes, default memcached max key length
-const LARGE_PAYLOAD_SIZE: usize = 1024 * 1024 - 2 * MAX_KEY_LENGTH; // ~1 MB, default memcached max value size
+const LARGE_PAYLOAD_SIZE: usize = 1024 * 1024 - 310; // ~1 MB, default memcached max value size
 
 async fn setup_client(keys: &[&str]) -> Client {
     let mut client = Client::new("tcp://127.0.0.1:11211")
@@ -261,6 +261,63 @@ async fn test_meta_get_not_found_with_k_flag() {
     let result = client.meta_get(key, Some(&flags)).await.unwrap();
 
     assert_eq!(result.unwrap().key, key.as_bytes().to_vec());
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_quiet_mode_meta_get_with_k_flag_and_cache_hit() {
+    let key = "quiet-mode-meta-get-test-key-cache-hit";
+    let value = "test-value";
+
+    let mut client = setup_client(&[key]).await;
+
+    client.set(key, value, None, None).await.unwrap();
+
+    let flags = ["v", "k", "q"];
+
+    let result = client.meta_get(key, Some(&flags)).await.unwrap().unwrap();
+
+    assert_eq!(result.key, key.as_bytes().to_vec());
+    assert_eq!(result.data, Some(value.as_bytes().to_vec()));
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_quiet_mode_meta_get_key_too_long() {
+    let key = "a".repeat(MAX_KEY_LENGTH + 1);
+
+    let mut client = setup_client(&[&key]).await;
+
+    let flags = ["v", "q"];
+
+    let result = client.meta_get(&key, Some(&flags)).await;
+
+    println!("{:?}", result);
+
+    assert!(matches!(
+        result,
+        Err(Error::Protocol(Status::Error(ErrorKind::KeyTooLong)))
+    ));
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_quiet_mode_meta_get_with_k_flag_and_cache_miss() {
+    let key = "quiet-mode-meta-get-test-key-cache-miss";
+
+    let mut client = setup_client(&[key]).await;
+
+    let flags = ["v", "k", "q"];
+
+    let result = client.meta_get(key, Some(&flags)).await;
+
+    println!("{:?}", result);
+
+    assert!(result.is_ok());
+    assert!(result.unwrap().is_none());
 }
 
 #[ignore = "Relies on a running memcached server"]
