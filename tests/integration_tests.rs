@@ -5,8 +5,8 @@ use serial_test::{parallel, serial};
 // NOTE: Each test should run with keys unique to that test to avoid async conflicts.  Because these tests run concurrently,
 // it's possible to delete/overwrite keys created by another test before they're read.
 
-const LARGE_PAYLOAD_SIZE: usize = 1000 * 1024; // 1 MB, default memcached max value size
 const MAX_KEY_LENGTH: usize = 250; // 250 bytes, default memcached max key length
+const LARGE_PAYLOAD_SIZE: usize = 1024 * 1024 - 2 * MAX_KEY_LENGTH; // ~1 MB, default memcached max value size
 
 async fn setup_client(keys: &[&str]) -> Client {
     let mut client = Client::new("tcp://127.0.0.1:11211")
@@ -94,12 +94,6 @@ async fn test_meta_get_cache_hit_with_no_flags() {
     let mut client = setup_client(&[key]).await;
 
     client.set(key, value, None, None).await.unwrap();
-
-    let get_result = client.get(key).await.unwrap();
-    println!(
-        "get_result: {:?}",
-        std::str::from_utf8(&get_result.unwrap().data.unwrap()).unwrap()
-    );
 
     let flags = None;
     let result = client.meta_get(key, flags).await.unwrap();
@@ -261,7 +255,7 @@ async fn test_meta_get_not_found_with_opaque_flag() {
 #[parallel]
 async fn test_meta_get_not_found_with_k_flag() {
     let key = "meta-get-test-key-not-found";
-    let flags = ["v", "O9001"];
+    let flags = ["v", "k"];
     let mut client = setup_client(&[key]).await;
 
     let result = client.meta_get(key, Some(&flags)).await.unwrap();

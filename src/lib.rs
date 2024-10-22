@@ -222,20 +222,15 @@ impl Client {
     /// If the key is found, `Some(Value)` is returned, describing the metadata and data of the key.
     ///
     /// Otherwise, `None` is returned.
-    ///
-    /// Supported meta flags:
-    /// - h: return whether item has been hit before as a 0 or 1
-    /// - l: return time since item was last accessed in seconds
-    /// - t: return item TTL remaining in seconds (-1 for unlimited)
     pub async fn meta_get<K: AsRef<[u8]>>(
         &mut self,
         key: K,
         meta_flags: Option<&[&str]>,
     ) -> Result<Option<Value>, Error> {
+        let kr = Self::validate_key_length(key.as_ref())?;
+
         self.conn.write_all(b"mg ").await?;
-        self.conn
-            .write_all(Self::validate_key_length(key.as_ref())?)
-            .await?;
+        self.conn.write_all(kr).await?;
         self.conn.write_all(b" ").await?;
         if let Some(flags) = meta_flags {
             self.conn.write_all(flags.join(" ").as_bytes()).await?;
@@ -248,13 +243,8 @@ impl Client {
             Response::Status(s) => Err(s.into()),
             Response::Data(d) => d
                 .map(|mut items| {
-                    if items.len() != 1 {
-                        Err(Status::Error(ErrorKind::Protocol(None)).into())
-                    } else {
-                        let mut item = items.remove(0);
-                        item.key = key.as_ref().to_vec();
-                        Ok(item)
-                    }
+                    let item = items.remove(0);
+                    Ok(item)
                 })
                 .transpose(),
             _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),

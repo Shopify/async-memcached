@@ -33,13 +33,13 @@ pub fn parse_meta_get_status(buf: &[u8]) -> IResult<&[u8], Response> {
 }
 
 pub fn parse_meta_get_response(buf: &[u8]) -> Result<Option<(usize, Response)>, ErrorKind> {
-    let bufn = buf.len();
+    let n_bytes_required = buf.len();
     let result = parse_meta_get_data_value(buf);
 
     match result {
-        Ok((left, response)) => {
-            let n = bufn - left.len();
-            Ok(Some((n, response)))
+        Ok((n_bytes_remaining, response)) => {
+            let n_bytes_buffered = n_bytes_required - n_bytes_remaining.len();
+            Ok(Some((n_bytes_buffered, response)))
         }
         Err(nom::Err::Incomplete(_)) => Ok(None),
         Err(nom::Err::Error(e)) | Err(nom::Err::Failure(e)) => {
@@ -50,14 +50,13 @@ pub fn parse_meta_get_response(buf: &[u8]) -> Result<Option<(usize, Response)>, 
 
 #[allow(dead_code)]
 pub fn parse_meta_set_response(buf: &[u8]) -> Result<Option<(usize, Response)>, ErrorKind> {
-    let bufn = buf.len();
-
+    let n_bytes_required = buf.len();
     let result = parse_meta_set_data_value(buf);
 
     match result {
-        Ok((left, response)) => {
-            let n = bufn - left.len();
-            Ok(Some((n, response)))
+        Ok((n_bytes_remaining, response)) => {
+            let n_bytes_buffered = n_bytes_required - n_bytes_remaining.len();
+            Ok(Some((n_bytes_buffered, response)))
         }
         Err(nom::Err::Incomplete(_)) => Ok(None),
         Err(nom::Err::Error(e)) | Err(nom::Err::Failure(e)) => {
