@@ -358,8 +358,9 @@ impl Client {
         K: AsRef<[u8]>,
         V: AsMemcachedValue,
     {
-        let kr = key.as_ref();
+        let kr = Self::validate_key_length(key.as_ref())?;
         let vr = value.as_bytes();
+        let mut quiet_mode = false;
 
         self.conn.write_all(b"ms ").await?;
         self.conn.write_all(kr).await?;
@@ -371,23 +372,48 @@ impl Client {
         if let Some(meta_flags) = meta_flags {
             self.conn.write_all(b" ").await?;
             self.conn.write_all(meta_flags.join(" ").as_bytes()).await?;
+            if meta_flags.contains(&"q") {
+                quiet_mode = true;
+            }
         }
 
         self.conn.write_all(b"\r\n").await?;
         self.conn.write_all(vr.as_ref()).await?;
         self.conn.write_all(b"\r\n").await?;
+
+        if quiet_mode {
+            self.conn.write_all(b"mn\r\n").await?;
+        }
+
         self.conn.flush().await?;
 
-        match self.drive_receive(parse_meta_set_response).await? {
-            Response::Status(Status::Stored) => Ok(None),
-            Response::Status(s) => Err(s.into()),
-            Response::Data(d) => d
-                .map(|mut items| {
-                    let item = items.remove(0);
-                    Ok(item)
-                })
-                .transpose(),
-            _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),
+        if quiet_mode {
+            match self.drive_receive(parse_meta_set_response).await? {
+                Response::Status(Status::NoOp) => {
+                    println!("got Status:: NoOp");
+                    Ok(None)
+                }
+                Response::Status(s) => Err(s.into()),
+                Response::Data(d) => d
+                    .map(|mut items| {
+                        let item = items.remove(0);
+                        Ok(item)
+                    })
+                    .transpose(),
+                _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),
+            }
+        } else {
+            match self.drive_receive(parse_meta_set_response).await? {
+                Response::Status(Status::Stored) => Ok(None),
+                Response::Status(s) => Err(s.into()),
+                Response::Data(d) => d
+                    .map(|mut items| {
+                        let item = items.remove(0);
+                        Ok(item)
+                    })
+                    .transpose(),
+                _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),
+            }
         }
     }
 
