@@ -140,34 +140,26 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
 
             Ok((input, Response::Data(Some(vec![value]))))
         }
+        // match arm for "MN\r\n" response
         Response::Status(Status::NoOp) => Ok((input, Response::Status(Status::NoOp))),
-        _ => {
-            // unexpected response code, should never happen, bail
-            Err(nom::Err::Error(nom::error::Error::new(
-                input,
-                nom::error::ErrorKind::Eof,
-            )))
-        }
+        _ => Err(nom::Err::Error(nom::error::Error::new(
+            input,
+            nom::error::ErrorKind::Eof,
+        ))),
     }
 }
 
 fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
-    println!("buf: {:?}", std::str::from_utf8(buf).unwrap());
-    println!("this is triggering before status parsing");
     let (input, status) = parse_meta_set_status(buf)?;
-    println!("this is triggering after status parsing");
+
     match status {
         // match arm for "HD" response
         Response::Status(Status::Stored) => {
-            println!("Status:: Stored this is triggering before meta flag parsing");
-            // no value (data block) or size in this case, potentially just flags
+            // no value (data block) or size in this case, potentially just meta flag data
             let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)
                 .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
-            println!("this is triggering before crlf parsing");
             let (input, _) = crlf(input)?; // consume the trailing crlf and leave the buffer empty
-            println!("this is triggering after crlf parsing");
 
-            // early return if there were no flags passed in
             if meta_values_array.is_empty() {
                 return Ok((input, Response::Status(Status::Stored)));
             }
@@ -182,14 +174,10 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
         }
         // match arm for "NS" response
         Response::Status(Status::NotStored) => {
-            println!("Status:: NotStored this is triggering before meta flag parsing");
-            // no value (data block) or size in this case, potentially just flags
             let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)
                 .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
-            println!("this is triggering before crlf parsing");
             let (input, _) = crlf(input)?; // consume the trailing crlf and leave the buffer empty
-            println!("this is triggering after crlf parsing");
-            // early return if there were no flags passed in
+
             if meta_values_array.is_empty() {
                 return Ok((input, Response::Status(Status::NotStored)));
             }
@@ -204,14 +192,9 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
         }
         // match arm for "EX" response
         Response::Status(Status::Exists) => {
-            println!("Status:: Exists this is triggering before meta flag parsing");
-            // no value (data block) or size in this case, potentially just flags
             let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?;
-            println!("this is triggering before crlf parsing");
             let (input, _) = crlf(input)?; // consume the trailing crlf and leave the buffer empty
-            println!("this is triggering after crlf parsing");
 
-            // early return if there were no flags passed in
             if meta_values_array.is_empty() {
                 return Ok((input, Response::Status(Status::Exists)));
             }
@@ -226,12 +209,8 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
         }
         // match arm for "NF" response
         Response::Status(Status::NotFound) => {
-            println!("Status:: NotFound this is triggering before meta flag parsing");
-            // no value (data block) or size in this case, potentially just flags
             let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?;
-            println!("this is triggering before crlf parsing");
             let (input, _) = crlf(input)?; // consume the trailing crlf and leave the buffer empty
-            println!("this is triggering after crlf parsing");
 
             // early return if there were no flags passed in
             if meta_values_array.is_empty() {
@@ -246,11 +225,8 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
 
             Ok((input, Response::Data(Some(vec![value]))))
         }
-        Response::Status(Status::NoOp) => {
-            println!("Status:: NoOp");
-            println!("input: {:?}", std::str::from_utf8(input).unwrap());
-            Ok((input, Response::Status(Status::NoOp)))
-        }
+        // match arm for "MN\r\n" response
+        Response::Status(Status::NoOp) => Ok((input, Response::Status(Status::NoOp))),
         _ => Err(nom::Err::Error(nom::error::Error::new(
             input,
             nom::error::ErrorKind::Eof,

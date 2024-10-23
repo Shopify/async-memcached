@@ -243,10 +243,10 @@ impl Client {
         self.conn.write_all(b"mg ").await?;
         self.conn.write_all(kr).await?;
         self.conn.write_all(b" ").await?;
-        if let Some(flags) = meta_flags {
-            self.conn.write_all(flags.join(" ").as_bytes()).await?;
+        if let Some(meta_flags) = meta_flags {
+            self.conn.write_all(meta_flags.join(" ").as_bytes()).await?;
             self.conn.write_all(b"\r\n").await?;
-            if flags.contains(&"q") {
+            if meta_flags.contains(&"q") {
                 quiet_mode = true;
                 // Write a no-op command if quiet mode is used so reliably detect cache misses.
                 self.conn.write_all(b"mn\r\n").await?;
@@ -389,10 +389,7 @@ impl Client {
 
         if quiet_mode {
             match self.drive_receive(parse_meta_set_response).await? {
-                Response::Status(Status::NoOp) => {
-                    println!("got Status:: NoOp");
-                    Ok(None)
-                }
+                Response::Status(Status::NoOp) => Ok(None),
                 Response::Status(s) => Err(s.into()),
                 Response::Data(d) => d
                     .map(|mut items| {
