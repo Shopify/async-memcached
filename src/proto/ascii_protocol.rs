@@ -11,7 +11,7 @@ const MAX_KEY_LENGTH: usize = 250; // reference in memcached documentation: http
 pub trait AsciiProtocol {
     /// Gets the given key.
     ///
-    /// If the key is found, `Some(MemcachedValue)` is returned, describing the metadata and data of the key.
+    /// If the key is found, `Some(Value)` is returned, describing the metadata and data of the key.
     ///
     /// Otherwise, [`Error`] is returned.
     fn get<K: AsRef<[u8]>>(&mut self, key: K)
@@ -19,7 +19,7 @@ pub trait AsciiProtocol {
 
     /// Gets multiple keys.
     ///
-    /// If any of the keys are found, a vector of [`MemcachedValue`] will be returned.
+    /// If any of the keys are found, a vector of [`Value`] will be returned.
     ///
     /// Otherwise, [`Error`] is returned.
     fn get_multi<I, K>(&mut self, keys: I) -> impl Future<Output = Result<Vec<Value>, Error>>
@@ -435,16 +435,7 @@ impl AsciiProtocol for Client {
         let kr = Self::validate_key_length(key.as_ref())?;
 
         self.conn
-            .write_all(
-                &[
-                    b"incr ",
-                    kr,
-                    b" ",
-                    amount.to_string().as_bytes(),
-                    b"\r\n",
-                ]
-                .concat(),
-            )
+            .write_all(&[b"incr ", kr, b" ", amount.to_string().as_bytes(), b"\r\n"].concat())
             .await?;
         self.conn.flush().await?;
 
@@ -485,16 +476,7 @@ impl AsciiProtocol for Client {
         let kr = Self::validate_key_length(key.as_ref())?;
 
         self.conn
-            .write_all(
-                &[
-                    b"decr ",
-                    kr,
-                    b" ",
-                    amount.to_string().as_bytes(),
-                    b"\r\n",
-                ]
-                .concat(),
-            )
+            .write_all(&[b"decr ", kr, b" ", amount.to_string().as_bytes(), b"\r\n"].concat())
             .await?;
         self.conn.flush().await?;
 

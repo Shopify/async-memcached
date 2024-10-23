@@ -14,11 +14,16 @@ pub trait MetaProtocol {
     /// If the key is found, `Some(Value)` is returned, describing the metadata and data of the key.
     ///
     /// Otherwise, `None` is returned.
-    ///
-    /// Supported meta flags:
-    /// - h: return whether item has been hit before as a 0 or 1
-    /// - l: return time since item was last accessed in seconds
-    /// - t: return item TTL remaining in seconds (-1 for unlimited)
+    //
+    // Command format:
+    // mg <key> <meta_flags>*\r\n
+    //
+    // - <key> is the key string, with a maximum length of 250 bytes.
+    //
+    // - <meta_flags> is an optional slice of string references for meta flags.
+    // Meta flags may have associated tokens after the initial character, e.g. "O123" for opaque.
+    // Using the "q" flag for quiet mode will append a no-op command to the request ("mn\r\n") so that the client
+    // can proceed properly in the event of a cache miss.
     fn meta_get<K: AsRef<[u8]>>(
         &mut self,
         key: K,
@@ -27,20 +32,21 @@ pub trait MetaProtocol {
 
     /// Sets the given key.
     ///
-    /// If `ttl` they will default to 0.  If the value is set
-    /// successfully, `Some(Value)` is returned, otherwise [`Error`] is returned.
-    /// NOTE: That the data is some Value is sparsely populated, containing only requested data by meta_flags
-    /// The meta set command a generic command for storing data to memcached. Based
-    /// on the flags supplied, it can replace all storage commands (see token M) as
-    /// well as adds new options.
+    /// If the value is set successfully, `Some(Value)` is returned, otherwise [`Error`] is returned.
+    /// NOTE: That the data in this Value is sparsely populated, containing only requested data by meta_flags
+    /// The meta set command is a generic command for storing data to memcached. Based on the flags supplied,
+    /// it can replace all storage commands (see token M) as well as adds new options.
     //
-    // ms <key> <datalen> <flags>*\r\n
+    // Command format:
+    // ms <key> <datalen> <meta_flags>*\r\n<data_block>\r\n
     //
-    // - <key> means one key string.
+    // - <key> is the key string, with a maximum length of 250 bytes.
     // - <datalen> is the length of the payload data.
     //
-    // - <flags> are a set of single character codes ended with a space or newline.
-    //   flags may have strings after the initial character.
+    // - <meta_flags> is an optional slice of string references for meta flags.
+    // Meta flags may have associated tokens after the initial character, e.g. "O123" for opaque.
+    //
+    // - <data_block> is the payload data to be stored, with a maximum size of ~1MB.
     fn meta_set<K, V>(
         &mut self,
         key: K,

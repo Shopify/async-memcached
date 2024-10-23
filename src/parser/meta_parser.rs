@@ -34,13 +34,13 @@ pub fn parse_meta_set_status(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
 }
 
 pub fn parse_meta_get_response(buf: &[u8]) -> Result<Option<(usize, MetaResponse)>, ErrorKind> {
-    let bufn = buf.len();
+    let total_bytes = buf.len();
     let result = parse_meta_get_data_value(buf);
 
     match result {
-        Ok((left, response)) => {
-            let n = bufn - left.len();
-            Ok(Some((n, response)))
+        Ok((remaining_bytes, response)) => {
+            let read_bytes = total_bytes - remaining_bytes.len();
+            Ok(Some((read_bytes, response)))
         }
         Err(nom::Err::Incomplete(_)) => Ok(None),
         Err(nom::Err::Error(e)) | Err(nom::Err::Failure(e)) => {
@@ -50,14 +50,13 @@ pub fn parse_meta_get_response(buf: &[u8]) -> Result<Option<(usize, MetaResponse
 }
 
 pub fn parse_meta_set_response(buf: &[u8]) -> Result<Option<(usize, MetaResponse)>, ErrorKind> {
-    let bufn = buf.len();
-
+    let total_bytes = buf.len();
     let result = parse_meta_set_data_value(buf);
 
     match result {
-        Ok((left, response)) => {
-            let n = bufn - left.len();
-            Ok(Some((n, response)))
+        Ok((remaining_bytes, response)) => {
+            let read_bytes = total_bytes - remaining_bytes.len();
+            Ok(Some((read_bytes, response)))
         }
         Err(nom::Err::Incomplete(_)) => Ok(None),
         Err(nom::Err::Error(e)) | Err(nom::Err::Failure(e)) => {
@@ -174,17 +173,14 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
         }
         // match arm for "NS" response
         MetaResponse::Status(Status::NotStored) => {
-            // no value (data block) or size in this case, potentially just flags
             let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)
                 .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
             let (input, _) = crlf(input)?; // consume the trailing crlf and leave the buffer empty
 
-            // early return if there were no flags passed in
             if meta_values_array.is_empty() {
                 return Ok((input, MetaResponse::Status(Status::NotStored)));
             }
 
-            // data is empty in this case
             let meta_value = construct_meta_value_from_flag_array(
                 meta_values_array,
                 None,
@@ -196,16 +192,13 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
         }
         // match arm for "EX" response
         MetaResponse::Status(Status::Exists) => {
-            // no value (data block) or size in this case, potentially just flags
             let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?;
             let (input, _) = crlf(input)?; // consume the trailing crlf and leave the buffer empty
 
-            // early return if there were no flags passed in
             if meta_values_array.is_empty() {
                 return Ok((input, MetaResponse::Status(Status::Exists)));
             }
 
-            // data is empty in this case
             let meta_value =
                 construct_meta_value_from_flag_array(meta_values_array, None, Some(Status::Exists))
                     .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
@@ -214,16 +207,13 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
         }
         // match arm for "NF" response
         MetaResponse::Status(Status::NotFound) => {
-            // no value (data block) or size in this case, potentially just flags
             let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?;
             let (input, _) = crlf(input)?; // consume the trailing crlf and leave the buffer empty
 
-            // early return if there were no flags passed in
             if meta_values_array.is_empty() {
                 return Ok((input, MetaResponse::Status(Status::NotFound)));
             }
 
-            // data is empty in this case
             let meta_value = construct_meta_value_from_flag_array(
                 meta_values_array,
                 None,

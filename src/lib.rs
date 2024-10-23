@@ -19,7 +19,7 @@ pub use self::parser::{
     ErrorKind, KeyMetadata, MetadumpResponse, Response, StatsResponse, Status, Value,
 };
 
-/// Ascii protocol implementation
+/// Ascii & Meta protocol implementations
 pub mod proto;
 pub use self::proto::{AsciiProtocol, MetaProtocol};
 
