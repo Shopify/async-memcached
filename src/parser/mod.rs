@@ -14,7 +14,7 @@ pub use ascii::{parse_ascii_metadump_response, parse_ascii_response, parse_ascii
 
 mod meta;
 #[allow(unused_imports)]
-pub use meta::parse_meta_response;
+pub use meta::parse_meta_get_response;
 
 /// A value from memcached.
 #[derive(Clone, Debug, PartialEq)]
@@ -24,9 +24,9 @@ pub struct Value {
     /// CAS identifier.
     pub cas: Option<u64>,
     /// Flags for this key.
+    /// Defaults to 0.
     /// NOTE: This is the client bitflags, not meta flags
     /// which is an opaque number passed by the client
-    /// Defaults to 0.
     pub flags: Option<u32>,
     /// Data for this key.
     pub data: Option<Vec<u8>>,
@@ -72,6 +72,8 @@ pub enum Status {
     Deleted,
     /// The key was touched.
     Touched,
+    /// Quiet mode no-op.
+    NoOp,
     /// The key already exists.
     Exists,
     /// The key already exists and value was requested in the meta protocol.
@@ -158,6 +160,7 @@ impl fmt::Display for Status {
             Self::NotStored => write!(f, "not stored"),
             Self::Deleted => write!(f, "deleted"),
             Self::Touched => write!(f, "touched"),
+            Self::NoOp => write!(f, "no-op"),
             Self::Exists => write!(f, "exists"),
             Self::Value => write!(f, "value"),
             Self::NotFound => write!(f, "not found"),

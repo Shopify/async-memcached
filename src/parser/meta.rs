@@ -1,41 +1,27 @@
 use nom::{
     branch::alt,
     bytes::streaming::{tag, take, take_while1},
-    character::{
-        complete::digit1,
-        streaming::{crlf, space0, space1},
-    },
-    combinator::{map, map_res, value},
+    character::streaming::{crlf, space1},
+    combinator::{map, value},
     error::ErrorKind::Fail,
     multi::many0,
-    sequence::{pair, preceded, terminated, tuple},
+    sequence::tuple,
     IResult,
 };
+
+use std::num::NonZero;
 
 use super::{parse_u32, ErrorKind, MetaValue, Response, Status, Value};
 use crate::Error;
 
-// TODO: remove this later in favour of individual parse_meta_*_status methods
 #[allow(dead_code)]
-pub fn parse_meta_status(buf: &[u8]) -> IResult<&[u8], Response> {
-    terminated(
-        alt((
-            value(Response::Status(Status::NotStored), tag(b"NS")),
-            value(Response::Status(Status::Deleted), tag(b"DE")),
-            value(Response::Status(Status::Touched), tag(b"TO")),
-            value(Response::Status(Status::Exists), tag(b"EX")),
-            value(Response::Status(Status::NotFound), tag(b"NF")),
-        )),
-        crlf,
-    )(buf)
-}
-
 pub fn parse_meta_set_status(buf: &[u8]) -> IResult<&[u8], Response> {
     alt((
         value(Response::Status(Status::Stored), tag(b"HD")),
         value(Response::Status(Status::NotStored), tag(b"NS")),
         value(Response::Status(Status::Exists), tag(b"EX")),
         value(Response::Status(Status::NotFound), tag(b"NF")),
+        value(Response::Status(Status::NoOp), tag(b"MN\r\n")),
     ))(buf)
 }
 
@@ -44,25 +30,35 @@ pub fn parse_meta_get_status(buf: &[u8]) -> IResult<&[u8], Response> {
         value(Response::Status(Status::Value), tag(b"VA ")),
         value(Response::Status(Status::Exists), tag(b"HD")),
         value(Response::Status(Status::NotFound), tag(b"EN")),
+        value(Response::Status(Status::NoOp), tag(b"MN\r\n")),
     ))(buf)
 }
 
-// TODO: refactor this into individual parse_meta_*_response methods
-#[allow(dead_code)]
-pub fn parse_meta_response(buf: &[u8]) -> Result<Option<(usize, Response)>, ErrorKind> {
-    let bufn = buf.len();
-    // TODO: alt calls parsers sequentially until one succeeds, which is not optimal.  Want to only call the correct parser, no sequencing.
-    // Also run the risk of hitting the wrong parser since there is overlap in response codes.
-    let result = alt((
-        parse_meta_status,
-        |input| parse_meta_get_data_value(input),
-        |input| parse_meta_set_data_value(input),
-    ))(buf);
+pub fn parse_meta_get_response(buf: &[u8]) -> Result<Option<(usize, Response)>, ErrorKind> {
+    let total_bytes = buf.len();
+    let result = parse_meta_get_data_value(buf);
 
     match result {
-        Ok((left, response)) => {
-            let n = bufn - left.len();
-            Ok(Some((n, response)))
+        Ok((remaining_bytes, response)) => {
+            let read_bytes = total_bytes - remaining_bytes.len();
+            Ok(Some((read_bytes, response)))
+        }
+        Err(nom::Err::Incomplete(_)) => Ok(None),
+        Err(nom::Err::Error(e)) | Err(nom::Err::Failure(e)) => {
+            Err(ErrorKind::Protocol(Some(e.code.description().to_string())))
+        }
+    }
+}
+
+#[allow(dead_code)]
+pub fn parse_meta_set_response(buf: &[u8]) -> Result<Option<(usize, Response)>, ErrorKind> {
+    let total_bytes = buf.len();
+    let result = parse_meta_set_data_value(buf);
+
+    match result {
+        Ok((remaining_bytes, response)) => {
+            let read_bytes = total_bytes - remaining_bytes.len();
+            Ok(Some((read_bytes, response)))
         }
         Err(nom::Err::Incomplete(_)) => Ok(None),
         Err(nom::Err::Error(e)) | Err(nom::Err::Failure(e)) => {
@@ -112,6 +108,7 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
         Response::Status(Status::Exists) => {
             // no value (data block) or size in this case, potentially just flags
             let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?;
+            let (input, _) = crlf(input)?; // consume the trailing crlf and leave the buffer empty
 
             // early return if there were no flags passed in (no-op)
             if meta_values_array.is_empty() {
@@ -128,6 +125,7 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
         }
         Response::Status(Status::NotFound) => {
             let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?;
+            let (input, _) = crlf(input)?; // consume the trailing crlf and leave the buffer empty
 
             // return early if there were no flags passed in (miss without opaque or k flag)
             if meta_values_array.is_empty() {
@@ -142,6 +140,7 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
 
             Ok((input, Response::Data(Some(vec![value]))))
         }
+        Response::Status(Status::NoOp) => Ok((input, Response::Status(Status::NoOp))),
         _ => {
             // unexpected response code, should never happen, bail
             Err(nom::Err::Error(nom::error::Error::new(
@@ -152,6 +151,7 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
     }
 }
 
+#[allow(dead_code)]
 fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
     let (input, status) = parse_meta_set_status(buf)?;
     match status {
@@ -159,6 +159,7 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
             // no value (data block) or size in this case, potentially just flags
             let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)
                 .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
+            let (input, _) = crlf(input)?; // consume the trailing crlf and leave the buffer empty
 
             // early return if there were no flags passed in
             if meta_values_array.is_empty() {
@@ -177,6 +178,7 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
             // no value (data block) or size in this case, potentially just flags
             let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)
                 .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
+            let (input, _) = crlf(input)?; // consume the trailing crlf and leave the buffer empty
 
             // early return if there were no flags passed in
             if meta_values_array.is_empty() {
@@ -194,6 +196,7 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
         Response::Status(Status::Exists) => {
             // no value (data block) or size in this case, potentially just flags
             let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?;
+            let (input, _) = crlf(input)?; // consume the trailing crlf and leave the buffer empty
 
             // early return if there were no flags passed in
             if meta_values_array.is_empty() {
@@ -211,6 +214,7 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
         Response::Status(Status::NotFound) => {
             // no value (data block) or size in this case, potentially just flags
             let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?;
+            let (input, _) = crlf(input)?; // consume the trailing crlf and leave the buffer empty
 
             // early return if there were no flags passed in
             if meta_values_array.is_empty() {
@@ -233,23 +237,23 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], Response> {
 }
 
 pub fn take_until_size(buf: &[u8], byte_size: u32) -> IResult<&[u8], &[u8]> {
-    let remaining = &buf[byte_size as usize..];
-    let (remaining, _) = tag("\r\n")(remaining)?; // consume the trailing \r\n to ensure the buffer is empty
+    let size = byte_size as usize;
 
-    Ok((remaining, &buf[..byte_size as usize]))
-}
+    // Check if the buffer has enough bytes for the data and the trailing "\r\n"
+    if buf.len() < size {
+        // Not enough data yet; request more
+        return Err(nom::Err::Incomplete(nom::Needed::Size(
+            NonZero::new(size).unwrap(),
+        )));
+    }
 
-#[allow(dead_code)]
-fn parse_meta_flag_values_as_u32(input: &[u8]) -> IResult<&[u8], Vec<(u8, u32)>> {
-    many0(pair(
-        preceded(space0, map(take(1usize), |s: &[u8]| s[0])),
-        map_res(digit1, |s: &[u8]| {
-            std::str::from_utf8(s)
-                .map_err(|_| Error::ParseError(nom::error::ErrorKind::AlphaNumeric))?
-                .parse::<u32>()
-                .map_err(|_| Error::ParseError(nom::error::ErrorKind::Digit))
-        }),
-    ))(input)
+    // Slice the buffer to extract the data
+    let (extracted, remaining) = buf.split_at(size);
+
+    // Ensure the remaining buffer starts with "\r\n"
+    let (remaining, _) = tag("\r\n")(remaining)?;
+
+    Ok((remaining, extracted))
 }
 
 fn parse_meta_flag_values_as_slice(input: &[u8]) -> IResult<&[u8], Vec<(u8, &[u8])>> {
@@ -598,7 +602,7 @@ mod tests {
         let input = b"HD\r\n";
         let (remaining, response) = parse_meta_get_data_value(input).unwrap();
 
-        assert_eq!(remaining, b"\r\n");
+        assert_eq!(remaining, b"");
 
         assert_eq!(response, Response::Data(None));
     }
@@ -608,7 +612,7 @@ mod tests {
         let input = b"HD h1 c1 l123\r\n";
         let (remaining, response) = parse_meta_get_data_value(input).unwrap();
 
-        assert_eq!(remaining, b"\r\n");
+        assert_eq!(remaining, b"");
 
         match response {
             Response::Data(Some(values)) => {
@@ -686,7 +690,7 @@ mod tests {
     fn test_parse_meta_get_data_value_cache_miss() {
         let input = b"EN\r\n";
         let (remaining, response) = parse_meta_get_data_value(input).unwrap();
-        assert_eq!(remaining, b"\r\n");
+        assert_eq!(remaining, b"");
         assert_eq!(response, Response::Status(Status::NotFound));
     }
 
@@ -695,7 +699,7 @@ mod tests {
         let input = b"EN Oopaque-token\r\n";
         let (remaining, response) = parse_meta_get_data_value(input).unwrap();
 
-        assert_eq!(remaining, b"\r\n");
+        assert_eq!(remaining, b"");
 
         match response {
             Response::Data(Some(values)) => {
@@ -717,7 +721,7 @@ mod tests {
     fn test_parse_meta_get_data_value_cache_miss_with_k_flag() {
         let input = b"EN ktest-key\r\n";
         let (remaining, response) = parse_meta_get_data_value(input).unwrap();
-        assert_eq!(remaining, b"\r\n");
+        assert_eq!(remaining, b"");
 
         match response {
             Response::Data(Some(values)) => {
@@ -844,7 +848,7 @@ mod tests {
         let server_response = b"HD\r\n";
         let (remaining, response) = parse_meta_set_data_value(server_response).unwrap();
 
-        assert_eq!(remaining, b"\r\n");
+        assert_eq!(remaining, b"");
 
         assert_eq!(response, Response::Status(Status::Stored));
     }
@@ -854,7 +858,7 @@ mod tests {
         let server_response = b"NS\r\n";
         let (remaining, response) = parse_meta_set_data_value(server_response).unwrap();
 
-        assert_eq!(remaining, b"\r\n");
+        assert_eq!(remaining, b"");
 
         assert_eq!(response, Response::Status(Status::NotStored));
     }
@@ -864,7 +868,7 @@ mod tests {
         let server_response = b"EX\r\n";
         let (remaining, response) = parse_meta_set_data_value(server_response).unwrap();
 
-        assert_eq!(remaining, b"\r\n");
+        assert_eq!(remaining, b"");
 
         assert_eq!(response, Response::Status(Status::Exists));
     }
@@ -874,7 +878,7 @@ mod tests {
         let server_response = b"NF\r\n";
         let (remaining, response) = parse_meta_set_data_value(server_response).unwrap();
 
-        assert_eq!(remaining, b"\r\n");
+        assert_eq!(remaining, b"");
 
         assert_eq!(response, Response::Status(Status::NotFound));
     }
@@ -884,7 +888,7 @@ mod tests {
         let server_response = b"HD O123\r\n";
         let (remaining, response) = parse_meta_set_data_value(server_response).unwrap();
 
-        assert_eq!(remaining, b"\r\n");
+        assert_eq!(remaining, b"");
 
         match response {
             Response::Data(Some(values)) => {
@@ -906,7 +910,7 @@ mod tests {
         let server_response = b"HD ktest-key\r\n";
         let (remaining, response) = parse_meta_set_data_value(server_response).unwrap();
 
-        assert_eq!(remaining, b"\r\n");
+        assert_eq!(remaining, b"");
 
         match response {
             Response::Data(Some(values)) => {
