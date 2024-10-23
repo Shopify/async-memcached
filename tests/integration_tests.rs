@@ -612,7 +612,7 @@ async fn test_set_fails_with_key_too_long() {
 #[tokio::test]
 #[parallel]
 async fn test_set_fails_with_value_too_large() {
-    let key = "too-large-set-key-with-str-value";
+    let key = "key-with-value-that-exceeds-max-payload-size";
 
     let mut client = setup_client(&[key]).await;
 
@@ -629,6 +629,802 @@ async fn test_set_fails_with_value_too_large() {
     let get_result = client.get(key).await;
 
     assert!(matches!(get_result, Ok(None)));
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+async fn test_meta_set_with_no_flags() {
+    let key = "meta-set-test-key";
+    let value = "test-value";
+
+    let mut client = setup_client(&[key]).await;
+
+    // Set the key using meta_set
+    let result = client.meta_set(key, value, None).await;
+    assert!(
+        result.is_ok(),
+        "Failed to set key using meta_set: {:?}",
+        result
+    );
+
+    // Retrieve the key using meta_get with v flag to verify that the item was stored
+    let get_flags = ["v"];
+    let get_result = client.meta_get(key, Some(&get_flags)).await.unwrap();
+
+    assert!(get_result.is_some(), "Key not found after meta_set");
+    let result_value = get_result.unwrap();
+
+    // Verify the value
+    assert_eq!(
+        String::from_utf8(result_value.data.unwrap()).unwrap(),
+        value,
+        "Retrieved value does not match set value"
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+async fn test_meta_set_with_opaque_token() {
+    let key = "meta-set-opaque-token-test-key";
+    let value = "test-value";
+    let mut client = setup_client(&[key]).await;
+
+    let meta_flags = ["T3600", "F42", "Oopaque-token"];
+
+    // Set the key using meta_set
+    let set_result = client.meta_set(key, value, Some(&meta_flags)).await;
+    assert!(
+        set_result.is_ok(),
+        "Failed to set key using meta_set: {:?}",
+        set_result
+    );
+
+    // Fetch the key with .get() to ensure that the item has been hit before
+    let get_result = client.get(key).await.unwrap();
+    assert!(get_result.is_some(), "Key not found after meta_set");
+
+    // Retrieve the key using meta_get to verify
+    let get_flags = ["v", "h", "l", "t"];
+    let get_result = client.meta_get(key, Some(&get_flags)).await.unwrap();
+
+    assert!(get_result.is_some(), "Key not found after meta_set");
+    let result_value = get_result.unwrap();
+
+    // Verify the value
+    assert_eq!(
+        String::from_utf8(result_value.data.unwrap()).unwrap(),
+        value,
+        "Retrieved value does not match set value"
+    );
+
+    // Verify the metaflags
+    let meta_flag_values = result_value.meta_values.unwrap();
+    assert_eq!(meta_flag_values.hit_before, Some(true));
+    assert_eq!(meta_flag_values.last_accessed, Some(0));
+    assert_eq!(meta_flag_values.ttl_remaining, Some(3600));
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+async fn test_meta_set_with_k_flag() {
+    let key = "meta-set-k-flag-test-key";
+    let value = "test-value";
+    let mut client = setup_client(&[key]).await;
+
+    let meta_flags = ["MS", "T3600", "F42", "k"];
+
+    // Set the key using meta_set
+    let set_result = client.meta_set(key, value, Some(&meta_flags)).await;
+    assert!(
+        set_result.is_ok(),
+        "Failed to set key using meta_set: {:?}",
+        set_result
+    );
+
+    let set_value = set_result.unwrap().unwrap();
+    assert_eq!(set_value.key, key.as_bytes());
+
+    // Fetch the key with .get() to ensure that the item has been hit before
+    let get_result = client.get(key).await.unwrap();
+    assert!(get_result.is_some(), "Key not found after meta_set");
+
+    // Retrieve the key using meta_get to verify
+    let get_flags = ["v", "h", "l", "t"];
+    let get_result = client.meta_get(key, Some(&get_flags)).await.unwrap();
+
+    assert!(get_result.is_some(), "Key not found after meta_set");
+    let result_value = get_result.unwrap();
+
+    // Verify the value
+    assert_eq!(
+        String::from_utf8(result_value.data.unwrap()).unwrap(),
+        value,
+        "Retrieved value does not match set value"
+    );
+
+    // Verify the metaflags
+    let meta_flag_values = result_value.meta_values.unwrap();
+    assert_eq!(meta_flag_values.hit_before, Some(true));
+    assert_eq!(meta_flag_values.last_accessed, Some(0));
+    assert_eq!(meta_flag_values.ttl_remaining, Some(3600));
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_set_with_cas_semantics_on_nonexistent_key() {
+    let key = "meta-set-cas-semantics-on-nonexistent-key-test-key";
+    let value = "test-value";
+    let mut client = setup_client(&[key]).await;
+
+    let meta_flags = ["C12321"];
+
+    let set_result = client.meta_set(key, value, Some(&meta_flags)).await;
+    assert!(
+        set_result.is_err(),
+        "meta_set should have returned an error for a nonexistent key with CAS semantics"
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_set_with_cas_match_on_key_that_exists() {
+    let key = "meta-set-cas-match-on-key-that-exists-test-key";
+    let value = "test-value";
+    let mut client = setup_client(&[key]).await;
+
+    // Set the key using meta_set to prepopulate, use E flag to set CAS value
+    let meta_flags = ["MS", "E12321"];
+    let set_result = client.meta_set(key, value, Some(&meta_flags)).await;
+    assert!(
+        set_result.is_ok(),
+        "Failed to set key using meta_set: {:?}",
+        set_result
+    );
+
+    let get_flags = ["v", "c"];
+    let get_result = client.meta_get(key, Some(&get_flags)).await.unwrap();
+    assert!(get_result.is_some(), "Key not found after meta_set");
+
+    let get_value = get_result.unwrap();
+
+    assert_eq!(
+        std::str::from_utf8(&get_value.data.unwrap()).unwrap(),
+        value
+    );
+    assert_eq!(get_value.cas.unwrap(), 12321);
+
+    // Set the key again using the force-set CAS value via C flag
+    let meta_flags = ["C12321"];
+    let new_value = "new-value";
+
+    let set_result = client.meta_set(key, new_value, Some(&meta_flags)).await;
+    assert!(
+        set_result.is_ok(),
+        "meta_set should set a new value when C flag token matches existing CAS value"
+    );
+
+    let get_flags = ["v", "c"];
+    let get_result = client.meta_get(key, Some(&get_flags)).await.unwrap();
+    assert!(get_result.is_some(), "Key not found after meta_set");
+
+    let get_value = get_result.unwrap();
+    assert_eq!(
+        std::str::from_utf8(&get_value.data.unwrap()).unwrap(),
+        new_value
+    );
+    // CAS value should be reset to a new atomic counter value
+    assert!(get_value.cas.unwrap() != 12321);
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_set_with_cas_mismatch_on_key_that_exists() {
+    let key = "meta-set-cas-mismatch-on-key-that-exists-test-key";
+    let value = "test-value";
+    let mut client = setup_client(&[key]).await;
+
+    // Set the key using meta_set to prepopulate, use E flag to set CAS value
+    let meta_flags = ["MS", "E99999"];
+    let set_result = client.meta_set(key, value, Some(&meta_flags)).await;
+    assert!(
+        set_result.is_ok(),
+        "Failed to set key using meta_set: {:?}",
+        set_result
+    );
+
+    let get_flags = ["v", "c"];
+    let get_result = client.meta_get(key, Some(&get_flags)).await.unwrap();
+    assert!(get_result.is_some(), "Key not found after meta_set");
+
+    let get_value = get_result.unwrap();
+
+    assert_eq!(
+        std::str::from_utf8(&get_value.data.unwrap()).unwrap(),
+        value
+    );
+    assert_eq!(get_value.cas.unwrap(), 99999);
+
+    // Try to set the key again with a CAS value that doesn't match
+    let meta_flags = ["C12321"];
+    let new_value = "new-value";
+
+    let set_result = client.meta_set(key, new_value, Some(&meta_flags)).await;
+    assert!(
+        set_result.is_err(),
+        "meta_set should err when C token doesn't match existing CAS value"
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_set_invalidate_on_expired_cas() {
+    let key = "meta-set-invalidate-on-expired-cas-test-key";
+    let value = "VALID";
+    let mut client = setup_client(&[key]).await;
+
+    // Set the key using meta_set to prepopulate, use E flag to set CAS value
+    let meta_flags = ["MS", "E99999"];
+    let set_result = client.meta_set(key, value, Some(&meta_flags)).await;
+    assert!(
+        set_result.is_ok(),
+        "Failed to set key using meta_set: {:?}",
+        set_result
+    );
+
+    // Invalidate the key by combining I flag with a C flag with a token lower than the existing CAS value
+    let meta_flags = ["C1", "I"];
+    let new_value = "INVALID";
+
+    let set_result = client.meta_set(key, new_value, Some(&meta_flags)).await;
+    assert!(
+        set_result.is_ok(),
+        "meta_set should invalidate the key when I flag is used with a C flag token that is lower than the existing CAS value"
+    );
+
+    // Verify that the key was invalidated
+    let get_flags = ["v", "c"];
+    let get_result = client.meta_get(key, Some(&get_flags)).await;
+
+    let get_value = get_result.unwrap().unwrap();
+
+    assert_eq!(
+        std::str::from_utf8(&get_value.data.unwrap()).unwrap(),
+        new_value
+    );
+
+    // CAS value should be reset to a new atomic counter value when the key is invalidated
+    assert!(get_value.cas.unwrap() != 99999);
+
+    let meta_values = get_value.meta_values.unwrap();
+    assert!(meta_values.is_recache_winner.unwrap());
+    assert!(meta_values.is_stale.unwrap());
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_set_invalidate_on_non_expired_cas() {
+    let key = "meta-set-invalidate-on-non-expired-cas-test-key";
+    let value = "VALID";
+    let mut client = setup_client(&[key]).await;
+
+    // Set the key using meta_set to prepopulate, use E flag to set CAS value
+    let meta_flags = ["MS", "E1"];
+    let set_result = client.meta_set(key, value, Some(&meta_flags)).await;
+    assert!(
+        set_result.is_ok(),
+        "Failed to set key using meta_set: {:?}",
+        set_result
+    );
+
+    // Invalidate the key by combining I flag with a C flag with a token lower than the existing CAS value
+    let meta_flags = ["C9999999", "I"];
+    let new_value = "INVALID";
+
+    let set_result = client.meta_set(key, new_value, Some(&meta_flags)).await;
+    assert!(
+        set_result.is_err(),
+        "meta_set should not invalidate the key when I flag is used with a C flag token that is greater than the existing CAS value"
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_set_in_add_mode() {
+    let key = "meta-set-add-if-not-exists-test-key";
+    let original_value = "test-value";
+
+    let mut client = setup_client(&[key]).await;
+
+    let mut meta_flags = ["ME", "F24"];
+
+    // Set the key using meta_set to pre-populate (in add mode)
+    let set_result = client
+        .meta_set(key, original_value, Some(&meta_flags))
+        .await;
+    assert!(
+        set_result.is_ok(),
+        "Failed to set key using meta_set: {:?}",
+        set_result
+    );
+
+    // Check initial set results
+    let get_flags = ["v", "f"];
+    let get_result_value = client
+        .meta_get(key, Some(&get_flags))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(get_result_value.flags.unwrap(), 24);
+    assert_eq!(
+        std::str::from_utf8(&get_result_value.data.unwrap()).unwrap(),
+        original_value
+    );
+
+    let new_value = "a-new-value";
+    meta_flags = ["ME", "F42"];
+
+    // Set the key using meta_set again, this should fail with Status::NotStored
+    let add_result = client.meta_set(key, new_value, Some(&meta_flags)).await;
+    let result = add_result.unwrap_err();
+    assert_eq!(Error::Protocol(Status::NotStored), result);
+
+    // Verify that the key was not re-added / modified
+    let get_flags = ["v", "f"];
+    let get_result_value = client
+        .meta_get(key, Some(&get_flags))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(get_result_value.flags.unwrap(), 24);
+    assert_eq!(
+        std::str::from_utf8(&get_result_value.data.unwrap()).unwrap(),
+        original_value
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_set_existing_key_in_prepend_mode() {
+    let key = "meta-set-prepend-test-key";
+    let original_value = "test-value";
+
+    let mut client = setup_client(&[key]).await;
+
+    let meta_flags = ["MS", "F24"];
+
+    // Set the key using meta_set to pre-populate (in set mode)
+    let set_result = client
+        .meta_set(key, original_value, Some(&meta_flags))
+        .await;
+    assert!(
+        set_result.is_ok(),
+        "Failed to set key using meta_set: {:?}",
+        set_result
+    );
+
+    // Check initial set results
+    let get_flags = ["v", "f"];
+    let get_result_value = client
+        .meta_get(key, Some(&get_flags))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(get_result_value.flags.unwrap(), 24);
+    assert_eq!(
+        std::str::from_utf8(&get_result_value.data.unwrap()).unwrap(),
+        original_value
+    );
+
+    let new_value = "prefix-to-prepend-";
+    // Assign a new F flag value - this should be ignored and the original flags preserved
+    let meta_flags = ["MP", "F42"];
+
+    // Set the key using meta_set again, this should fail with Status::NotStored
+    let prepend_result = client.meta_set(key, new_value, Some(&meta_flags)).await;
+    assert!(
+        prepend_result.is_ok(),
+        "Failed to set key using meta_set: {:?}",
+        prepend_result
+    );
+
+    // Verify that the new value was prepended to the existing value and that the original flags are preserved
+    let get_flags = ["v", "f"];
+    let get_result_value = client
+        .meta_get(key, Some(&get_flags))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(get_result_value.flags.unwrap(), 24);
+    assert_eq!(
+        std::str::from_utf8(&get_result_value.data.unwrap()).unwrap(),
+        format!("{}{}", new_value, original_value)
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_set_nonexistent_key_in_prepend_mode() {
+    let key = "meta-set-prepend-non-existent-key";
+    let original_value = "test-value";
+
+    let mut client = setup_client(&[key]).await;
+
+    let meta_flags = ["MP", "F24"];
+
+    // Set the key using meta_set to pre-populate (in prepend mode)
+    let set_result = client
+        .meta_set(key, original_value, Some(&meta_flags))
+        .await;
+    assert!(
+        set_result.is_err(),
+        "Should have received Err(Protocol(NotStored)) but got: {:?}",
+        set_result
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_set_existing_key_in_append_mode() {
+    let key = "meta-set-append-test-key";
+    let original_value = "test-value";
+
+    let mut client = setup_client(&[key]).await;
+
+    let meta_flags = ["MS", "F24"];
+
+    // Set the key using meta_set to pre-populate (in set mode)
+    let set_result = client
+        .meta_set(key, original_value, Some(&meta_flags))
+        .await;
+    assert!(
+        set_result.is_ok(),
+        "Failed to set key using meta_set: {:?}",
+        set_result
+    );
+
+    // Check initial set results
+    let get_flags = ["v", "f"];
+    let get_result_value = client
+        .meta_get(key, Some(&get_flags))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(get_result_value.flags.unwrap(), 24);
+    assert_eq!(
+        std::str::from_utf8(&get_result_value.data.unwrap()).unwrap(),
+        original_value
+    );
+
+    let new_value = "-suffix-to-append";
+    // Assign a new F flag value - this should be ignored and the original flags preserved
+    let meta_flags = ["MA", "F42"];
+
+    // Set the key using meta_set again, this should fail with Status::NotStored
+    let append_result = client.meta_set(key, new_value, Some(&meta_flags)).await;
+    assert!(
+        append_result.is_ok(),
+        "Failed to set key using meta_set: {:?}",
+        append_result
+    );
+
+    // Verify that the new value was appended to the existing value and that the original flags are preserved
+    let get_flags = ["v", "f"];
+    let get_result_value = client
+        .meta_get(key, Some(&get_flags))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(get_result_value.flags.unwrap(), 24);
+    assert_eq!(
+        std::str::from_utf8(&get_result_value.data.unwrap()).unwrap(),
+        format!("{}{}", original_value, new_value)
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_set_nonexistent_key_in_append_mode() {
+    let key = "meta-set-append-non-existent-key";
+    let original_value = "test-value";
+
+    let mut client = setup_client(&[key]).await;
+
+    let meta_flags = ["MA", "F24"];
+
+    // Set the key using meta_set to pre-populate (in prepend mode)
+    let set_result = client
+        .meta_set(key, original_value, Some(&meta_flags))
+        .await;
+    assert!(
+        set_result.is_err(),
+        "Should have received Err(Protocol(NotStored)) but got: {:?}",
+        set_result
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_set_nonexistent_key_in_append_mode_with_autovivify() {
+    let key = "meta-set-append-autovivify-test-key";
+    let original_value = "test-value";
+
+    let mut client = setup_client(&[key]).await;
+
+    // TODO: This will throw a ("Tag") error if N is provided without a TTL, that error needs to be handled properly (raise to client as ClientError // invalid command)
+    // Seems like any flag that wants a token will complain if the token is not provided with the same error, except O which will throw ("CrLf")
+    let meta_flags = ["MA", "F24", "N3600"];
+
+    // Set the key using meta_set to pre-populate (in set mode)
+    let set_result = client
+        .meta_set(key, original_value, Some(&meta_flags))
+        .await;
+    assert!(
+        set_result.is_ok(),
+        "Failed to set key using meta_set: {:?}",
+        set_result
+    );
+
+    // Check initial set results
+    let get_flags = ["v", "f", "t"];
+    let get_result_value = client
+        .meta_get(key, Some(&get_flags))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(get_result_value.flags.unwrap(), 24);
+    assert_eq!(
+        get_result_value.meta_values.unwrap().ttl_remaining.unwrap(),
+        3600
+    );
+    assert_eq!(
+        std::str::from_utf8(&get_result_value.data.unwrap()).unwrap(),
+        original_value
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_set_existing_key_in_replace_mode() {
+    let key = "meta-set-replace-test-key";
+    let original_value = "original-value";
+
+    let mut client = setup_client(&[key]).await;
+
+    let meta_flags = ["MS", "F24"];
+
+    // Set the key using meta_set to pre-populate (in set mode)
+    let set_result = client
+        .meta_set(key, original_value, Some(&meta_flags))
+        .await;
+    assert!(
+        set_result.is_ok(),
+        "Failed to set key using meta_set: {:?}",
+        set_result
+    );
+
+    // Check initial set results
+    let get_flags = ["v", "f"];
+    let get_result_value = client
+        .meta_get(key, Some(&get_flags))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(get_result_value.flags.unwrap(), 24);
+    assert_eq!(
+        std::str::from_utf8(&get_result_value.data.unwrap()).unwrap(),
+        original_value
+    );
+
+    let new_value = "new-value";
+    // Assign a new F flag value - this should be ignored and the flags are also replaced
+    let meta_flags = ["MR", "F42"];
+
+    // Set the key using meta_set again, this should fail with Status::NotStored
+    let replace_result = client.meta_set(key, new_value, Some(&meta_flags)).await;
+    assert!(
+        replace_result.is_ok(),
+        "Failed to set key using meta_set: {:?}",
+        replace_result
+    );
+
+    // Verify that the new value was replaced and that the original flags are preserved
+    let get_flags = ["v", "f"];
+    let get_result_value = client
+        .meta_get(key, Some(&get_flags))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(get_result_value.flags.unwrap(), 42);
+    assert_eq!(
+        std::str::from_utf8(&get_result_value.data.unwrap()).unwrap(),
+        new_value
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_set_nonexistent_key_in_replace_mode() {
+    let key = "meta-set-replace-non-existent-key";
+    let original_value = "test-value";
+
+    let mut client = setup_client(&[key]).await;
+
+    let meta_flags = ["MR", "F24"];
+
+    // Set the key using meta_set to pre-populate (in replace mode)
+    let set_result = client
+        .meta_set(key, original_value, Some(&meta_flags))
+        .await;
+    assert!(
+        set_result.is_err(),
+        "Should have received Err(Protocol(NotStored)) but got: {:?}",
+        set_result
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_quiet_mode_meta_set() {
+    // TODO: This test should hang for now.
+    let key = "quiet-mode-meta-set-test-key";
+    let value = "test-value";
+
+    let mut client = setup_client(&[key]).await;
+
+    let flags = ["k", "q"];
+
+    let result = client.meta_set(key, value, Some(&flags)).await;
+
+    assert!(result.is_ok());
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_quiet_mode_meta_set_with_cas_match_on_key_that_exists() {
+    // TODO: This test should hang for now.
+    let key = "quiet-mode-meta-set-cas-match-on-key-that-exists-test-key";
+    let value = "test-value";
+    let mut client = setup_client(&[key]).await;
+
+    // Set the key using meta_set to prepopulate, use E flag to set CAS value
+    let meta_flags = ["MS", "E12321", "q"];
+    let set_result = client.meta_set(key, value, Some(&meta_flags)).await;
+    assert!(
+        set_result.is_ok(),
+        "Failed to set key using meta_set: {:?}",
+        set_result
+    );
+
+    let get_flags = ["v", "c"];
+    let get_result = client.meta_get(key, Some(&get_flags)).await.unwrap();
+    assert!(get_result.is_some(), "Key not found after meta_set");
+
+    let get_value = get_result.unwrap();
+
+    assert_eq!(
+        std::str::from_utf8(&get_value.data.unwrap()).unwrap(),
+        value
+    );
+    assert_eq!(get_value.cas.unwrap(), 12321);
+
+    // Set the key again using the force-set CAS value via C flag
+    let meta_flags = ["C12321", "q"];
+    let new_value = "new-value";
+
+    let set_result = client.meta_set(key, new_value, Some(&meta_flags)).await;
+    assert!(
+        set_result.is_ok(),
+        "meta_set should set a new value when C flag token matches existing CAS value"
+    );
+
+    let get_flags = ["v", "c"];
+    let get_result = client.meta_get(key, Some(&get_flags)).await.unwrap();
+    assert!(get_result.is_some(), "Key not found after meta_set");
+
+    let get_value = get_result.unwrap();
+    assert_eq!(
+        std::str::from_utf8(&get_value.data.unwrap()).unwrap(),
+        new_value
+    );
+    // CAS value should be reset to a new atomic counter value
+    assert!(get_value.cas.unwrap() != 12321);
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_quiet_mode_meta_set_with_cas_semantics_on_nonexistent_key() {
+    // NOTE: This test should proceed as normal because an error is returned.
+    let key = "quiet-mode-meta-set-cas-semantics-on-nonexistent-key-test-key";
+    let value = "test-value";
+    let mut client = setup_client(&[key]).await;
+
+    let meta_flags = ["C12321", "q"];
+
+    let set_result = client.meta_set(key, value, Some(&meta_flags)).await;
+    assert!(
+        set_result.is_err(),
+        "meta_set should have returned an error for a nonexistent key with CAS semantics"
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_quiet_mode_meta_set_with_cas_mismatch_on_key_that_exists() {
+    // TODO: This test proceeds as normal because an error is returned.
+    let key = "quiet-mode-meta-set-cas-mismatch-on-key-that-exists-test-key";
+    let value = "test-value";
+    let mut client = setup_client(&[key]).await;
+
+    // Set the key using meta_set to prepopulate, use E flag to set CAS value
+    let meta_flags = ["MS", "E99999"];
+    let set_result = client.meta_set(key, value, Some(&meta_flags)).await;
+    assert!(
+        set_result.is_ok(),
+        "Failed to set key using meta_set: {:?}",
+        set_result
+    );
+
+    let get_flags = ["v", "c"];
+    let get_result = client.meta_get(key, Some(&get_flags)).await.unwrap();
+    assert!(get_result.is_some(), "Key not found after meta_set");
+
+    let get_value = get_result.unwrap();
+
+    assert_eq!(
+        std::str::from_utf8(&get_value.data.unwrap()).unwrap(),
+        value
+    );
+    assert_eq!(get_value.cas.unwrap(), 99999);
+
+    // Try to set the key again with a CAS value that doesn't match
+    let meta_flags = ["C12321", "q"];
+    let new_value = "new-value";
+
+    let set_result = client.meta_set(key, new_value, Some(&meta_flags)).await;
+    assert!(
+        set_result.is_err(),
+        "meta_set should err when C token doesn't match existing CAS value"
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_quiet_mode_meta_set_nonexistent_key_in_replace_mode() {
+    // NOTE: This test proceeds as normal because an error is returned.
+    let key = "quiet-mode-meta-set-replace-non-existent-key";
+    let original_value = "test-value";
+
+    let mut client = setup_client(&[key]).await;
+
+    let meta_flags = ["MR", "F24", "q"];
+
+    // Set the key using meta_set to pre-populate (in replace mode)
+    let set_result = client
+        .meta_set(key, original_value, Some(&meta_flags))
+        .await;
+    assert!(
+        set_result.is_err(),
+        "Should have received Err(Protocol(NotStored)) but got: {:?}",
+        set_result
+    );
 }
 
 #[ignore = "Relies on a running memcached server"]
@@ -741,7 +1537,7 @@ async fn test_get_many_aliases_get_multi_properly() {
         assert!(result.is_ok(), "failed to set {}, {:?}", key, result);
     }
 
-    #[allow(deprecated)] // specifically testing deprecated method
+    #[allow(deprecated, reason = "specifically testing deprecated method")]
     let result = client.get_many(&keys).await;
 
     assert!(
