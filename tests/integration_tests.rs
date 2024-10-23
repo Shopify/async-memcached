@@ -2046,7 +2046,7 @@ async fn test_decrements_existing_key_with_no_reply() {
 #[tokio::test]
 #[serial]
 async fn test_flush_all() {
-    let key = "flush-all-key";
+    let key = "test_flush_all";
     let value: u64 = 1;
 
     let mut client = setup_client(&[key]).await;
@@ -2055,7 +2055,7 @@ async fn test_flush_all() {
     let result = client.get(key).await;
     assert!(result.is_ok());
 
-    let result = client.flush_all().await;
+    let result = client.flush_all(None).await;
     assert!(result.is_ok());
 
     let result = client.get(key).await;

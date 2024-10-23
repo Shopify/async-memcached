@@ -783,14 +783,19 @@ impl Client {
         Ok(entries)
     }
 
-    /// Flushes all existing items on the server
+    /// Flushes all existing items on the server with optional expire time
     ///
     /// This operation invalidates all existing items immediately. Any items with an update time
     /// older than the time of the flush_all operation will be ignored for retrieval purposes.
     /// This operation does not free up memory taken up by the existing items.
-
-    pub async fn flush_all(&mut self) -> Result<(), Error> {
-        self.conn.write_all(b"flush_all\r\n").await?;
+    pub async fn flush_all(&mut self, ttl: Option<i64>) -> Result<(), Error> {
+        let exptime = match ttl {
+            None => String::new(),
+            Some(t) => format!(" {t}"),
+        };
+        self.conn
+            .write_all(&[b"flush_all", exptime.as_bytes(), b"\r\n"].concat())
+            .await?;
         self.conn.flush().await?;
 
         let mut response = String::new();
