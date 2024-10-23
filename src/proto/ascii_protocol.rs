@@ -5,6 +5,8 @@ use fxhash::FxHashMap;
 use std::future::Future;
 use tokio::io::AsyncWriteExt;
 
+const MAX_KEY_LENGTH: usize = 250; // reference in memcached documentation: https://github.com/memcached/memcached/blob/5609673ed29db98a377749fab469fe80777de8fd/doc/protocol.txt#L46
+
 /// Trait defining ASCII protocol-specific methods for the Client.
 pub trait AsciiProtocol {
     /// Gets the given key.
@@ -148,8 +150,10 @@ pub trait AsciiProtocol {
 
 impl AsciiProtocol for Client {
     async fn get<K: AsRef<[u8]>>(&mut self, key: K) -> Result<Option<Value>, Error> {
+        let kr = Self::validate_key_length(key.as_ref())?;
+
         self.conn
-            .write_all(&[b"get ", key.as_ref(), b"\r\n"].concat())
+            .write_all(&[b"get ", kr, b"\r\n"].concat())
             .await?;
         self.conn.flush().await?;
 
@@ -174,10 +178,13 @@ impl AsciiProtocol for Client {
         I: IntoIterator<Item = K>,
         K: AsRef<[u8]>,
     {
-        self.conn.write_all(b"get ").await?;
+        self.conn.write_all(b"get").await?;
         for key in keys {
-            self.conn.write_all(key.as_ref()).await?;
+            if key.as_ref().len() > MAX_KEY_LENGTH {
+                continue;
+            }
             self.conn.write_all(b" ").await?;
+            self.conn.write_all(key.as_ref()).await?;
         }
         self.conn.write_all(b"\r\n").await?;
         self.conn.flush().await?;
@@ -208,7 +215,7 @@ impl AsciiProtocol for Client {
         K: AsRef<[u8]>,
         V: AsMemcachedValue,
     {
-        let kr = key.as_ref();
+        let kr = Self::validate_key_length(key.as_ref())?;
         let vr = value.as_bytes();
 
         self.conn.write_all(b"set ").await?;
@@ -251,6 +258,10 @@ impl AsciiProtocol for Client {
     {
         for (key, value) in kv {
             let kr = key.as_ref();
+            if kr.len() > MAX_KEY_LENGTH {
+                continue;
+            }
+
             let vr = value.as_bytes();
 
             self.conn.write_all(b"set ").await?;
@@ -290,7 +301,7 @@ impl AsciiProtocol for Client {
         K: AsRef<[u8]>,
         V: AsMemcachedValue,
     {
-        let kr = key.as_ref();
+        let kr = Self::validate_key_length(key.as_ref())?;
         let vr = value.as_bytes();
 
         self.conn.write_all(b"add ").await?;
@@ -333,6 +344,10 @@ impl AsciiProtocol for Client {
     {
         for (key, value) in kv {
             let kr = key.as_ref();
+            if kr.len() > MAX_KEY_LENGTH {
+                continue;
+            }
+
             let vr = value.as_bytes();
 
             self.conn.write_all(b"add ").await?;
@@ -366,7 +381,7 @@ impl AsciiProtocol for Client {
     where
         K: AsRef<[u8]>,
     {
-        let kr = key.as_ref();
+        let kr = Self::validate_key_length(key.as_ref())?;
 
         self.conn
             .write_all(&[b"delete ", kr, b" noreply\r\n"].concat())
@@ -380,7 +395,7 @@ impl AsciiProtocol for Client {
     where
         K: AsRef<[u8]>,
     {
-        let kr = key.as_ref();
+        let kr = Self::validate_key_length(key.as_ref())?;
 
         self.conn
             .write_all(&[b"delete ", kr, b"\r\n"].concat())
@@ -399,8 +414,13 @@ impl AsciiProtocol for Client {
         K: AsRef<[u8]>,
     {
         for key in keys {
+            let kr = key.as_ref();
+            if kr.len() > MAX_KEY_LENGTH {
+                continue;
+            }
+
             self.conn.write_all(b"delete ").await?;
-            self.conn.write_all(key.as_ref()).await?;
+            self.conn.write_all(kr).await?;
             self.conn.write_all(b" noreply\r\n").await?;
         }
         self.conn.flush().await?;
@@ -412,11 +432,13 @@ impl AsciiProtocol for Client {
     where
         K: AsRef<[u8]>,
     {
+        let kr = Self::validate_key_length(key.as_ref())?;
+
         self.conn
             .write_all(
                 &[
                     b"incr ",
-                    key.as_ref(),
+                    kr,
                     b" ",
                     amount.to_string().as_bytes(),
                     b"\r\n",
@@ -437,11 +459,13 @@ impl AsciiProtocol for Client {
     where
         K: AsRef<[u8]>,
     {
+        let kr = Self::validate_key_length(key.as_ref())?;
+
         self.conn
             .write_all(
                 &[
                     b"incr ",
-                    key.as_ref(),
+                    kr,
                     b" ",
                     amount.to_string().as_bytes(),
                     b" noreply\r\n",
@@ -458,11 +482,13 @@ impl AsciiProtocol for Client {
     where
         K: AsRef<[u8]>,
     {
+        let kr = Self::validate_key_length(key.as_ref())?;
+
         self.conn
             .write_all(
                 &[
                     b"decr ",
-                    key.as_ref(),
+                    kr,
                     b" ",
                     amount.to_string().as_bytes(),
                     b"\r\n",
@@ -483,11 +509,13 @@ impl AsciiProtocol for Client {
     where
         K: AsRef<[u8]>,
     {
+        let kr = Self::validate_key_length(key.as_ref())?;
+
         self.conn
             .write_all(
                 &[
                     b"decr ",
-                    key.as_ref(),
+                    kr,
                     b" ",
                     amount.to_string().as_bytes(),
                     b" noreply\r\n",

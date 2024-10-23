@@ -19,6 +19,7 @@ pub fn parse_meta_get_status(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
         value(MetaResponse::Status(Status::Value), tag(b"VA ")),
         value(MetaResponse::Status(Status::Exists), tag(b"HD")),
         value(MetaResponse::Status(Status::NotFound), tag(b"EN")),
+        value(MetaResponse::Status(Status::NoOp), tag(b"MN\r\n")),
     ))(buf)
 }
 
@@ -28,6 +29,7 @@ pub fn parse_meta_set_status(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
         value(MetaResponse::Status(Status::NotStored), tag(b"NS")),
         value(MetaResponse::Status(Status::Exists), tag(b"EX")),
         value(MetaResponse::Status(Status::NotFound), tag(b"NF")),
+        value(MetaResponse::Status(Status::NoOp), tag(b"MN\r\n")),
     ))(buf)
 }
 
@@ -136,6 +138,8 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
 
             Ok((input, MetaResponse::Data(Some(vec![meta_value]))))
         }
+        // match arm for "MN\r\n" response
+        MetaResponse::Status(Status::NoOp) => Ok((input, MetaResponse::Status(Status::NoOp))),
         _ => {
             // unexpected response code, should never happen, bail
             Err(nom::Err::Error(nom::error::Error::new(
@@ -229,6 +233,8 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
 
             Ok((input, MetaResponse::Data(Some(vec![meta_value]))))
         }
+        // match arm for "MN\r\n" response
+        MetaResponse::Status(Status::NoOp) => Ok((input, MetaResponse::Status(Status::NoOp))),
         _ => Err(nom::Err::Error(nom::error::Error::new(
             input,
             nom::error::ErrorKind::Eof,
@@ -272,7 +278,6 @@ fn parse_meta_flag_values_as_slice(input: &[u8]) -> IResult<&[u8], Vec<(u8, Opti
     }
 }
 
-// TODO: refactor with new struct MetaValue
 fn map_meta_flag(flag: u8, token: &[u8], meta_value: &mut MetaValue) -> Result<(), crate::Error> {
     match flag {
         b'c' => {
@@ -388,14 +393,6 @@ fn construct_meta_value_from_flag_array(
         .iter()
         .map(|(flag, value)| (*flag, value.unwrap_or_default()))
         .collect();
-
-    // let mut meta_value = MetaValue {
-    //     key: None,
-    //     cas: None,
-    //     flags: Some(0),
-    //     data: data,
-    //     meta_values: None,
-    // };
 
     for (flag, token) in flag_array {
         map_meta_flag(flag, token, &mut meta_value)?;
@@ -561,7 +558,7 @@ mod tests {
                     str::from_utf8(meta_value.data.as_ref().unwrap()).unwrap(),
                     "test-value"
                 );
-                assert_eq!(meta_value.flags, Some(0));
+                assert_eq!(meta_value.flags, None);
                 assert_eq!(meta_value.cas, None);
                 assert_eq!(meta_value.hit_before, Some(true));
                 assert_eq!(meta_value.last_accessed, Some(56));
@@ -587,7 +584,7 @@ mod tests {
                     str::from_utf8(meta_value.data.as_ref().unwrap()).unwrap(),
                     "test-value"
                 );
-                assert_eq!(meta_value.flags, Some(0));
+                assert_eq!(meta_value.flags, None);
                 assert_eq!(meta_value.cas, None);
             }
             _ => panic!("Expected Response::Data, got something else"),
@@ -616,7 +613,7 @@ mod tests {
                 assert_eq!(meta_values.len(), 1);
                 let meta_value = &meta_values[0];
                 assert_eq!(meta_value.data, None);
-                assert_eq!(meta_value.flags, Some(0));
+                assert_eq!(meta_value.flags, None);
                 assert_eq!(meta_value.cas, Some(1));
                 assert_eq!(meta_value.hit_before, Some(true));
                 assert_eq!(meta_value.last_accessed, Some(123));
@@ -640,7 +637,7 @@ mod tests {
                     str::from_utf8(meta_value.data.as_ref().unwrap()).unwrap(),
                     "test-value"
                 );
-                assert_eq!(meta_value.flags, Some(0));
+                assert_eq!(meta_value.flags, None);
                 assert_eq!(meta_value.cas, None);
                 assert_eq!(meta_value.hit_before, Some(true));
                 assert_eq!(meta_value.last_accessed, Some(56));
@@ -667,7 +664,7 @@ mod tests {
                     str::from_utf8(meta_value.data.as_ref().unwrap()).unwrap(),
                     "test-value"
                 );
-                assert_eq!(meta_value.flags, Some(0));
+                assert_eq!(meta_value.flags, None);
                 assert_eq!(meta_value.cas, None);
                 assert_eq!(meta_value.hit_before, Some(true));
                 assert_eq!(meta_value.last_accessed, Some(56));
@@ -696,9 +693,9 @@ mod tests {
             MetaResponse::Data(Some(meta_values)) => {
                 assert_eq!(meta_values.len(), 1);
                 let meta_value = &meta_values[0];
-                assert_eq!(meta_value.key, Some(b"".to_vec()));
+                assert_eq!(meta_value.key, None);
                 assert_eq!(meta_value.data, None);
-                assert_eq!(meta_value.flags, Some(0));
+                assert_eq!(meta_value.flags, None);
                 assert_eq!(meta_value.cas, None);
                 assert_eq!(meta_value.opaque_token, Some(b"opaque-token".to_vec()));
             }
@@ -718,7 +715,7 @@ mod tests {
                 let meta_value = &meta_values[0];
                 assert_eq!(meta_value.key, Some(b"test-key".to_vec()));
                 assert_eq!(meta_value.data, None);
-                assert_eq!(meta_value.flags, Some(0));
+                assert_eq!(meta_value.flags, None);
                 assert_eq!(meta_value.cas, None);
                 assert_eq!(meta_value.status, Some(Status::NotFound));
             }
@@ -754,7 +751,7 @@ mod tests {
                     str::from_utf8(meta_value.data.as_ref().unwrap()).unwrap(),
                     "test-\r\nvalue"
                 );
-                assert_eq!(meta_value.flags, Some(0));
+                assert_eq!(meta_value.flags, None);
                 assert_eq!(meta_value.cas, None);
                 assert_eq!(meta_value.hit_before, Some(true));
                 assert_eq!(meta_value.last_accessed, Some(56));
@@ -784,7 +781,7 @@ mod tests {
                     str::from_utf8(meta_value.data.as_ref().unwrap()).unwrap(),
                     "test\r-\nvalue"
                 );
-                assert_eq!(meta_value.flags, Some(0));
+                assert_eq!(meta_value.flags, None);
                 assert_eq!(meta_value.cas, None);
                 assert_eq!(meta_value.hit_before, Some(true));
                 assert_eq!(meta_value.last_accessed, Some(56));
@@ -814,7 +811,7 @@ mod tests {
                     str::from_utf8(meta_value.data.as_ref().unwrap()).unwrap(),
                     "test\n-\rvalue"
                 );
-                assert_eq!(meta_value.flags, Some(0));
+                assert_eq!(meta_value.flags, None);
                 assert_eq!(meta_value.cas, None);
                 assert_eq!(meta_value.hit_before, Some(true));
                 assert_eq!(meta_value.last_accessed, Some(56));
@@ -876,7 +873,7 @@ mod tests {
                 assert_eq!(meta_values.len(), 1);
                 let meta_value = &meta_values[0];
                 assert_eq!(meta_value.data, None);
-                assert_eq!(meta_value.flags, Some(0));
+                assert_eq!(meta_value.flags, None);
                 assert_eq!(meta_value.cas, None);
                 assert_eq!(meta_value.opaque_token, Some(b"123".to_vec()));
             }
@@ -897,7 +894,7 @@ mod tests {
                 let meta_value = &meta_values[0];
                 assert_eq!(meta_value.key, Some(b"test-key".to_vec()));
                 assert_eq!(meta_value.data, None);
-                assert_eq!(meta_value.flags, Some(0));
+                assert_eq!(meta_value.flags, None);
                 assert_eq!(meta_value.cas, None);
                 assert_eq!(meta_value.status, Some(Status::Stored));
             }

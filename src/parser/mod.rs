@@ -25,8 +25,6 @@ pub struct Value {
     /// CAS identifier.
     pub cas: Option<u64>,
     /// Flags for this key.
-    /// NOTE: This is the client bitflags, not meta flags
-    /// which is an opaque number passed by the client
     /// Defaults to 0.
     pub flags: Option<u32>,
     /// Data for this key.
@@ -40,7 +38,7 @@ pub struct MetaValue {
     pub key: Option<Vec<u8>>,
     /// CAS value (c flag)
     pub cas: Option<u64>,
-    /// Client flags (f flag)
+    /// Client bitflags (f flag)
     pub flags: Option<u32>,
     /// Data for this key.
     pub data: Option<Vec<u8>>,

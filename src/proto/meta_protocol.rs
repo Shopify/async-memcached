@@ -1,4 +1,4 @@
-use crate::{AsMemcachedValue, Client, Error, ErrorKind, Status};
+use crate::{AsMemcachedValue, Client, Error, Status};
 
 use crate::parser::{parse_meta_get_response, parse_meta_set_response};
 use crate::parser::{MetaResponse, MetaValue};
@@ -58,31 +58,48 @@ impl MetaProtocol for Client {
         key: K,
         meta_flags: Option<&[&str]>,
     ) -> Result<Option<MetaValue>, Error> {
+        let kr = Self::validate_key_length(key.as_ref())?;
+        let mut quiet_mode = false;
+
         self.conn.write_all(b"mg ").await?;
-        self.conn
-            .write_all(Self::validate_key_length(key.as_ref())?)
-            .await?;
+        self.conn.write_all(kr).await?;
         self.conn.write_all(b" ").await?;
-        if let Some(flags) = meta_flags {
-            self.conn.write_all(flags.join(" ").as_bytes()).await?;
+        if let Some(meta_flags) = meta_flags {
+            self.conn.write_all(meta_flags.join(" ").as_bytes()).await?;
+            self.conn.write_all(b"\r\n").await?;
+            if meta_flags.contains(&"q") {
+                quiet_mode = true;
+                // Write a no-op command if quiet mode is used so reliably detect cache misses.
+                self.conn.write_all(b"mn\r\n").await?;
+            }
+        } else {
+            self.conn.write_all(b"\r\n").await?;
         }
-        self.conn.write_all(b"\r\n").await?;
+
         self.conn.flush().await?;
 
-        match self.drive_receive(parse_meta_get_response).await? {
-            MetaResponse::Status(Status::NotFound) => Ok(None),
-            MetaResponse::Status(s) => Err(s.into()),
-            MetaResponse::Data(d) => d
-                .map(|mut items| {
-                    if items.len() != 1 {
-                        Err(Status::Error(ErrorKind::Protocol(None)).into())
-                    } else {
-                        let mut item = items.remove(0);
-                        item.key = Some(key.as_ref().to_vec());
+        if quiet_mode {
+            match self.drive_receive(parse_meta_get_response).await? {
+                MetaResponse::Status(Status::NoOp) => Ok(None),
+                MetaResponse::Status(s) => Err(s.into()),
+                MetaResponse::Data(d) => d
+                    .map(|mut items| {
+                        let item = items.remove(0);
                         Ok(item)
-                    }
-                })
-                .transpose(),
+                    })
+                    .transpose(),
+            }
+        } else {
+            match self.drive_receive(parse_meta_get_response).await? {
+                MetaResponse::Status(Status::NotFound) => Ok(None),
+                MetaResponse::Status(s) => Err(s.into()),
+                MetaResponse::Data(d) => d
+                    .map(|mut items| {
+                        let item = items.remove(0);
+                        Ok(item)
+                    })
+                    .transpose(),
+            }
         }
     }
 
@@ -96,8 +113,9 @@ impl MetaProtocol for Client {
         K: AsRef<[u8]>,
         V: AsMemcachedValue,
     {
-        let kr = key.as_ref();
+        let kr = Self::validate_key_length(key.as_ref())?;
         let vr = value.as_bytes();
+        let mut quiet_mode = false;
 
         self.conn.write_all(b"ms ").await?;
         self.conn.write_all(kr).await?;
@@ -109,27 +127,43 @@ impl MetaProtocol for Client {
         if let Some(meta_flags) = meta_flags {
             self.conn.write_all(b" ").await?;
             self.conn.write_all(meta_flags.join(" ").as_bytes()).await?;
+            if meta_flags.contains(&"q") {
+                quiet_mode = true;
+            }
         }
 
         self.conn.write_all(b"\r\n").await?;
         self.conn.write_all(vr.as_ref()).await?;
         self.conn.write_all(b"\r\n").await?;
+
+        if quiet_mode {
+            self.conn.write_all(b"mn\r\n").await?;
+        }
+
         self.conn.flush().await?;
 
-        match self.drive_receive(parse_meta_set_response).await? {
-            MetaResponse::Status(Status::Stored) => Ok(None),
-            MetaResponse::Status(s) => Err(s.into()),
-            MetaResponse::Data(d) => d
-                .map(|mut items| {
-                    if items.len() != 1 {
-                        Err(Status::Error(ErrorKind::Protocol(None)).into())
-                    } else {
-                        let mut item = items.remove(0);
-                        item.key = Some(key.as_ref().to_vec());
+        if quiet_mode {
+            match self.drive_receive(parse_meta_set_response).await? {
+                MetaResponse::Status(Status::NoOp) => Ok(None),
+                MetaResponse::Status(s) => Err(s.into()),
+                MetaResponse::Data(d) => d
+                    .map(|mut items| {
+                        let item = items.remove(0);
                         Ok(item)
-                    }
-                })
-                .transpose(),
+                    })
+                    .transpose(),
+            }
+        } else {
+            match self.drive_receive(parse_meta_set_response).await? {
+                MetaResponse::Status(Status::Stored) => Ok(None),
+                MetaResponse::Status(s) => Err(s.into()),
+                MetaResponse::Data(d) => d
+                    .map(|mut items| {
+                        let item = items.remove(0);
+                        Ok(item)
+                    })
+                    .transpose(),
+            }
         }
     }
 }

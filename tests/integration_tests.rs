@@ -6,7 +6,7 @@ use serial_test::{parallel, serial};
 // it's possible to delete/overwrite keys created by another test before they're read.
 
 const MAX_KEY_LENGTH: usize = 250; // 250 bytes, default memcached max key length
-const LARGE_PAYLOAD_SIZE: usize = 1024 * 1024 - 310; // ~1 MB, default memcached max value size
+const LARGE_PAYLOAD_SIZE: usize = 1024 * 1024 - 310; // Memcached's default maximum payload size ~1MB minus max key length + metadata
 
 async fn setup_client(keys: &[&str]) -> Client {
     let mut client = Client::new("tcp://127.0.0.1:11211")
@@ -279,7 +279,7 @@ async fn test_quiet_mode_meta_get_with_k_flag_and_cache_hit() {
 
     let result = client.meta_get(key, Some(&flags)).await.unwrap().unwrap();
 
-    assert_eq!(result.key, key.as_bytes().to_vec());
+    assert_eq!(result.key, Some(key.as_bytes().to_vec()));
     assert_eq!(result.data, Some(value.as_bytes().to_vec()));
 }
 
@@ -1158,8 +1158,6 @@ async fn test_meta_set_nonexistent_key_in_append_mode_with_autovivify() {
 
     let mut client = setup_client(&[key]).await;
 
-    // TODO: This will throw a ("Tag") error if N is provided without a TTL, that error needs to be handled properly (raise to client as ClientError // invalid command)
-    // Seems like any flag that wants a token will complain if the token is not provided with the same error, except O which will throw ("CrLf")
     let meta_flags = ["MA", "F24", "N3600"];
 
     // Set the key using meta_set to pre-populate (in set mode)
@@ -1273,7 +1271,6 @@ async fn test_meta_set_nonexistent_key_in_replace_mode() {
 #[tokio::test]
 #[parallel]
 async fn test_quiet_mode_meta_set() {
-    // TODO: This test should hang for now.
     let key = "quiet-mode-meta-set-test-key";
     let value = "test-value";
 
@@ -1290,7 +1287,6 @@ async fn test_quiet_mode_meta_set() {
 #[tokio::test]
 #[parallel]
 async fn test_quiet_mode_meta_set_with_cas_match_on_key_that_exists() {
-    // TODO: This test should hang for now.
     let key = "quiet-mode-meta-set-cas-match-on-key-that-exists-test-key";
     let value = "test-value";
     let mut client = setup_client(&[key]).await;
@@ -1343,7 +1339,6 @@ async fn test_quiet_mode_meta_set_with_cas_match_on_key_that_exists() {
 #[tokio::test]
 #[parallel]
 async fn test_quiet_mode_meta_set_with_cas_semantics_on_nonexistent_key() {
-    // NOTE: This test should proceed as normal because an error is returned.
     let key = "quiet-mode-meta-set-cas-semantics-on-nonexistent-key-test-key";
     let value = "test-value";
     let mut client = setup_client(&[key]).await;
@@ -1361,7 +1356,6 @@ async fn test_quiet_mode_meta_set_with_cas_semantics_on_nonexistent_key() {
 #[tokio::test]
 #[parallel]
 async fn test_quiet_mode_meta_set_with_cas_mismatch_on_key_that_exists() {
-    // TODO: This test proceeds as normal because an error is returned.
     let key = "quiet-mode-meta-set-cas-mismatch-on-key-that-exists-test-key";
     let value = "test-value";
     let mut client = setup_client(&[key]).await;
@@ -1402,7 +1396,6 @@ async fn test_quiet_mode_meta_set_with_cas_mismatch_on_key_that_exists() {
 #[tokio::test]
 #[parallel]
 async fn test_quiet_mode_meta_set_nonexistent_key_in_replace_mode() {
-    // NOTE: This test proceeds as normal because an error is returned.
     let key = "quiet-mode-meta-set-replace-non-existent-key";
     let original_value = "test-value";
 
