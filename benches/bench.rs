@@ -1,4 +1,4 @@
-use async_memcached::Client;
+use async_memcached::{AsciiProtocol, Client, MetaProtocol};
 use criterion::{criterion_group, criterion_main, Criterion};
 use tokio::runtime::Runtime;
 

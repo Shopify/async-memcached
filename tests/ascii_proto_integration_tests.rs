@@ -1,4 +1,4 @@
-use async_memcached::{Client, Error, ErrorKind, Status};
+use async_memcached::{AsciiProtocol, Client, Error, ErrorKind, MetaProtocol, Status};
 use rand::seq::IteratorRandom;
 use serial_test::{parallel, serial};
 
@@ -6,7 +6,7 @@ use serial_test::{parallel, serial};
 // it's possible to delete/overwrite keys created by another test before they're read.
 
 const MAX_KEY_LENGTH: usize = 250; // 250 bytes, default memcached max key length
-const LARGE_PAYLOAD_SIZE: usize = 1024 * 1024 - 310; // ~1 MB, default memcached max value size
+const LARGE_PAYLOAD_SIZE: usize = 1024 * 1024 - 310; // Memcached's default maximum payload size ~1MB minus max key length + metadata
 
 async fn setup_client(keys: &[&str]) -> Client {
     let mut client = Client::new("tcp://127.0.0.1:11211")
@@ -179,11 +179,10 @@ async fn test_meta_get_with_many_flags() {
         value
     );
 
-    let meta_flag_values = result_meta_value.meta_values.unwrap();
-    assert!(meta_flag_values.hit_before.unwrap());
-    assert_eq!(meta_flag_values.last_accessed.unwrap(), 0);
-    assert!(meta_flag_values.ttl_remaining.unwrap() > 0);
-    assert_eq!(meta_flag_values.opaque_token.unwrap(), "9001".as_bytes());
+    assert!(result_meta_value.hit_before.unwrap());
+    assert_eq!(result_meta_value.last_accessed.unwrap(), 0);
+    assert!(result_meta_value.ttl_remaining.unwrap() > 0);
+    assert_eq!(result_meta_value.opaque_token.unwrap(), "9001".as_bytes());
 }
 
 #[ignore = "Relies on a running memcached server"]
@@ -215,11 +214,13 @@ async fn test_meta_get_with_many_flags_and_no_value() {
 
     assert_eq!(meta_get_result_value.data, None);
 
-    let meta_flag_values = meta_get_result_value.meta_values.unwrap();
-    assert!(meta_flag_values.hit_before.unwrap());
-    assert_eq!(meta_flag_values.last_accessed.unwrap(), 0);
-    assert!(meta_flag_values.ttl_remaining.unwrap() > 0);
-    assert_eq!(meta_flag_values.opaque_token.unwrap(), "9001".as_bytes());
+    assert!(meta_get_result_value.hit_before.unwrap());
+    assert_eq!(meta_get_result_value.last_accessed.unwrap(), 0);
+    assert!(meta_get_result_value.ttl_remaining.unwrap() > 0);
+    assert_eq!(
+        meta_get_result_value.opaque_token.unwrap(),
+        "9001".as_bytes()
+    );
 }
 
 #[ignore = "Relies on a running memcached server"]
@@ -245,8 +246,8 @@ async fn test_meta_get_not_found_with_opaque_flag() {
     let result = client.meta_get(key, Some(&flags)).await.unwrap();
 
     assert_eq!(
-        result.unwrap().meta_values.unwrap().opaque_token,
-        Some("9001".as_bytes().to_vec())
+        result.unwrap().opaque_token.unwrap(),
+        "9001".as_bytes().to_vec()
     );
 }
 
@@ -260,7 +261,7 @@ async fn test_meta_get_not_found_with_k_flag() {
 
     let result = client.meta_get(key, Some(&flags)).await.unwrap();
 
-    assert_eq!(result.unwrap().key, key.as_bytes().to_vec());
+    assert_eq!(result.unwrap().key, Some(key.as_bytes().to_vec()));
 }
 
 #[ignore = "Relies on a running memcached server"]
@@ -278,7 +279,7 @@ async fn test_quiet_mode_meta_get_with_k_flag_and_cache_hit() {
 
     let result = client.meta_get(key, Some(&flags)).await.unwrap().unwrap();
 
-    assert_eq!(result.key, key.as_bytes().to_vec());
+    assert_eq!(result.key, Some(key.as_bytes().to_vec()));
     assert_eq!(result.data, Some(value.as_bytes().to_vec()));
 }
 
@@ -698,10 +699,9 @@ async fn test_meta_set_with_opaque_token() {
     );
 
     // Verify the metaflags
-    let meta_flag_values = result_value.meta_values.unwrap();
-    assert_eq!(meta_flag_values.hit_before, Some(true));
-    assert_eq!(meta_flag_values.last_accessed, Some(0));
-    assert_eq!(meta_flag_values.ttl_remaining, Some(3600));
+    assert!(result_value.hit_before.unwrap());
+    assert_eq!(result_value.last_accessed, Some(0));
+    assert_eq!(result_value.ttl_remaining, Some(3600));
 }
 
 #[ignore = "Relies on a running memcached server"]
@@ -722,7 +722,7 @@ async fn test_meta_set_with_k_flag() {
     );
 
     let set_value = set_result.unwrap().unwrap();
-    assert_eq!(set_value.key, key.as_bytes());
+    assert_eq!(set_value.key, Some(key.as_bytes().to_vec()));
 
     // Fetch the key with .get() to ensure that the item has been hit before
     let get_result = client.get(key).await.unwrap();
@@ -743,10 +743,9 @@ async fn test_meta_set_with_k_flag() {
     );
 
     // Verify the metaflags
-    let meta_flag_values = result_value.meta_values.unwrap();
-    assert_eq!(meta_flag_values.hit_before, Some(true));
-    assert_eq!(meta_flag_values.last_accessed, Some(0));
-    assert_eq!(meta_flag_values.ttl_remaining, Some(3600));
+    assert!(result_value.hit_before.unwrap());
+    assert_eq!(result_value.last_accessed, Some(0));
+    assert_eq!(result_value.ttl_remaining, Some(3600));
 }
 
 #[ignore = "Relies on a running memcached server"]
@@ -898,10 +897,8 @@ async fn test_meta_set_invalidate_on_expired_cas() {
 
     // CAS value should be reset to a new atomic counter value when the key is invalidated
     assert!(get_value.cas.unwrap() != 99999);
-
-    let meta_values = get_value.meta_values.unwrap();
-    assert!(meta_values.is_recache_winner.unwrap());
-    assert!(meta_values.is_stale.unwrap());
+    assert!(get_value.is_recache_winner.unwrap());
+    assert!(get_value.is_stale.unwrap());
 }
 
 #[ignore = "Relies on a running memcached server"]
@@ -1161,8 +1158,6 @@ async fn test_meta_set_nonexistent_key_in_append_mode_with_autovivify() {
 
     let mut client = setup_client(&[key]).await;
 
-    // TODO: This will throw a ("Tag") error if N is provided without a TTL, that error needs to be handled properly (raise to client as ClientError // invalid command)
-    // Seems like any flag that wants a token will complain if the token is not provided with the same error, except O which will throw ("CrLf")
     let meta_flags = ["MA", "F24", "N3600"];
 
     // Set the key using meta_set to pre-populate (in set mode)
@@ -1183,10 +1178,7 @@ async fn test_meta_set_nonexistent_key_in_append_mode_with_autovivify() {
         .unwrap()
         .unwrap();
     assert_eq!(get_result_value.flags.unwrap(), 24);
-    assert_eq!(
-        get_result_value.meta_values.unwrap().ttl_remaining.unwrap(),
-        3600
-    );
+    assert_eq!(get_result_value.ttl_remaining.unwrap(), 3600);
     assert_eq!(
         std::str::from_utf8(&get_result_value.data.unwrap()).unwrap(),
         original_value
@@ -1279,7 +1271,6 @@ async fn test_meta_set_nonexistent_key_in_replace_mode() {
 #[tokio::test]
 #[parallel]
 async fn test_quiet_mode_meta_set() {
-    // TODO: This test should hang for now.
     let key = "quiet-mode-meta-set-test-key";
     let value = "test-value";
 
@@ -1296,7 +1287,6 @@ async fn test_quiet_mode_meta_set() {
 #[tokio::test]
 #[parallel]
 async fn test_quiet_mode_meta_set_with_cas_match_on_key_that_exists() {
-    // TODO: This test should hang for now.
     let key = "quiet-mode-meta-set-cas-match-on-key-that-exists-test-key";
     let value = "test-value";
     let mut client = setup_client(&[key]).await;
@@ -1349,7 +1339,6 @@ async fn test_quiet_mode_meta_set_with_cas_match_on_key_that_exists() {
 #[tokio::test]
 #[parallel]
 async fn test_quiet_mode_meta_set_with_cas_semantics_on_nonexistent_key() {
-    // NOTE: This test should proceed as normal because an error is returned.
     let key = "quiet-mode-meta-set-cas-semantics-on-nonexistent-key-test-key";
     let value = "test-value";
     let mut client = setup_client(&[key]).await;
@@ -1367,7 +1356,6 @@ async fn test_quiet_mode_meta_set_with_cas_semantics_on_nonexistent_key() {
 #[tokio::test]
 #[parallel]
 async fn test_quiet_mode_meta_set_with_cas_mismatch_on_key_that_exists() {
-    // TODO: This test proceeds as normal because an error is returned.
     let key = "quiet-mode-meta-set-cas-mismatch-on-key-that-exists-test-key";
     let value = "test-value";
     let mut client = setup_client(&[key]).await;
@@ -1408,7 +1396,6 @@ async fn test_quiet_mode_meta_set_with_cas_mismatch_on_key_that_exists() {
 #[tokio::test]
 #[parallel]
 async fn test_quiet_mode_meta_set_nonexistent_key_in_replace_mode() {
-    // NOTE: This test proceeds as normal because an error is returned.
     let key = "quiet-mode-meta-set-replace-non-existent-key";
     let original_value = "test-value";
 
