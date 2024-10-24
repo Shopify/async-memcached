@@ -1,6 +1,6 @@
 use crate::{AsMemcachedValue, Client, Error, Status};
 
-use crate::parser::{parse_meta_get_response, parse_meta_set_response, parse_meta_delete_response};
+use crate::parser::{parse_meta_delete_response, parse_meta_get_response, parse_meta_set_response};
 use crate::parser::{MetaResponse, MetaValue};
 
 use std::future::Future;
@@ -70,7 +70,7 @@ pub trait MetaProtocol {
     fn meta_delete<K: AsRef<[u8]>>(
         &mut self,
         key: K,
-        meta_flags: &[char],
+        meta_flags: Option<&[&str]>,
     ) -> impl Future<Output = Result<Option<MetaValue>, Error>>;
 }
 
@@ -81,7 +81,6 @@ impl MetaProtocol for Client {
         meta_flags: Option<&[&str]>,
     ) -> Result<Option<MetaValue>, Error> {
         let kr = Self::validate_key_length(key.as_ref())?;
-        let mut quiet_mode = false;
 
         self.conn.write_all(b"mg ").await?;
         self.conn.write_all(kr).await?;
@@ -90,7 +89,6 @@ impl MetaProtocol for Client {
             self.conn.write_all(meta_flags.join(" ").as_bytes()).await?;
             self.conn.write_all(b"\r\n").await?;
             if meta_flags.contains(&"q") {
-                quiet_mode = true;
                 // Write a no-op command if quiet mode is used so reliably detect cache misses.
                 self.conn.write_all(b"mn\r\n").await?;
             }
@@ -100,28 +98,16 @@ impl MetaProtocol for Client {
 
         self.conn.flush().await?;
 
-        if quiet_mode {
-            match self.drive_receive(parse_meta_get_response).await? {
-                MetaResponse::Status(Status::NoOp) => Ok(None),
-                MetaResponse::Status(s) => Err(s.into()),
-                MetaResponse::Data(d) => d
-                    .map(|mut items| {
-                        let item = items.remove(0);
-                        Ok(item)
-                    })
-                    .transpose(),
-            }
-        } else {
-            match self.drive_receive(parse_meta_get_response).await? {
-                MetaResponse::Status(Status::NotFound) => Ok(None),
-                MetaResponse::Status(s) => Err(s.into()),
-                MetaResponse::Data(d) => d
-                    .map(|mut items| {
-                        let item = items.remove(0);
-                        Ok(item)
-                    })
-                    .transpose(),
-            }
+        match self.drive_receive(parse_meta_get_response).await? {
+            MetaResponse::Status(Status::NotFound) => Ok(None),
+            MetaResponse::Status(Status::NoOp) => Ok(None),
+            MetaResponse::Status(s) => Err(s.into()),
+            MetaResponse::Data(d) => d
+                .map(|mut items| {
+                    let item = items.remove(0);
+                    Ok(item)
+                })
+                .transpose(),
         }
     }
 
@@ -164,56 +150,51 @@ impl MetaProtocol for Client {
 
         self.conn.flush().await?;
 
-        if quiet_mode {
-            match self.drive_receive(parse_meta_set_response).await? {
-                MetaResponse::Status(Status::NoOp) => Ok(None),
-                MetaResponse::Status(s) => Err(s.into()),
-                MetaResponse::Data(d) => d
-                    .map(|mut items| {
-                        let item = items.remove(0);
-                        Ok(item)
-                    })
-                    .transpose(),
-            }
-        } else {
-            match self.drive_receive(parse_meta_set_response).await? {
-                MetaResponse::Status(Status::Stored) => Ok(None),
-                MetaResponse::Status(s) => Err(s.into()),
-                MetaResponse::Data(d) => d
-                    .map(|mut items| {
-                        let item = items.remove(0);
-                        Ok(item)
-                    })
-                    .transpose(),
-            }
+        match self.drive_receive(parse_meta_set_response).await? {
+            MetaResponse::Status(Status::Stored) => Ok(None),
+            MetaResponse::Status(Status::NoOp) => Ok(None),
+            MetaResponse::Status(s) => Err(s.into()),
+            MetaResponse::Data(d) => d
+                .map(|mut items| {
+                    let item = items.remove(0);
+                    Ok(item)
+                })
+                .transpose(),
         }
     }
 
     async fn meta_delete<K: AsRef<[u8]>>(
         &mut self,
         key: K,
-        meta_flags: &[char],
+        meta_flags: Option<&[&str]>,
     ) -> Result<Option<MetaValue>, Error> {
-        let mut command = Vec::with_capacity(300);
-        command.extend_from_slice(b"md ");
-        command.extend_from_slice(key.as_ref());
-        if !meta_flags.is_empty() {
-            for flag in meta_flags {
-                command.push(b' ');
-                command.push(*flag as u8);
+        let kr = Self::validate_key_length(key.as_ref())?;
+
+        self.conn.write_all(b"mg ").await?;
+        self.conn.write_all(kr).await?;
+        self.conn.write_all(b" ").await?;
+        if let Some(meta_flags) = meta_flags {
+            self.conn.write_all(meta_flags.join(" ").as_bytes()).await?;
+            self.conn.write_all(b"\r\n").await?;
+            if meta_flags.contains(&"q") {
+                self.conn.write_all(b"mn\r\n").await?;
             }
+        } else {
+            self.conn.write_all(b"\r\n").await?;
         }
-        command.extend_from_slice(b"\r\n");
-        //println!("command: {:?}", String::from_utf8_lossy(&command));
-        self.conn.write_all(&command).await?;
+
         self.conn.flush().await?;
 
         match self.drive_receive(parse_meta_delete_response).await? {
-            MetaResponse::Status(Status::Deleted) => Ok(()),
-            MetaResponse::Status(Status::Exists) => Err(Status::Error(ErrorKind::Protocol(Some("exists_placeholder".to_string()))).into()),
-            MetaResponse::Status(Status::NotFound) => Err(Status::Error(ErrorKind::Protocol(Some("not_found_placeholder".to_string()))).into()),
+            MetaResponse::Status(Status::Deleted) => Ok(None),
+            MetaResponse::Status(Status::NoOp) => Ok(None),
             MetaResponse::Status(s) => Err(s.into()),
-            _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),
+            MetaResponse::Data(d) => d
+                .map(|mut items| {
+                    let item = items.remove(0);
+                    Ok(item)
+                })
+                .transpose(),
         }
     }
 }
