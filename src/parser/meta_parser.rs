@@ -65,23 +65,28 @@ pub fn parse_meta_set_response(buf: &[u8]) -> Result<Option<(usize, MetaResponse
     }
 }
 
-// example meta_get command:
-// mg meta-get-test-key v h l t
-// so it has flags of v h l t
-// meta_get example response:
+// example meta_get command sent to memcached server:
+// mg meta-get-test-key v h l t k
+// so it has flags of v h l t k
+//
+// meta_get example response from memcached server:
 // VA 10 h1 l56 t2179
 // test-value
-// this method should return a response with a value object like like:
-// Value {
+//
+// This method should return a response with a MetaValue object containing only the requested meta flag data, like this:
+// MetaValue {
 //     key: "meta-get-test-key",
 //     cas: None,
-//     flags: 0,
-//     data: "test-value",
-//     meta_values: Some(MetaValue {
-//         h: true,
-//         l: 56,
-//         t: 2179,
-//     }),
+//     flags: None,
+//     data: [116, 101, 115, 116, 45, 118, 97, 108, 117, 101],
+//     status: Some(Status::Value),
+//     hit_before: Some(true),
+//     last_accessed: Some(56),
+//     ttl_remaining: Some(2179),
+//     size: None,
+//     opaque_token: None,
+//     is_stale: None,
+//     is_recache_winner: None,
 // }
 fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
     let (input, status) = parse_meta_get_status(buf)?; // removes <CD> response code from the input
@@ -149,6 +154,28 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
     }
 }
 
+// example meta_set command sent to memcached server:
+// ms meta-set-test-key E9001 T3600 Oopaque-token c s\r\nTEST-VALUE\r\n
+// so it has flags of E9001 T3600 Oopaque-token c s
+//
+// meta_set example response from memcached server:
+// HD Oopaque-token c9001
+//
+// This method should return a response with a MetaValue object containing only the requested meta flag data, like this:
+// MetaValue {
+//     key: None,
+//     cas: Some(9001),
+//     flags: None,
+//     data: None,
+//     status: Some(Status::Stored),
+//     hit_before: None,
+//     last_accessed: None,
+//     ttl_remaining: None,
+//     size: 10,
+//     opaque_token: Some(opaque-token),
+//     is_stale: None,
+//     is_recache_winner: None,
+// }
 fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
     let (input, status) = parse_meta_set_status(buf)?;
     match status {
