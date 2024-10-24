@@ -149,24 +149,7 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
             Ok((input, MetaResponse::Data(Some(vec![meta_value]))))
         }
         // match arm for "EN" response
-        MetaResponse::Status(Status::NotFound) => {
-            let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?;
-            let (input, _) = crlf(input)?; // consume the trailing crlf and leave the buffer empty
-
-            // return early if there were no flags passed in (miss without opaque or k flag)
-            if meta_values_array.is_empty() {
-                return Ok((input, MetaResponse::Status(Status::NotFound)));
-            }
-
-            let meta_value = construct_meta_value_from_flag_array(
-                meta_values_array,
-                None,
-                Some(Status::NotFound),
-            )
-            .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
-
-            Ok((input, MetaResponse::Data(Some(vec![meta_value]))))
-        }
+        MetaResponse::Status(Status::NotFound) => process_meta_response_without_data_payload(input, Status::NotFound),
         // match arm for "MN\r\n" response
         MetaResponse::Status(Status::NoOp) => Ok((input, MetaResponse::Status(Status::NoOp))),
         _ => {
@@ -208,23 +191,7 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
         // match arm for "MN\r\n" response
         MetaResponse::Status(Status::NoOp) => Ok((input, MetaResponse::Status(Status::NoOp))),
         // match arm for "HD", "NS", "EX" & "NF" responses
-        MetaResponse::Status(s) => {
-            // no value (data block) or size in this case, potentially just flags
-            let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?;
-            let (input, _) = crlf(input)?; // consume the trailing crlf and leave the buffer empty
-
-            // early return if there were no flags passed in
-            if meta_values_array.is_empty() {
-                return Ok((input, MetaResponse::Status(s)));
-            }
-
-            // data is empty in this case
-            let meta_value =
-                construct_meta_value_from_flag_array(meta_values_array, None, Some(Status::Stored))
-                    .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
-
-            Ok((input, MetaResponse::Data(Some(vec![meta_value]))))
-        }
+        MetaResponse::Status(s) => process_meta_response_without_data_payload(input, s),
         _ => Err(nom::Err::Error(nom::error::Error::new(
             input,
             nom::error::ErrorKind::Eof,
@@ -239,22 +206,7 @@ fn parse_meta_delete_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
         // match arm for "MN\r\n" response
         MetaResponse::Status(Status::NoOp) => Ok((input, MetaResponse::Status(Status::NoOp))),
         // match arm for "HD", "NF" & "EX" responses
-        MetaResponse::Status(s) => {
-            // no value (data block) or size in this case, potentially just flags
-            let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?;
-            let (input, _) = crlf(input)?; // consume the trailing crlf and leave the buffer empty
-
-            // early return if there were no flags passed in
-            if meta_values_array.is_empty() {
-                return Ok((input, MetaResponse::Status(s)));
-            }
-
-            // data is empty in this case
-            let meta_value = construct_meta_value_from_flag_array(meta_values_array, None, Some(s))
-                .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
-
-            Ok((input, MetaResponse::Data(Some(vec![meta_value]))))
-        }
+        MetaResponse::Status(s) => process_meta_response_without_data_payload(input, s),
         _ => Err(nom::Err::Error(nom::error::Error::new(
             input,
             nom::error::ErrorKind::Eof,
@@ -419,6 +371,26 @@ fn construct_meta_value_from_flag_array(
     }
 
     Ok(meta_value)
+}
+
+fn process_meta_response_without_data_payload(
+    input: &[u8],
+    status: Status,
+) -> IResult<&[u8], MetaResponse> {
+    // no value (data block) or size in this case, potentially just flags
+    let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?;
+    let (input, _) = crlf(input)?; // consume the trailing crlf and leave the buffer empty
+
+    // early return if there were no flags passed in
+    if meta_values_array.is_empty() {
+        return Ok((input, MetaResponse::Status(status)));
+    }
+
+    // data is empty in this case
+    let meta_value = construct_meta_value_from_flag_array(meta_values_array, None, Some(status))
+        .map_err(|_| nom::Err::Failure(nom::error::Error::new(input, Fail)))?;
+
+    Ok((input, MetaResponse::Data(Some(vec![meta_value]))))
 }
 
 #[cfg(test)]
