@@ -59,14 +59,8 @@ pub trait MetaProtocol {
 
     /// Deletes the given key with additional metadata.
     ///
-    /// If the key is found ...
-    ///
-    /// Otherwise, `None` is returned.
-    ///
-    /// Supported meta flags:
-    /// - b: return whether item has been hit before as a 0 or 1
-    /// - C: return time since item was last accessed in seconds
-    /// - E: return item TTL remaining in seconds (-1 for unlimited)
+    /// If the key is found, it will be deleted, invalidated or tombstoned depending on the meta flags provided.
+    /// If data is requested back via meta flags then a `MetaValue` is returned, otherwise `None`.
     fn meta_delete<K: AsRef<[u8]>>(
         &mut self,
         key: K,
