@@ -30,7 +30,7 @@ pub trait MetaProtocol {
         meta_flags: Option<&[&str]>,
     ) -> impl Future<Output = Result<Option<MetaValue>, Error>>;
 
-    /// Sets the given key.
+    /// Sets the given key with additional metadata.
     ///
     /// If the value is set successfully, `Some(Value)` is returned, otherwise [`Error`] is returned.
     /// NOTE: That the data in this Value is sparsely populated, containing only requested data by meta_flags
@@ -59,14 +59,16 @@ pub trait MetaProtocol {
 
     /// Deletes the given key with additional metadata.
     ///
-    /// If the key is found ...
-    ///
-    /// Otherwise, `None` is returned.
-    ///
-    /// Supported meta flags:
-    /// - b: return whether item has been hit before as a 0 or 1
-    /// - C: return time since item was last accessed in seconds
-    /// - E: return item TTL remaining in seconds (-1 for unlimited)
+    /// If the key is found, it will be deleted, invalidated or tombstoned depending on the meta flags provided.
+    /// If data is requested back via meta flags then a `MetaValue` is returned, otherwise `None`.
+    //
+    // Command format:
+    // md <key> <meta_flags>*\r\n
+    //
+    // - <key> is the key string, with a maximum length of 250 bytes.
+    //
+    // - <meta_flags> is an optional slice of string references for meta flags.
+    // Meta flags may have associated tokens after the initial character, e.g. "O123" for opaque.
     fn meta_delete<K: AsRef<[u8]>>(
         &mut self,
         key: K,

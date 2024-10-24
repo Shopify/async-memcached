@@ -165,11 +165,11 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
 }
 
 // example meta_set command sent to memcached server:
-// ms meta-set-test-key E9001 T3600 Oopaque-token c s\r\nTEST-VALUE\r\n
-// so it has flags of E9001 T3600 Oopaque-token c s
+// ms meta-set-test-key 10 E9001 T3600 Oopaque-token c s\r\nTEST-VALUE\r\n
+// so it has value size of 10, flags of E9001 T3600 Oopaque-token c s and data payload of TEST-VALUE
 //
 // meta_set example response from memcached server:
-// HD Oopaque-token c9001
+// HD Oopaque-token c9001 s10
 //
 // This method should return a response with a MetaValue object containing only the requested meta flag data, like this:
 // MetaValue {
@@ -201,6 +201,28 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
     }
 }
 
+// example meta_delete command sent to memcached server:
+// md meta-delete-test-key k x I T60
+// so it has meta flags of k x I T60
+//
+// meta_delete example response from memcached server:
+// HD kmeta-delete-test-key
+//
+// This method should return a response with a MetaValue object containing only the requested meta flag data, like this:
+// MetaValue {
+//     key: meta-delete-test-key,
+//     cas: None,
+//     flags: None,
+//     data: None,
+//     status: Some(Status::Deleted),
+//     hit_before: None,
+//     last_accessed: None,
+//     ttl_remaining: None,
+//     size: None,
+//     opaque_token: None,
+//     is_stale: None,
+//     is_recache_winner: None,
+// }
 fn parse_meta_delete_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
     let (input, status) = parse_meta_delete_status(buf)?; // removes <CD> response code from the input
 
