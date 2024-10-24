@@ -170,7 +170,7 @@ impl MetaProtocol for Client {
     ) -> Result<Option<MetaValue>, Error> {
         let kr = Self::validate_key_length(key.as_ref())?;
 
-        self.conn.write_all(b"mg ").await?;
+        self.conn.write_all(b"md ").await?;
         self.conn.write_all(kr).await?;
         self.conn.write_all(b" ").await?;
         if let Some(meta_flags) = meta_flags {
