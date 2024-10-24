@@ -1127,7 +1127,7 @@ async fn test_meta_delete_key_too_long() {
 #[tokio::test]
 #[parallel]
 async fn test_meta_delete_with_matching_cas_flags() {
-    let key = "meta-delete-test-key-with-cas";
+    let key = "meta-delete-test-key-with-matching-cas";
     let value = "test-value";
 
     let mut client = setup_client(&[key]).await;
@@ -1154,7 +1154,7 @@ async fn test_meta_delete_with_matching_cas_flags() {
 #[tokio::test]
 #[parallel]
 async fn test_meta_delete_with_mismatched_cas_flags() {
-    let key = "meta-delete-test-key-with-cas";
+    let key = "meta-delete-test-key-with-mismatched-cas";
     let value = "test-value";
 
     let mut client = setup_client(&[key]).await;

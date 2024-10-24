@@ -165,11 +165,11 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
 }
 
 // example meta_set command sent to memcached server:
-// ms meta-set-test-key E9001 T3600 Oopaque-token c s\r\nTEST-VALUE\r\n
-// so it has flags of E9001 T3600 Oopaque-token c s
+// ms meta-set-test-key 10 E9001 T3600 Oopaque-token c s\r\nTEST-VALUE\r\n
+// so it has value size of 10, flags of E9001 T3600 Oopaque-token c s and data payload of TEST-VALUE
 //
 // meta_get example response from memcached server:
-// HD Oopaque-token c9001
+// HD Oopaque-token c9001 s10
 //
 // This method should return a response with a MetaValue object containing only the requested meta flag data, like this:
 // MetaValue {
