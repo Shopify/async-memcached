@@ -187,6 +187,7 @@ impl MetaProtocol for Client {
 
         match self.drive_receive(parse_meta_delete_response).await? {
             MetaResponse::Status(Status::Deleted) => Ok(None),
+            MetaResponse::Status(Status::Exists) => Err(Error::Protocol(Status::Exists)),
             MetaResponse::Status(Status::NoOp) => Ok(None),
             MetaResponse::Status(s) => Err(s.into()),
             MetaResponse::Data(d) => d

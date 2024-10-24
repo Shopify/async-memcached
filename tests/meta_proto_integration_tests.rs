@@ -1040,3 +1040,271 @@ async fn test_quiet_mode_meta_set_nonexistent_key_in_replace_mode() {
         set_result
     );
 }
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_delete_existing_key_no_flags() {
+    let key = "meta-delete-test-key-no-flags";
+    let value = "test-value";
+
+    let mut client = setup_client(&[key]).await;
+
+    // Set the key using meta_set
+    client.meta_set(key, value, None).await.unwrap();
+
+    // Delete the key without any flags
+    let delete_result = client.meta_delete(key, None).await.unwrap();
+
+    // Expect None as the key and no meta  flags were provided
+    assert!(delete_result.is_none());
+
+    // Verify that the key is indeed deleted
+    let get_result = client.get(key).await.unwrap();
+    assert!(get_result.is_none());
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_delete_existing_key_with_quiet_flag() {
+    let key = "meta-delete-test-key-with-quiet-flag";
+    let value = "test-value";
+
+    let mut client = setup_client(&[key]).await;
+
+    // Set the key using meta_set
+    client.meta_set(key, value, None).await.unwrap();
+
+    // Delete the key with the "q" flag
+    let delete_result = client.meta_delete(key, Some(&["q"])).await.unwrap();
+
+    // Expect None as the key was successfully deleted
+    assert!(delete_result.is_none());
+
+    // Verify that the key is indeed deleted
+    let get_result = client.get(key).await.unwrap();
+    assert!(get_result.is_none());
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_delete_nonexistent_key() {
+    let key = "meta-delete-test-key-nonexistent";
+
+    let mut client = setup_client(&[key]).await;
+
+    // Attempt to delete a non-existent key
+    let delete_result = client.meta_delete(key, None).await;
+
+    // Expect an error as the key does not exist
+    assert!(matches!(
+        delete_result,
+        Err(Error::Protocol(Status::NotFound))
+    ));
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_delete_key_too_long() {
+    let key = "a".repeat(MAX_KEY_LENGTH + 1); // Exceeds 250 bytes
+
+    let mut client = setup_client(&[&key]).await;
+
+    // Attempt to delete the key that is too long
+    let delete_result = client.meta_delete(&key, None).await;
+
+    // Expect an error indicating the key is too long
+    assert!(matches!(
+        delete_result,
+        Err(Error::Protocol(Status::Error(ErrorKind::KeyTooLong)))
+    ));
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_delete_with_matching_cas_flags() {
+    let key = "meta-delete-test-key-with-cas";
+    let value = "test-value";
+
+    let mut client = setup_client(&[key]).await;
+
+    // Set the key using meta_set with a specific CAS value
+    let meta_flags = ["E12345"];
+    client
+        .meta_set(key, value, Some(&meta_flags))
+        .await
+        .unwrap();
+
+    // Attempt to delete with the correct CAS value
+    let delete_result = client.meta_delete(key, Some(&["C12345"])).await.unwrap();
+
+    // Expect None as the key was successfully deleted
+    assert!(delete_result.is_none());
+
+    // Verify that the key is indeed deleted
+    let get_result = client.get(key).await.unwrap();
+    assert!(get_result.is_none());
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_delete_with_mismatched_cas_flags() {
+    let key = "meta-delete-test-key-with-cas";
+    let value = "test-value";
+
+    let mut client = setup_client(&[key]).await;
+
+    // Set the key using meta_set with a specific CAS value
+    let meta_flags = ["E12345"];
+    client
+        .meta_set(key, value, Some(&meta_flags))
+        .await
+        .unwrap();
+
+    // Attempt to delete with the mismatched CAS value
+    let delete_result = client.meta_delete(key, Some(&["C54321"])).await;
+
+    // Expect an error due to CAS mismatch
+    assert!(matches!(
+        delete_result,
+        Err(Error::Protocol(Status::Exists))
+    ));
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_delete_invalidates_key() {
+    let key = "meta-delete-invalidate-key";
+    let value = "test-value";
+
+    let mut client = setup_client(&[key]).await;
+
+    // Set the key using meta_set
+    client
+        .meta_set(key, value, None)
+        .await
+        .expect("Failed to set key with meta_set");
+
+    // Delete the key using the I flag (invalidate)
+    let delete_result = client
+        .meta_delete(key, Some(&["I"]))
+        .await
+        .expect("Failed to delete key with meta_delete");
+
+    // Expect None as the key was marked invalidated
+    assert!(
+        delete_result.is_none(),
+        "Key was not invalidated as expected"
+    );
+
+    // Attempt to get the key; depending on implementation, it might still exist but marked as invalid
+    let get_result = client.meta_get(key, Some(&["v"])).await.unwrap().unwrap();
+
+    assert!(get_result.is_stale.unwrap());
+    assert!(get_result.is_recache_winner.unwrap());
+    assert_eq!(get_result.data.unwrap(), value.as_bytes());
+
+    // Fetching the key again should show that subsequent gets do not qualify as recache winner
+    let get_result = client.meta_get(key, Some(&["v"])).await.unwrap().unwrap();
+
+    assert!(get_result.is_stale.unwrap());
+    assert!(!get_result.is_recache_winner.unwrap());
+    assert_eq!(get_result.data.unwrap(), value.as_bytes());
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_delete_invalidates_key_and_updates_ttl() {
+    let key = "meta-delete-invalidate-key-and-update-ttl";
+    let value = "test-value";
+
+    let mut client = setup_client(&[key]).await;
+
+    // Set the key using meta_set
+    client
+        .meta_set(key, value, Some(&["T1234"]))
+        .await
+        .expect("Failed to set key with meta_set");
+
+    let ttl_result = client.meta_get(key, Some(&["t"])).await.unwrap().unwrap();
+    assert_eq!(ttl_result.ttl_remaining.unwrap(), 1234);
+
+    // Invalidate the key using the I flag and update the TTL to 60 seconds
+    let delete_result = client
+        .meta_delete(key, Some(&["I", "T60"]))
+        .await
+        .expect("Failed to delete key with meta_delete");
+
+    // Expect None as the key was marked invalidated, TTL was updated to 60 seconds and no return data was requested
+    assert!(
+        delete_result.is_none(),
+        "Key was not invalidated as expected"
+    );
+
+    // Attempt to get the key; depending on implementation, it might still exist but marked as invalid
+    let get_result = client
+        .meta_get(key, Some(&["v", "t"]))
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert!(get_result.is_stale.unwrap());
+    assert!(get_result.is_recache_winner.unwrap());
+    assert_eq!(get_result.ttl_remaining.unwrap(), 60);
+    assert_eq!(get_result.data.unwrap(), value.as_bytes());
+
+    // Fetching the key again should show that subsequent gets do not qualify as recache winner
+    let get_result = client.meta_get(key, Some(&["v"])).await.unwrap().unwrap();
+
+    assert!(get_result.is_stale.unwrap());
+    assert!(!get_result.is_recache_winner.unwrap());
+    assert_eq!(get_result.data.unwrap(), value.as_bytes());
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_delete_tombstones_key() {
+    let key = "meta-delete-tombstones-key";
+    let value = "test-value";
+
+    let mut client = setup_client(&[key]).await;
+
+    // Set the key using meta_set
+    client
+        .meta_set(key, value, Some(&["T1234"]))
+        .await
+        .expect("Failed to set key with meta_set");
+
+    let ttl_result = client.meta_get(key, Some(&["t"])).await.unwrap().unwrap();
+    assert_eq!(ttl_result.ttl_remaining.unwrap(), 1234);
+
+    // Invalidate the key using the I flag and update the TTL to 60 seconds
+    let delete_result = client
+        .meta_delete(key, Some(&["x"]))
+        .await
+        .expect("Failed to tombstone key with meta_delete");
+
+    // Expect None as the key was marked invalidated, TTL was updated to 60 seconds and no return data was requested
+    assert!(
+        delete_result.is_none(),
+        "Key was not invalidated as expected"
+    );
+
+    // Attempt to get the key; depending on implementation, it might still exist but marked as invalid
+    let get_result = client
+        .meta_get(key, Some(&["v", "t"]))
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(get_result.ttl_remaining.unwrap(), -1);
+    assert_eq!(get_result.data.unwrap(), vec![]);
+}

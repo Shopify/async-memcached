@@ -149,7 +149,9 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
             Ok((input, MetaResponse::Data(Some(vec![meta_value]))))
         }
         // match arm for "EN" response
-        MetaResponse::Status(Status::NotFound) => process_meta_response_without_data_payload(input, Status::NotFound),
+        MetaResponse::Status(Status::NotFound) => {
+            process_meta_response_without_data_payload(input, Status::NotFound)
+        }
         // match arm for "MN\r\n" response
         MetaResponse::Status(Status::NoOp) => Ok((input, MetaResponse::Status(Status::NoOp))),
         _ => {
@@ -355,6 +357,18 @@ fn construct_meta_value_from_flag_array(
     data: Option<&[u8]>,
     status: Option<Status>,
 ) -> Result<MetaValue, Error> {
+    // might need something like this in the case of tombstoned data.
+    // Currently returns Some([]), but should maybe be converted to None?
+    // let data = if let Some(d) = data {
+    //     if d.is_empty() {
+    //         None
+    //     } else {
+    //         Some(d.to_vec())
+    //     }
+    // } else {
+    //     None
+    // };
+
     let mut meta_value = MetaValue {
         status,
         data: data.map(|d| d.to_vec()),
