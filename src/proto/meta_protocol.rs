@@ -1,6 +1,6 @@
 use crate::{AsMemcachedValue, Client, Error, Status};
 
-use crate::parser::{parse_meta_get_response, parse_meta_set_response};
+use crate::parser::{parse_meta_get_response, parse_meta_set_response, parse_meta_delete_response};
 use crate::parser::{MetaResponse, MetaValue};
 
 use std::future::Future;
@@ -56,6 +56,22 @@ pub trait MetaProtocol {
     where
         K: AsRef<[u8]>,
         V: AsMemcachedValue;
+
+    /// Deletes the given key with additional metadata.
+    ///
+    /// If the key is found ...
+    ///
+    /// Otherwise, `None` is returned.
+    ///
+    /// Supported meta flags:
+    /// - b: return whether item has been hit before as a 0 or 1
+    /// - C: return time since item was last accessed in seconds
+    /// - E: return item TTL remaining in seconds (-1 for unlimited)
+    fn meta_delete<K: AsRef<[u8]>>(
+        &mut self,
+        key: K,
+        meta_flags: &[char],
+    ) -> impl Future<Output = Result<Option<MetaValue>, Error>>;
 }
 
 impl MetaProtocol for Client {
@@ -170,6 +186,34 @@ impl MetaProtocol for Client {
                     })
                     .transpose(),
             }
+        }
+    }
+
+    async fn meta_delete<K: AsRef<[u8]>>(
+        &mut self,
+        key: K,
+        meta_flags: &[char],
+    ) -> Result<Option<MetaValue>, Error> {
+        let mut command = Vec::with_capacity(300);
+        command.extend_from_slice(b"md ");
+        command.extend_from_slice(key.as_ref());
+        if !meta_flags.is_empty() {
+            for flag in meta_flags {
+                command.push(b' ');
+                command.push(*flag as u8);
+            }
+        }
+        command.extend_from_slice(b"\r\n");
+        //println!("command: {:?}", String::from_utf8_lossy(&command));
+        self.conn.write_all(&command).await?;
+        self.conn.flush().await?;
+
+        match self.drive_receive(parse_meta_delete_response).await? {
+            MetaResponse::Status(Status::Deleted) => Ok(()),
+            MetaResponse::Status(Status::Exists) => Err(Status::Error(ErrorKind::Protocol(Some("exists_placeholder".to_string()))).into()),
+            MetaResponse::Status(Status::NotFound) => Err(Status::Error(ErrorKind::Protocol(Some("not_found_placeholder".to_string()))).into()),
+            MetaResponse::Status(s) => Err(s.into()),
+            _ => Err(Error::Protocol(Status::Error(ErrorKind::Protocol(None)))),
         }
     }
 }
