@@ -205,16 +205,17 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
     let (input, status) = parse_meta_set_status(buf)?;
 
     match status {
-        // match arm for "HD" response
-        MetaResponse::Status(Status::Stored) => {
+        // match arm for "MN\r\n" response
+        MetaResponse::Status(Status::NoOp) => Ok((input, MetaResponse::Status(Status::NoOp))),
+        // match arm for "HD", "NS", "EX" & "NF" responses
+        MetaResponse::Status(s) => {
             // no value (data block) or size in this case, potentially just flags
-            let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)
-                .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
+            let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?;
             let (input, _) = crlf(input)?; // consume the trailing crlf and leave the buffer empty
 
             // early return if there were no flags passed in
             if meta_values_array.is_empty() {
-                return Ok((input, MetaResponse::Status(Status::Stored)));
+                return Ok((input, MetaResponse::Status(s)));
             }
 
             // data is empty in this case
@@ -224,60 +225,6 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
 
             Ok((input, MetaResponse::Data(Some(vec![meta_value]))))
         }
-        // match arm for "NS" response
-        MetaResponse::Status(Status::NotStored) => {
-            let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)
-                .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
-            let (input, _) = crlf(input)?; // consume the trailing crlf and leave the buffer empty
-
-            if meta_values_array.is_empty() {
-                return Ok((input, MetaResponse::Status(Status::NotStored)));
-            }
-
-            let meta_value = construct_meta_value_from_flag_array(
-                meta_values_array,
-                None,
-                Some(Status::NotStored),
-            )
-            .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
-
-            Ok((input, MetaResponse::Data(Some(vec![meta_value]))))
-        }
-        // match arm for "EX" response
-        MetaResponse::Status(Status::Exists) => {
-            let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?;
-            let (input, _) = crlf(input)?; // consume the trailing crlf and leave the buffer empty
-
-            if meta_values_array.is_empty() {
-                return Ok((input, MetaResponse::Status(Status::Exists)));
-            }
-
-            let meta_value =
-                construct_meta_value_from_flag_array(meta_values_array, None, Some(Status::Exists))
-                    .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
-
-            Ok((input, MetaResponse::Data(Some(vec![meta_value]))))
-        }
-        // match arm for "NF" response
-        MetaResponse::Status(Status::NotFound) => {
-            let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?;
-            let (input, _) = crlf(input)?; // consume the trailing crlf and leave the buffer empty
-
-            if meta_values_array.is_empty() {
-                return Ok((input, MetaResponse::Status(Status::NotFound)));
-            }
-
-            let meta_value = construct_meta_value_from_flag_array(
-                meta_values_array,
-                None,
-                Some(Status::NotFound),
-            )
-            .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
-
-            Ok((input, MetaResponse::Data(Some(vec![meta_value]))))
-        }
-        // match arm for "MN\r\n" response
-        MetaResponse::Status(Status::NoOp) => Ok((input, MetaResponse::Status(Status::NoOp))),
         _ => Err(nom::Err::Error(nom::error::Error::new(
             input,
             nom::error::ErrorKind::Eof,
@@ -289,61 +236,25 @@ fn parse_meta_delete_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
     let (input, status) = parse_meta_delete_status(buf)?; // removes <CD> response code from the input
 
     match status {
-        MetaResponse::Status(Status::Deleted) => {
-            // no value (data block) or size in this case, potentially just flags
-            let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)
-                .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
-            let (input, _) = crlf(input)?; // consume the trailing crlf and leave the buffer empty
-
-            // early return if there were no flags passed in
-            if meta_values_array.is_empty() {
-                return Ok((input, MetaResponse::Status(Status::Deleted)));
-            }
-
-            // data is empty in this case
-            let meta_value =
-                construct_meta_value_from_flag_array(meta_values_array, None, Some(Status::Deleted))
-                    .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
-
-            Ok((input, MetaResponse::Data(Some(vec![meta_value]))))
-        }
-        MetaResponse::Status(Status::NotFound) => {
-            // no value (data block) or size in this case, potentially just flags
-            let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)
-                .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
-            let (input, _) = crlf(input)?; // consume the trailing crlf and leave the buffer empty
-
-            // early return if there were no flags passed in
-            if meta_values_array.is_empty() {
-                return Ok((input, MetaResponse::Status(Status::NotFound)));
-            }
-
-            // data is empty in this case
-            let meta_value =
-                construct_meta_value_from_flag_array(meta_values_array, None, Some(Status::NotFound))
-                    .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
-
-            Ok((input, MetaResponse::Data(Some(vec![meta_value]))))
-        }
-        MetaResponse::Status(Status::Exists) => {
-            // no value (data block) or size in this case, potentially just flags
-            let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)
-                .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
-            let (input, _) = crlf(input)?; // consume the trailing crlf and leave the buffer empty
-
-            // early return if there were no flags passed in
-            if meta_values_array.is_empty() {
-                return Ok((input, MetaResponse::Status(Status::Exists)));
-            }
-
-            // data is empty in this case
-            let meta_value =
-                construct_meta_value_from_flag_array(meta_values_array, None, Some(Status::Exists))
-                    .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
-
-            Ok((input, MetaResponse::Data(Some(vec![meta_value]))))
-        }
+        // match arm for "MN\r\n" response
         MetaResponse::Status(Status::NoOp) => Ok((input, MetaResponse::Status(Status::NoOp))),
+        // match arm for "HD", "NF" & "EX" responses
+        MetaResponse::Status(s) => {
+            // no value (data block) or size in this case, potentially just flags
+            let (input, meta_values_array) = parse_meta_flag_values_as_slice(input)?;
+            let (input, _) = crlf(input)?; // consume the trailing crlf and leave the buffer empty
+
+            // early return if there were no flags passed in
+            if meta_values_array.is_empty() {
+                return Ok((input, MetaResponse::Status(s)));
+            }
+
+            // data is empty in this case
+            let meta_value = construct_meta_value_from_flag_array(meta_values_array, None, Some(s))
+                .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?;
+
+            Ok((input, MetaResponse::Data(Some(vec![meta_value]))))
+        }
         _ => Err(nom::Err::Error(nom::error::Error::new(
             input,
             nom::error::ErrorKind::Eof,
