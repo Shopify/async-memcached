@@ -225,7 +225,7 @@ impl MetaProtocol for Client {
         self.conn.flush().await?;
 
         match self.drive_receive(parse_meta_arithmetic_response).await? {
-            MetaResponse::Status(Status::NotFound) => Ok(None),
+            MetaResponse::Status(Status::Stored) => Ok(None),
             MetaResponse::Status(Status::NoOp) => Ok(None),
             MetaResponse::Status(s) => Err(s.into()),
             MetaResponse::Data(d) => d

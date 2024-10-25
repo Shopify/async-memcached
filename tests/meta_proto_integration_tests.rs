@@ -1308,3 +1308,349 @@ async fn test_meta_delete_tombstones_key() {
     assert_eq!(get_result.ttl_remaining.unwrap(), -1);
     assert!(get_result.data.is_none());
 }
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_arithmetic_increment_with_no_flags() {
+    let key = "meta-arithmetic-increment-no-flags";
+    let initial_value = "9";
+    let expected_value = "10";
+
+    let mut client = setup_client(&[key]).await;
+
+    client.set(key, initial_value, None, None).await.unwrap();
+
+    let incr_result = client.meta_arithmetic(key, None).await.unwrap();
+
+    // Verify the result is none because we didn't request any data back through meta flags
+    assert!(incr_result.is_none());
+
+    // Verify that the key was incremented by 1
+    let get_result = client.meta_get(key, Some(&["v"])).await.unwrap().unwrap();
+    assert_eq!(
+        String::from_utf8(get_result.data.unwrap()).unwrap(),
+        expected_value,
+        "Value after increment does not match expected value"
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_arithmetic_decrement_with_no_flags() {
+    let key = "meta-arithmetic-decrement-no-flags";
+    let initial_value = "100";
+    let expected_value = "9";
+
+    let mut client = setup_client(&[key]).await;
+
+    client
+        .meta_set(key, initial_value, Some(&["s"]))
+        .await
+        .unwrap();
+
+    let decr_result = client
+        .meta_arithmetic(key, Some(&["MD", "D91"]))
+        .await
+        .unwrap();
+
+    // Verify the result is none because we didn't request any data back through meta flags
+    assert!(decr_result.is_none());
+
+    // Verify that the key was decremented by 1
+    let get_result = client
+        .meta_get(key, Some(&["v", "s"]))
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        String::from_utf8(get_result.data.unwrap()).unwrap(),
+        expected_value,
+        "Value after decrement does not match expected value"
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_arithmetic_increment_with_quiet_flag() {
+    let key = "meta-arithmetic-increment-quiet-flag";
+    let initial_value = "20";
+    let expected_value = "21";
+
+    let mut client = setup_client(&[key]).await;
+
+    client.set(key, initial_value, None, None).await.unwrap();
+
+    let flags = ["q"];
+    let result = client.meta_arithmetic(key, Some(&flags)).await.unwrap();
+
+    assert!(result.is_none());
+
+    let get_result = client.meta_get(key, Some(&["v"])).await.unwrap().unwrap();
+    assert_eq!(
+        String::from_utf8(get_result.data.unwrap()).unwrap(),
+        expected_value,
+        "Value after increment does not match expected value"
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_arithmetic_on_nonexistent_key_with_quiet_flag() {
+    let key = "meta-arithmetic-nonexistent-key-with-quiet-flag";
+
+    let mut client = setup_client(&[key]).await;
+
+    let flags = ["q"];
+    let incr_result = client.meta_arithmetic(key, Some(&flags)).await;
+
+    assert!(matches!(
+        incr_result,
+        Err(Error::Protocol(Status::NotFound))
+    ));
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_arithmetic_increment_with_opaque_flag() {
+    let key = "meta-arithmetic-increment-opaque-flag";
+    let initial_value = "5";
+
+    let mut client = setup_client(&[key]).await;
+
+    client.set(key, initial_value, None, None).await.unwrap();
+
+    let flags = ["O1001"];
+    let result = client.meta_arithmetic(key, Some(&flags)).await.unwrap();
+
+    // Verify the result
+    assert!(result.is_some());
+    let meta_value = result.unwrap();
+
+    assert!(meta_value.data.is_none(), "Data should be empty");
+
+    assert_eq!(
+        meta_value.opaque_token.unwrap(),
+        "1001".as_bytes(),
+        "Opaque token does not match"
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_arithmetic_increment_with_matching_cas_flag() {
+    let key = "meta-arithmetic-increment-matching-cas-flag";
+    let initial_value = "15";
+    let expected_value = "16";
+
+    let mut client = setup_client(&[key]).await;
+
+    // Set the initial value with a specific CAS value
+    client
+        .meta_set(key, initial_value, Some(&["E2002"]))
+        .await
+        .unwrap();
+
+    client.meta_arithmetic(key, Some(&["C2002"])).await.unwrap();
+
+    let get_result = client.meta_get(key, Some(&["v"])).await.unwrap().unwrap();
+    assert_eq!(
+        String::from_utf8(get_result.data.unwrap()).unwrap(),
+        expected_value,
+        "Value after increment does not match expected value"
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_arithmetic_increment_with_mismatched_cas_flag() {
+    let key = "meta-arithmetic-increment-mismatched-cas-flag";
+    let initial_value = "15";
+
+    let mut client = setup_client(&[key]).await;
+
+    // Set the initial value with a specific CAS value
+    client
+        .meta_set(key, initial_value, Some(&["E2002"]))
+        .await
+        .unwrap();
+
+    // Perform arithmetic increment with a mismatched CAS flag
+    let mismatched_flags = ["C9999"];
+    let mismatched_result = client.meta_arithmetic(key, Some(&mismatched_flags)).await;
+
+    // Expect an error due to CAS mismatch
+    assert!(
+        matches!(mismatched_result, Err(Error::Protocol(Status::Exists))),
+        "Expected CAS mismatch error"
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_arithmetic_with_invalid_flags() {
+    let key = "meta-arithmetic-invalid-flags";
+    let initial_value = "10";
+
+    let mut client = setup_client(&[key]).await;
+
+    client.meta_set(key, initial_value, None).await.unwrap();
+
+    // Perform arithmetic increment with invalid flag
+    let flags = ["invalid_flag"];
+    let result = client.meta_arithmetic(key, Some(&flags)).await;
+
+    // Expect an error due to invalid flag
+    assert!(
+        matches!(result, Err(Error::Protocol(Status::Error(_)))),
+        "Expected error due to invalid flag"
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_arithmetic_increments_with_specified_delta() {
+    let key = "meta-arithmetic-increments-with-specified-delta";
+    let initial_value = 50_u64;
+    let delta = 50_u64;
+    let expected_value = initial_value + delta;
+
+    let delta_flag = format!("D{}", delta);
+
+    let meta_flags = [delta_flag.as_str(), "v"];
+    let mut client = setup_client(&[key]).await;
+
+    // Set the initial value with a specific CAS value
+    client.meta_set(key, initial_value, None).await.unwrap();
+
+    let incr_result = client
+        .meta_arithmetic(key, Some(&meta_flags))
+        .await
+        .unwrap();
+
+    // Nonexistent key should have been cached with seeded value from J flag and TTL from N flag
+    assert_eq!(
+        String::from_utf8(incr_result.unwrap().data.unwrap()).unwrap(),
+        expected_value.to_string()
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_arithmetic_decrements_with_specified_delta() {
+    let key = "meta-arithmetic-decrements-with-specified-delta";
+    let initial_value = 51_u64;
+    let delta = 50_u64;
+    let expected_value = initial_value - delta;
+
+    let delta_flag = format!("D{}", delta);
+
+    let meta_flags = [delta_flag.as_str(), "MD", "v"];
+    let mut client = setup_client(&[key]).await;
+
+    // Set the initial value with a specific CAS value
+    client.meta_set(key, initial_value, None).await.unwrap();
+
+    let incr_result = client
+        .meta_arithmetic(key, Some(&meta_flags))
+        .await
+        .unwrap();
+
+    // Nonexistent key should have been cached with seeded value from J flag and TTL from N flag
+    assert_eq!(
+        String::from_utf8(incr_result.unwrap().data.unwrap()).unwrap(),
+        expected_value.to_string()
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_arithmetic_overflows_with_proper_delta_when_incrementing_past_max_u64() {
+    let key = "meta-arithmetic-overflows-with-proper-delta-when-incrementing-past-max-u64";
+    let initial_value = u64::MAX;
+    let delta = 3_u64;
+    let expected_value = 2;
+
+    let delta_flag = format!("D{}", delta);
+
+    let meta_flags = [delta_flag.as_str(), "v"];
+    let mut client = setup_client(&[key]).await;
+
+    // Set the initial value with a specific CAS value
+    client.meta_set(key, initial_value, None).await.unwrap();
+
+    let incr_result = client
+        .meta_arithmetic(key, Some(&meta_flags))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        String::from_utf8(incr_result.unwrap().data.unwrap()).unwrap(),
+        expected_value.to_string()
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_arithmetic_does_not_decrement_below_zero() {
+    let key = "meta-arithmetic-does-not-decrement-below-zero";
+    let initial_value = 10_u64;
+    let delta = 50_u64;
+    let expected_value = 0;
+
+    let delta_flag = format!("D{}", delta);
+
+    let meta_flags = [delta_flag.as_str(), "MD", "v"];
+    let mut client = setup_client(&[key]).await;
+
+    // Set the initial value with a specific CAS value
+    client.meta_set(key, initial_value, None).await.unwrap();
+
+    let incr_result = client
+        .meta_arithmetic(key, Some(&meta_flags))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        String::from_utf8(incr_result.unwrap().data.unwrap()).unwrap(),
+        expected_value.to_string()
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_arithmetic_caches_new_key_with_n_and_j_flags() {
+    let key = "meta-arithmetic-n-and-j-flags";
+
+    let mut client = setup_client(&[key]).await;
+
+    let get_result = client.meta_get(key, Some(&["v"])).await.unwrap();
+    assert!(get_result.is_none());
+
+    // Perform arithmetic increment with invalid flag
+    let flags = ["N9001", "J99", "v", "t"];
+    let arithmetic_result = client
+        .meta_arithmetic(key, Some(&flags))
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        String::from_utf8(arithmetic_result.data.unwrap()).unwrap(),
+        "99"
+    );
+    assert_eq!(arithmetic_result.ttl_remaining.unwrap(), 9001);
+}

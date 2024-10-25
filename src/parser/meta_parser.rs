@@ -101,8 +101,9 @@ pub fn parse_meta_delete_response(buf: &[u8]) -> Result<Option<(usize, MetaRespo
     }
 }
 
-// TODO: implement
-pub fn parse_meta_arithmetic_response(buf: &[u8]) -> Result<Option<(usize, MetaResponse)>, ErrorKind> {
+pub fn parse_meta_arithmetic_response(
+    buf: &[u8],
+) -> Result<Option<(usize, MetaResponse)>, ErrorKind> {
     let total_bytes = buf.len();
     let result = parse_meta_arithmetic_data_value(buf);
 
@@ -153,11 +154,13 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
 
             // After tombstoning a key, the memcached server will return size 0 and a trailing \r\n for the data block,
             // which can be interpreted as None.
-            let (input, data) = if size > 0 {
+            let (input, mut data) = if size > 0 {
                 take_until_size(input, size)? // parses the data from the input
             } else {
                 (input, None) // tombstoned key, no data block
             };
+
+            data = data.trim_ascii_end();
 
             let meta_value =
                 construct_meta_value_from_flag_array(flag_array, data, Some(Status::Value))
@@ -273,7 +276,6 @@ fn parse_meta_delete_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
     }
 }
 
-// TODO: might be good?
 fn parse_meta_arithmetic_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
     let (input, status) = parse_meta_arithmetic_status(buf)?; // removes <CD> response code from the input
 
