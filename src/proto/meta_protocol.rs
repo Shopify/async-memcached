@@ -1,6 +1,9 @@
 use crate::{AsMemcachedValue, Client, Error, Status};
 
-use crate::parser::{parse_meta_delete_response, parse_meta_get_response, parse_meta_set_response};
+use crate::parser::{
+    parse_meta_arithmetic_response, parse_meta_delete_response, parse_meta_get_response,
+    parse_meta_set_response,
+};
 use crate::parser::{MetaResponse, MetaValue};
 
 use std::future::Future;
@@ -11,7 +14,7 @@ use tokio::io::AsyncWriteExt;
 pub trait MetaProtocol {
     /// Gets the given key with additional metadata.
     ///
-    /// If the key is found, `Some(Value)` is returned, describing the metadata and data of the key.
+    /// If the key is found, `Some(MetaValue)` is returned, describing the metadata and data of the key.
     ///
     /// Otherwise, `None` is returned.
     //
@@ -32,8 +35,8 @@ pub trait MetaProtocol {
 
     /// Sets the given key with additional metadata.
     ///
-    /// If the value is set successfully, `Some(Value)` is returned, otherwise [`Error`] is returned.
-    /// NOTE: That the data in this Value is sparsely populated, containing only requested data by meta_flags
+    /// If the value is set successfully, `Some(MetaValue)` is returned, otherwise [`Error`] is returned.
+    /// NOTE: That the data in this MetaValue is sparsely populated, containing only requested data by meta_flags
     /// The meta set command is a generic command for storing data to memcached. Based on the flags supplied,
     /// it can replace all storage commands (see token M) as well as adds new options.
     //
@@ -74,6 +77,38 @@ pub trait MetaProtocol {
         key: K,
         meta_flags: Option<&[&str]>,
     ) -> impl Future<Output = Result<Option<MetaValue>, Error>>;
+
+    /// Performs an arithmetic (increment or decrement)operation on the given key.
+    ///
+    /// If the key is found, the arithmetic operation is performed.
+    /// If data is requested back via meta flags then a `MetaValue` is returned, otherwise `None`.
+    //
+    // Command format:
+    // ma <key> <meta_flags>*\r\n
+    //
+    // - <key> is the key string, with a maximum length of 250 bytes.
+    //
+    // - <meta_flags> is an optional slice of string references for meta flags.
+    // Meta flags may have associated tokens after the initial character, e.g. "O123" for opaque.
+    //
+    // Mode switching between increment and decrement is done with the M flag.
+    // The default behaviour is to increment with a delta of 1.
+    //
+    // Using the "q" flag for quiet mode will append a no-op command to the request ("mn\r\n") so that the client
+    // can proceed properly in the event of a cache miss.
+    fn meta_arithmetic<K: AsRef<[u8]>>(
+        &mut self,
+        key: K,
+        meta_flags: Option<&[&str]>,
+    ) -> impl Future<Output = Result<Option<MetaValue>, Error>>;
+
+    /// Writes a non-set command to the connection.
+    fn write_non_set_command(
+        &mut self,
+        op: &str,
+        kr: &[u8],
+        meta_flags: Option<&[&str]>,
+    ) -> impl Future<Output = Result<(), Error>>;
 }
 
 impl MetaProtocol for Client {
@@ -84,19 +119,7 @@ impl MetaProtocol for Client {
     ) -> Result<Option<MetaValue>, Error> {
         let kr = Self::validate_key_length(key.as_ref())?;
 
-        self.conn.write_all(b"mg ").await?;
-        self.conn.write_all(kr).await?;
-        self.conn.write_all(b" ").await?;
-        if let Some(meta_flags) = meta_flags {
-            self.conn.write_all(meta_flags.join(" ").as_bytes()).await?;
-            self.conn.write_all(b"\r\n").await?;
-            if meta_flags.contains(&"q") {
-                // Write a no-op command to reliably detect cache misses if quiet mode is used.
-                self.conn.write_all(b"mn\r\n").await?;
-            }
-        } else {
-            self.conn.write_all(b"\r\n").await?;
-        }
+        self.write_non_set_command("mg", kr, meta_flags).await?;
 
         self.conn.flush().await?;
 
@@ -172,18 +195,7 @@ impl MetaProtocol for Client {
     ) -> Result<Option<MetaValue>, Error> {
         let kr = Self::validate_key_length(key.as_ref())?;
 
-        self.conn.write_all(b"md ").await?;
-        self.conn.write_all(kr).await?;
-        self.conn.write_all(b" ").await?;
-        if let Some(meta_flags) = meta_flags {
-            self.conn.write_all(meta_flags.join(" ").as_bytes()).await?;
-            self.conn.write_all(b"\r\n").await?;
-            if meta_flags.contains(&"q") {
-                self.conn.write_all(b"mn\r\n").await?;
-            }
-        } else {
-            self.conn.write_all(b"\r\n").await?;
-        }
+        self.write_non_set_command("md", kr, meta_flags).await?;
 
         self.conn.flush().await?;
 
@@ -199,5 +211,53 @@ impl MetaProtocol for Client {
                 })
                 .transpose(),
         }
+    }
+
+    async fn meta_arithmetic<K: AsRef<[u8]>>(
+        &mut self,
+        key: K,
+        meta_flags: Option<&[&str]>,
+    ) -> Result<Option<MetaValue>, Error> {
+        let kr = Self::validate_key_length(key.as_ref())?;
+
+        self.write_non_set_command("ma", kr, meta_flags).await?;
+
+        self.conn.flush().await?;
+
+        match self.drive_receive(parse_meta_arithmetic_response).await? {
+            MetaResponse::Status(Status::NotFound) => Ok(None),
+            MetaResponse::Status(Status::NoOp) => Ok(None),
+            MetaResponse::Status(s) => Err(s.into()),
+            MetaResponse::Data(d) => d
+                .map(|mut items| {
+                    let item = items.remove(0);
+                    Ok(item)
+                })
+                .transpose(),
+        }
+    }
+
+    async fn write_non_set_command(
+        &mut self,
+        op: &str,
+        kr: &[u8],
+        meta_flags: Option<&[&str]>,
+    ) -> Result<(), Error> {
+        self.conn.write_all(op.as_bytes()).await?;
+        self.conn.write_all(b" ").await?;
+        self.conn.write_all(kr).await?;
+        self.conn.write_all(b" ").await?;
+        if let Some(meta_flags) = meta_flags {
+            self.conn.write_all(meta_flags.join(" ").as_bytes()).await?;
+            self.conn.write_all(b"\r\n").await?;
+            if meta_flags.contains(&"q") {
+                // Write a no-op command if quiet mode is used so reliably detect cache misses.
+                self.conn.write_all(b"mn\r\n").await?;
+            }
+        } else {
+            self.conn.write_all(b"\r\n").await?;
+        }
+
+        Ok(())
     }
 }

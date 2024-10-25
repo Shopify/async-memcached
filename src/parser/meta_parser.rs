@@ -42,6 +42,17 @@ pub fn parse_meta_delete_status(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
     ))(buf)
 }
 
+pub fn parse_meta_arithmetic_status(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
+    alt((
+        value(MetaResponse::Status(Status::Value), tag(b"VA ")),
+        value(MetaResponse::Status(Status::Stored), tag(b"HD")),
+        value(MetaResponse::Status(Status::NotFound), tag(b"NF")),
+        value(MetaResponse::Status(Status::NotStored), tag(b"NS")),
+        value(MetaResponse::Status(Status::Exists), tag(b"EX")),
+        value(MetaResponse::Status(Status::NoOp), tag(b"MN\r\n")),
+    ))(buf)
+}
+
 pub fn parse_meta_get_response(buf: &[u8]) -> Result<Option<(usize, MetaResponse)>, ErrorKind> {
     let total_bytes = buf.len();
     let result = parse_meta_get_data_value(buf);
@@ -77,6 +88,23 @@ pub fn parse_meta_set_response(buf: &[u8]) -> Result<Option<(usize, MetaResponse
 pub fn parse_meta_delete_response(buf: &[u8]) -> Result<Option<(usize, MetaResponse)>, ErrorKind> {
     let total_bytes = buf.len();
     let result = parse_meta_delete_data_value(buf);
+
+    match result {
+        Ok((remaining_bytes, response)) => {
+            let read_bytes = total_bytes - remaining_bytes.len();
+            Ok(Some((read_bytes, response)))
+        }
+        Err(nom::Err::Incomplete(_)) => Ok(None),
+        Err(nom::Err::Error(e)) | Err(nom::Err::Failure(e)) => {
+            Err(ErrorKind::Protocol(Some(e.code.description().to_string())))
+        }
+    }
+}
+
+// TODO: implement
+pub fn parse_meta_arithmetic_response(buf: &[u8]) -> Result<Option<(usize, MetaResponse)>, ErrorKind> {
+    let total_bytes = buf.len();
+    let result = parse_meta_arithmetic_data_value(buf);
 
     match result {
         Ok((remaining_bytes, response)) => {
@@ -234,6 +262,35 @@ fn parse_meta_delete_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
     let (input, status) = parse_meta_delete_status(buf)?; // removes <CD> response code from the input
 
     match status {
+        // match arm for "MN\r\n" response
+        MetaResponse::Status(Status::NoOp) => Ok((input, MetaResponse::Status(Status::NoOp))),
+        // match arm for "HD", "NF" & "EX" responses
+        MetaResponse::Status(s) => process_meta_response_without_data_payload(input, s),
+        _ => Err(nom::Err::Error(nom::error::Error::new(
+            input,
+            nom::error::ErrorKind::Eof,
+        ))),
+    }
+}
+
+// TODO: might be good?
+fn parse_meta_arithmetic_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
+    let (input, status) = parse_meta_arithmetic_status(buf)?; // removes <CD> response code from the input
+
+    match status {
+        // match arm for "VA " response when v flag is used
+        MetaResponse::Status(Status::Value) => {
+            let (input, size) = parse_u32(input)?; // parses the size of the data from the input
+            let (input, flag_array) = parse_meta_flag_values_as_slice(input)?; // parses the flags from the input
+            let (input, _) = crlf(input)?; // removes the leading crlf from the data block
+            let (input, data) = take_until_size(input, size)?; // parses the data from the input
+
+            let meta_value =
+                construct_meta_value_from_flag_array(flag_array, Some(data), Some(Status::Value))
+                    .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?; // Throw Fail as a generic nom error
+
+            Ok((input, MetaResponse::Data(Some(vec![meta_value]))))
+        }
         // match arm for "MN\r\n" response
         MetaResponse::Status(Status::NoOp) => Ok((input, MetaResponse::Status(Status::NoOp))),
         // match arm for "HD", "NF" & "EX" responses
