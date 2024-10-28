@@ -160,7 +160,8 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
                 (input, None) // tombstoned key, no data block
             };
 
-            data = data.trim_ascii_end();
+            // trim the data block of any trailing whitespace
+            data = data.map(|d| d.trim_ascii_end());
 
             let meta_value =
                 construct_meta_value_from_flag_array(flag_array, data, Some(Status::Value))
@@ -288,7 +289,7 @@ fn parse_meta_arithmetic_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> 
             let (input, data) = take_until_size(input, size)?; // parses the data from the input
 
             let meta_value =
-                construct_meta_value_from_flag_array(flag_array, Some(data), Some(Status::Value))
+                construct_meta_value_from_flag_array(flag_array, data, Some(Status::Value))
                     .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?; // Throw Fail as a generic nom error
 
             Ok((input, MetaResponse::Data(Some(vec![meta_value]))))
