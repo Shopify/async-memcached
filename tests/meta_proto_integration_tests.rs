@@ -1306,5 +1306,5 @@ async fn test_meta_delete_tombstones_key() {
         .unwrap();
 
     assert_eq!(get_result.ttl_remaining.unwrap(), -1);
-    assert_eq!(get_result.data.unwrap(), vec![]);
+    assert!(get_result.data.is_none());
 }

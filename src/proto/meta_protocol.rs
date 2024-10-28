@@ -91,7 +91,7 @@ impl MetaProtocol for Client {
             self.conn.write_all(meta_flags.join(" ").as_bytes()).await?;
             self.conn.write_all(b"\r\n").await?;
             if meta_flags.contains(&"q") {
-                // Write a no-op command if quiet mode is used so reliably detect cache misses.
+                // Write a no-op command to reliably detect cache misses if quiet mode is used.
                 self.conn.write_all(b"mn\r\n").await?;
             }
         } else {

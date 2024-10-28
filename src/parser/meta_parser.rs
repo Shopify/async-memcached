@@ -122,10 +122,17 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
             let (input, size) = parse_u32(input)?; // parses the size of the data from the input
             let (input, flag_array) = parse_meta_flag_values_as_slice(input)?; // parses the flags from the input
             let (input, _) = crlf(input)?; // removes the leading crlf from the data block
-            let (input, data) = take_until_size(input, size)?; // parses the data from the input
+
+            // After tombstoning a key, the memcached server will return size 0 and a trailing \r\n for the data block,
+            // which can be interpreted as None.
+            let (input, data) = if size > 0 {
+                take_until_size(input, size)? // parses the data from the input
+            } else {
+                (input, None) // tombstoned key, no data block
+            };
 
             let meta_value =
-                construct_meta_value_from_flag_array(flag_array, Some(data), Some(Status::Value))
+                construct_meta_value_from_flag_array(flag_array, data, Some(Status::Value))
                     .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?; // Throw Fail as a generic nom error
 
             Ok((input, MetaResponse::Data(Some(vec![meta_value]))))
@@ -238,7 +245,7 @@ fn parse_meta_delete_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
     }
 }
 
-pub fn take_until_size(buf: &[u8], byte_size: u32) -> IResult<&[u8], &[u8]> {
+pub fn take_until_size(buf: &[u8], byte_size: u32) -> IResult<&[u8], Option<&[u8]>> {
     let size = byte_size as usize;
 
     // Check if the buffer has enough bytes for the data and the trailing "\r\n"
@@ -255,7 +262,7 @@ pub fn take_until_size(buf: &[u8], byte_size: u32) -> IResult<&[u8], &[u8]> {
     // Ensure the remaining buffer starts with "\r\n"
     let (remaining, _) = tag("\r\n")(remaining)?;
 
-    Ok((remaining, extracted))
+    Ok((remaining, Some(extracted)))
 }
 
 #[allow(clippy::type_complexity)]
@@ -379,18 +386,6 @@ fn construct_meta_value_from_flag_array(
     data: Option<&[u8]>,
     status: Option<Status>,
 ) -> Result<MetaValue, Error> {
-    // might need something like this in the case of tombstoned data.
-    // Currently returns Some([]), but should maybe be converted to None?
-    // let data = if let Some(d) = data {
-    //     if d.is_empty() {
-    //         None
-    //     } else {
-    //         Some(d.to_vec())
-    //     }
-    // } else {
-    //     None
-    // };
-
     let mut meta_value = MetaValue {
         status,
         data: data.map(|d| d.to_vec()),
