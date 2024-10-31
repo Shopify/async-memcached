@@ -78,7 +78,7 @@ pub trait MetaProtocol {
         meta_flags: Option<&[&str]>,
     ) -> impl Future<Output = Result<Option<MetaValue>, Error>>;
 
-    /// Performs an arithmetic (increment or decrement)operation on the given key.
+    /// Performs an arithmetic (increment or decrement) operation on the given key.
     ///
     /// If the key is found, the arithmetic operation is performed.
     /// If data is requested back via meta flags then a `MetaValue` is returned, otherwise `None`.
@@ -101,14 +101,6 @@ pub trait MetaProtocol {
         key: K,
         meta_flags: Option<&[&str]>,
     ) -> impl Future<Output = Result<Option<MetaValue>, Error>>;
-
-    /// Writes a non-set command to the connection.
-    fn write_non_set_command(
-        &mut self,
-        op: &str,
-        kr: &[u8],
-        meta_flags: Option<&[&str]>,
-    ) -> impl Future<Output = Result<(), Error>>;
 }
 
 impl MetaProtocol for Client {
@@ -119,7 +111,18 @@ impl MetaProtocol for Client {
     ) -> Result<Option<MetaValue>, Error> {
         let kr = Self::validate_key_length(key.as_ref())?;
 
-        self.write_non_set_command("mg", kr, meta_flags).await?;
+        self.conn.write_all(b"mg ").await?;
+        self.conn.write_all(kr).await?;
+        self.conn.write_all(b" ").await?;
+        if let Some(meta_flags) = meta_flags {
+            self.conn.write_all(meta_flags.join(" ").as_bytes()).await?;
+            self.conn.write_all(b"\r\n").await?;
+            if meta_flags.contains(&"q") {
+                self.conn.write_all(b"mn\r\n").await?;
+            }
+        } else {
+            self.conn.write_all(b"\r\n").await?;
+        }
 
         self.conn.flush().await?;
 
@@ -195,7 +198,18 @@ impl MetaProtocol for Client {
     ) -> Result<Option<MetaValue>, Error> {
         let kr = Self::validate_key_length(key.as_ref())?;
 
-        self.write_non_set_command("md", kr, meta_flags).await?;
+        self.conn.write_all(b"md ").await?;
+        self.conn.write_all(kr).await?;
+        self.conn.write_all(b" ").await?;
+        if let Some(meta_flags) = meta_flags {
+            self.conn.write_all(meta_flags.join(" ").as_bytes()).await?;
+            self.conn.write_all(b"\r\n").await?;
+            if meta_flags.contains(&"q") {
+                self.conn.write_all(b"mn\r\n").await?;
+            }
+        } else {
+            self.conn.write_all(b"\r\n").await?;
+        }
 
         self.conn.flush().await?;
 
@@ -220,7 +234,18 @@ impl MetaProtocol for Client {
     ) -> Result<Option<MetaValue>, Error> {
         let kr = Self::validate_key_length(key.as_ref())?;
 
-        self.write_non_set_command("ma", kr, meta_flags).await?;
+        self.conn.write_all(b"ma ").await?;
+        self.conn.write_all(kr).await?;
+        self.conn.write_all(b" ").await?;
+        if let Some(meta_flags) = meta_flags {
+            self.conn.write_all(meta_flags.join(" ").as_bytes()).await?;
+            self.conn.write_all(b"\r\n").await?;
+            if meta_flags.contains(&"q") {
+                self.conn.write_all(b"mn\r\n").await?;
+            }
+        } else {
+            self.conn.write_all(b"\r\n").await?;
+        }
 
         self.conn.flush().await?;
 
@@ -235,29 +260,5 @@ impl MetaProtocol for Client {
                 })
                 .transpose(),
         }
-    }
-
-    async fn write_non_set_command(
-        &mut self,
-        op: &str,
-        kr: &[u8],
-        meta_flags: Option<&[&str]>,
-    ) -> Result<(), Error> {
-        self.conn.write_all(op.as_bytes()).await?;
-        self.conn.write_all(b" ").await?;
-        self.conn.write_all(kr).await?;
-        self.conn.write_all(b" ").await?;
-        if let Some(meta_flags) = meta_flags {
-            self.conn.write_all(meta_flags.join(" ").as_bytes()).await?;
-            self.conn.write_all(b"\r\n").await?;
-            if meta_flags.contains(&"q") {
-                // Write a no-op command if quiet mode is used so reliably detect cache misses.
-                self.conn.write_all(b"mn\r\n").await?;
-            }
-        } else {
-            self.conn.write_all(b"\r\n").await?;
-        }
-
-        Ok(())
     }
 }

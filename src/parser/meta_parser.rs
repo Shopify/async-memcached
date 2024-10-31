@@ -197,7 +197,7 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
             // unexpected response code, should never happen, bail
             Err(nom::Err::Error(nom::error::Error::new(
                 input,
-                nom::error::ErrorKind::Eof,
+                nom::error::ErrorKind::Fail,
             )))
         }
     }
@@ -235,7 +235,7 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
         MetaResponse::Status(s) => process_meta_response_without_data_payload(input, s),
         _ => Err(nom::Err::Error(nom::error::Error::new(
             input,
-            nom::error::ErrorKind::Eof,
+            nom::error::ErrorKind::Fail,
         ))),
     }
 }
@@ -272,7 +272,7 @@ fn parse_meta_delete_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
         MetaResponse::Status(s) => process_meta_response_without_data_payload(input, s),
         _ => Err(nom::Err::Error(nom::error::Error::new(
             input,
-            nom::error::ErrorKind::Eof,
+            nom::error::ErrorKind::Fail,
         ))),
     }
 }
@@ -300,7 +300,7 @@ fn parse_meta_arithmetic_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> 
         MetaResponse::Status(s) => process_meta_response_without_data_payload(input, s),
         _ => Err(nom::Err::Error(nom::error::Error::new(
             input,
-            nom::error::ErrorKind::Eof,
+            nom::error::ErrorKind::Fail,
         ))),
     }
 }
