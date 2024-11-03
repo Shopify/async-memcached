@@ -14,5 +14,6 @@ Error Handling and Validation:
 Performance Optimization:
 - try to mmaintain zero copy for all bytes
 - try to avoid dynamic functions
+- avoid allocating new Strings and Vecs wherever possible
 
 Follow Rust docs for style, examples, and code

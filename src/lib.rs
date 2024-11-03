@@ -240,6 +240,15 @@ impl Client {
         }
         Ok(kr)
     }
+
+    fn validate_opaque_length(opaque: &[u8]) -> Result<&[u8], Error> {
+        if opaque.len() > 32 {
+            return Err(Error::from(Status::Error(ErrorKind::Protocol(Some(
+                "Opaque value must be 32 bytes or less".to_string(),
+            )))));
+        }
+        Ok(opaque)
+    }
 }
 
 /// Asynchronous iterator for metadump operations.

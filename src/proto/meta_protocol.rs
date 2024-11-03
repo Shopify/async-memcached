@@ -78,27 +78,63 @@ pub trait MetaProtocol {
         meta_flags: Option<&[&str]>,
     ) -> impl Future<Output = Result<Option<MetaValue>, Error>>;
 
-    /// Performs an arithmetic (increment or decrement) operation on the given key.
+    /// Performs an increment (arithmetic) operation on the given key.
     ///
-    /// If the key is found, the arithmetic operation is performed.
+    /// If the key is found, the increment operation is performed.
     /// If data is requested back via meta flags then a `MetaValue` is returned, otherwise `None`.
-    //
-    // Command format:
-    // ma <key> <meta_flags>*\r\n
-    //
-    // - <key> is the key string, with a maximum length of 250 bytes.
-    //
-    // - <meta_flags> is an optional slice of string references for meta flags.
-    // Meta flags may have associated tokens after the initial character, e.g. "O123" for opaque.
-    //
-    // Mode switching between increment and decrement is done with the M flag.
-    // The default behaviour is to increment with a delta of 1.
-    //
-    // Using the "q" flag for quiet mode will append a no-op command to the request ("mn\r\n") so that the client
-    // can proceed properly in the event of a cache miss.
-    fn meta_arithmetic<K: AsRef<[u8]>>(
+    ///
+    /// Command format:
+    ///   ma <key> <meta_flags>*\r\n
+    ///
+    /// - <key> is the key string, with a maximum length of 250 bytes.
+    ///
+    /// - <opaque> is an optional slice of string references with a maximum length of 32 bytes.
+    ///
+    /// - <delta> is an optional u64 value for the decrement delta.
+    ///   The default behaviour is to decrement with a delta of 1.
+    ///
+    /// - <is_quiet> is a boolean value indicating whether to use quiet mode.
+    ///   quiet mode will append a no-op command to the request ("mn\r\n") so that the client
+    ///   can proceed properly in the event of a cache miss.
+    ///
+    /// - <meta_flags> is an optional slice of string references for additional meta flags.
+    ///   Meta flags may have associated tokens after the initial character, e.g "N123"
+    fn meta_increment<K: AsRef<[u8]>>(
         &mut self,
         key: K,
+        is_quiet: bool,
+        opaque: Option<&[u8]>,
+        delta: Option<u64>,
+        meta_flags: Option<&[&str]>,
+    ) -> impl Future<Output = Result<Option<MetaValue>, Error>>;
+
+    /// Performs a decrement (arithmetic) operation on the given key.
+    ///
+    /// If the key is found, the decrement operation is performed.
+    /// If data is requested back via meta flags then a `MetaValue` is returned, otherwise `None`.
+    ///
+    /// Command format:
+    ///   ma <key> MD <meta_flags>*\r\n
+    ///
+    /// - <key> is the key string, with a maximum length of 250 bytes.
+    ///
+    /// - <opaque> is an optional slice of string references with a maximum length of 32 bytes.
+    ///
+    /// - <delta> is an optional u64 value for the decrement delta.
+    ///   The default behaviour is to decrement with a delta of 1.
+    ///
+    /// - <is_quiet> is a boolean value indicating whether to use quiet mode.
+    ///   quiet mode will append a no-op command to the request ("mn\r\n") so that the client
+    ///   can proceed properly in the event of a cache miss.
+    ///
+    /// - <meta_flags> is an optional slice of string references for additional meta flags.
+    ///   Meta flags may have associated tokens after the initial character, e.g "N123"
+    fn meta_decrement<K: AsRef<[u8]>>(
+        &mut self,
+        key: K,
+        is_quiet: bool,
+        opaque: Option<&[u8]>,
+        delta: Option<u64>,
         meta_flags: Option<&[&str]>,
     ) -> impl Future<Output = Result<Option<MetaValue>, Error>>;
 }
@@ -113,8 +149,8 @@ impl MetaProtocol for Client {
 
         self.conn.write_all(b"mg ").await?;
         self.conn.write_all(kr).await?;
-        self.conn.write_all(b" ").await?;
         if let Some(meta_flags) = meta_flags {
+            self.conn.write_all(b" ").await?;
             self.conn.write_all(meta_flags.join(" ").as_bytes()).await?;
             self.conn.write_all(b"\r\n").await?;
             if meta_flags.contains(&"q") {
@@ -200,8 +236,8 @@ impl MetaProtocol for Client {
 
         self.conn.write_all(b"md ").await?;
         self.conn.write_all(kr).await?;
-        self.conn.write_all(b" ").await?;
         if let Some(meta_flags) = meta_flags {
+            self.conn.write_all(b" ").await?;
             self.conn.write_all(meta_flags.join(" ").as_bytes()).await?;
             self.conn.write_all(b"\r\n").await?;
             if meta_flags.contains(&"q") {
@@ -227,22 +263,99 @@ impl MetaProtocol for Client {
         }
     }
 
-    async fn meta_arithmetic<K: AsRef<[u8]>>(
+    async fn meta_increment<K: AsRef<[u8]>>(
         &mut self,
         key: K,
+        is_quiet: bool,
+        opaque: Option<&[u8]>,
+        delta: Option<u64>,
         meta_flags: Option<&[&str]>,
     ) -> Result<Option<MetaValue>, Error> {
         let kr = Self::validate_key_length(key.as_ref())?;
 
+        if let Some(opaque) = &opaque {
+            Self::validate_opaque_length(opaque)?;
+        }
+
         self.conn.write_all(b"ma ").await?;
         self.conn.write_all(kr).await?;
-        self.conn.write_all(b" ").await?;
-        if let Some(meta_flags) = meta_flags {
-            self.conn.write_all(meta_flags.join(" ").as_bytes()).await?;
-            self.conn.write_all(b"\r\n").await?;
-            if meta_flags.contains(&"q") {
-                self.conn.write_all(b"mn\r\n").await?;
+
+        if let Some(opaque) = &opaque {
+            self.conn.write_all(b" O").await?;
+            self.conn.write_all(opaque.as_ref()).await?;
+        }
+
+        // skip writing "MI" because it's default behaviour and we can save the bytes.
+        if let Some(delta) = delta {
+            if delta != 1 {
+                self.conn.write_all(b" D").await?;
+                self.conn.write_all(delta.to_string().as_bytes()).await?;
             }
+        }
+
+        if let Some(meta_flags) = meta_flags {
+            self.conn.write_all(b" ").await?;
+            self.conn.write_all(meta_flags.join(" ").as_bytes()).await?;
+        }
+
+        if is_quiet {
+            self.conn.write_all(b" q\r\nmn\r\n").await?;
+        } else {
+            self.conn.write_all(b"\r\n").await?;
+        }
+
+        self.conn.flush().await?;
+
+        match self.drive_receive(parse_meta_arithmetic_response).await? {
+            MetaResponse::Status(Status::Stored) => Ok(None),
+            MetaResponse::Status(Status::NoOp) => Ok(None),
+            MetaResponse::Status(s) => Err(s.into()),
+            MetaResponse::Data(d) => d
+                .map(|mut items| {
+                    let item = items.remove(0);
+                    Ok(item)
+                })
+                .transpose(),
+        }
+    }
+
+    async fn meta_decrement<K: AsRef<[u8]>>(
+        &mut self,
+        key: K,
+        is_quiet: bool,
+        opaque: Option<&[u8]>,
+        delta: Option<u64>,
+        meta_flags: Option<&[&str]>,
+    ) -> Result<Option<MetaValue>, Error> {
+        let kr = Self::validate_key_length(key.as_ref())?;
+
+        if let Some(opaque) = &opaque {
+            Self::validate_opaque_length(opaque)?;
+        }
+
+        self.conn.write_all(b"ma ").await?;
+        self.conn.write_all(kr).await?;
+        self.conn.write_all(b" MD").await?;
+
+        if let Some(opaque) = &opaque {
+            self.conn.write_all(b" O").await?;
+            self.conn.write_all(opaque.as_ref()).await?;
+        }
+
+        if let Some(delta) = delta {
+            if delta != 1 {
+                self.conn.write_all(b" D").await?;
+                self.conn.write_all(delta.to_string().as_bytes()).await?;
+            }
+        }
+
+        if let Some(meta_flags) = meta_flags {
+            self.conn.write_all(b" ").await?;
+            self.conn.write_all(meta_flags.join(" ").as_bytes()).await?;
+        }
+
+        if is_quiet {
+            self.conn.write_all(b" q\r\nmn\r\n").await?;
         } else {
             self.conn.write_all(b"\r\n").await?;
         }
