@@ -1534,7 +1534,6 @@ async fn test_meta_increment_with_specified_delta() {
     let meta_flags = ["v"];
     let mut client = setup_client(&[key]).await;
 
-    // Set the initial value with a specific CAS value
     client.meta_set(key, initial_value, None).await.unwrap();
 
     let incr_result = client
@@ -1560,7 +1559,6 @@ async fn test_meta_decrement_with_specified_delta() {
     let meta_flags = ["v"];
     let mut client = setup_client(&[key]).await;
 
-    // Set the initial value with a specific CAS value
     client.meta_set(key, initial_value, None).await.unwrap();
 
     let decr_result = client
@@ -1586,7 +1584,6 @@ async fn test_meta_increment_overflows_with_proper_delta_when_incrementing_past_
     let meta_flags = ["v"];
     let mut client = setup_client(&[key]).await;
 
-    // Set the initial value with a specific CAS value
     client.meta_set(key, initial_value, None).await.unwrap();
 
     let incr_result = client
@@ -1636,7 +1633,6 @@ async fn test_meta_increment_sets_new_key_with_n_and_j_flags() {
     let get_result = client.meta_get(key, Some(&["v"])).await.unwrap();
     assert!(get_result.is_none());
 
-    // Perform arithmetic increment with invalid flag
     let flags = ["N9001", "J99", "v", "t"];
     let increment_result = client
         .meta_increment(key, false, None, None, Some(&flags))
@@ -1664,7 +1660,6 @@ async fn test_meta_increment_prefers_explicit_parameters_over_meta_flags() {
     let meta_flags = ["v", "D9001", "MD", "q", "O1001"];
     let mut client = setup_client(&[key]).await;
 
-    // Set the initial value with a specific CAS value
     client.meta_set(key, initial_value, None).await.unwrap();
 
     let incr_result = client
@@ -1691,7 +1686,6 @@ async fn test_meta_increment_uses_meta_flags_when_no_explicit_parameters_are_pro
     let meta_flags = ["v", "D50", "O1001"];
     let mut client = setup_client(&[key]).await;
 
-    // Set the initial value with a specific CAS value
     client.meta_set(key, initial_value, None).await.unwrap();
 
     let incr_result = client
@@ -1719,7 +1713,6 @@ async fn test_meta_increment_ignores_mode_switch_flag() {
     let meta_flags = ["v", "MD"];
     let mut client = setup_client(&[key]).await;
 
-    // Set the initial value with a specific CAS value
     client.meta_set(key, initial_value, None).await.unwrap();
 
     let incr_result = client
@@ -1732,4 +1725,26 @@ async fn test_meta_increment_ignores_mode_switch_flag() {
         String::from_utf8(incr_result.data.unwrap()).unwrap(),
         expected_value.to_string()
     );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_increment_raises_error_when_opaque_is_too_long() {
+    let key = "meta-increment-raises-error-when-opaque-is-too-long";
+    let initial_value = 50_u64;
+    let opaque = "1".repeat(33);
+
+    let mut client = setup_client(&[key]).await;
+
+    client.meta_set(key, initial_value, None).await.unwrap();
+
+    let incr_result = client
+        .meta_increment(key, false, Some(opaque.as_bytes()), None, None)
+        .await;
+
+    assert!(matches!(
+        incr_result,
+        Err(Error::Protocol(Status::Error(ErrorKind::OpaqueTooLong)))
+    ));
 }
