@@ -99,6 +99,8 @@ pub trait MetaProtocol {
     ///
     /// - <meta_flags> is an optional slice of string references for additional meta flags.
     ///   Meta flags may have associated tokens after the initial character, e.g "N123"
+    ///   Do not include "M", "D", "O" or "q" flags as additional meta flags, they will be ignored.
+    ///   Instead, use the specified parameters.
     fn meta_increment<K: AsRef<[u8]>>(
         &mut self,
         key: K,
@@ -129,6 +131,8 @@ pub trait MetaProtocol {
     ///
     /// - <meta_flags> is an optional slice of string references for additional meta flags.
     ///   Meta flags may have associated tokens after the initial character, e.g "N123"
+    ///   Do not include "M", "D", "O" or "q" flags as additional meta flags, they will be ignored.
+    ///   Instead, use the specified parameters.
     fn meta_decrement<K: AsRef<[u8]>>(
         &mut self,
         key: K,
@@ -294,8 +298,20 @@ impl MetaProtocol for Client {
         }
 
         if let Some(meta_flags) = meta_flags {
-            self.conn.write_all(b" ").await?;
-            self.conn.write_all(meta_flags.join(" ").as_bytes()).await?;
+            for flag in meta_flags {
+                // ignore M flag because it's specific to the method called, ignore q and require param to be used
+                // prefer explicit D and O params over meta flags
+                if flag.starts_with('M')
+                    || flag.starts_with('q')
+                    || (flag.starts_with('D') && delta.is_some())
+                    || (flag.starts_with('O') && opaque.is_some())
+                {
+                    continue;
+                } else {
+                    self.conn.write_all(b" ").await?;
+                    self.conn.write_all(flag.as_bytes()).await?;
+                }
+            }
         }
 
         if is_quiet {
@@ -350,8 +366,20 @@ impl MetaProtocol for Client {
         }
 
         if let Some(meta_flags) = meta_flags {
-            self.conn.write_all(b" ").await?;
-            self.conn.write_all(meta_flags.join(" ").as_bytes()).await?;
+            for flag in meta_flags {
+                // ignore M flag because it's specific to the method called, ignore q and require param to be used
+                // prefer explicit D and O params over meta flags
+                if flag.starts_with('M')
+                    || flag.starts_with('q')
+                    || (flag.starts_with('D') && delta.is_some())
+                    || (flag.starts_with('O') && opaque.is_some())
+                {
+                    continue;
+                } else {
+                    self.conn.write_all(b" ").await?;
+                    self.conn.write_all(flag.as_bytes()).await?;
+                }
+            }
         }
 
         if is_quiet {

@@ -1650,3 +1650,86 @@ async fn test_meta_increment_sets_new_key_with_n_and_j_flags() {
     );
     assert_eq!(increment_result.ttl_remaining.unwrap(), 9001);
 }
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_increment_prefers_explicit_parameters_over_meta_flags() {
+    let key = "meta-increment-prefers-explicit-parameters-over-meta-flags";
+    let initial_value = 50_u64;
+    let delta = 50_u64;
+    let expected_value = initial_value + delta;
+    let opaque = "1337".as_bytes();
+
+    let meta_flags = ["v", "D9001", "MD", "q", "O1001"];
+    let mut client = setup_client(&[key]).await;
+
+    // Set the initial value with a specific CAS value
+    client.meta_set(key, initial_value, None).await.unwrap();
+
+    let incr_result = client
+        .meta_increment(key, false, Some(opaque), Some(delta), Some(&meta_flags))
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        String::from_utf8(incr_result.data.unwrap()).unwrap(),
+        expected_value.to_string()
+    );
+    assert_eq!(incr_result.opaque_token.unwrap(), opaque);
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_increment_uses_meta_flags_when_no_explicit_parameters_are_provided() {
+    let key = "meta-increment-uses-meta-flags-when-no-explicit-parameters-are-provided";
+    let initial_value = 50_u64;
+    let expected_value = initial_value + 50;
+
+    let meta_flags = ["v", "D50", "O1001"];
+    let mut client = setup_client(&[key]).await;
+
+    // Set the initial value with a specific CAS value
+    client.meta_set(key, initial_value, None).await.unwrap();
+
+    let incr_result = client
+        .meta_increment(key, false, None, None, Some(&meta_flags))
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        String::from_utf8(incr_result.data.unwrap()).unwrap(),
+        expected_value.to_string()
+    );
+    assert_eq!(incr_result.opaque_token.unwrap(), "1001".as_bytes());
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_increment_ignores_mode_switch_flag() {
+    let key = "meta-increment-ignores-mode-switch-flag";
+    let initial_value = 50_u64;
+    let delta = 50_u64;
+    let expected_value = initial_value + delta;
+
+    let meta_flags = ["v", "MD"];
+    let mut client = setup_client(&[key]).await;
+
+    // Set the initial value with a specific CAS value
+    client.meta_set(key, initial_value, None).await.unwrap();
+
+    let incr_result = client
+        .meta_increment(key, false, None, Some(delta), Some(&meta_flags))
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        String::from_utf8(incr_result.data.unwrap()).unwrap(),
+        expected_value.to_string()
+    );
+}
