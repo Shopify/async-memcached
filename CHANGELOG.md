@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Implemented Meta NoOp parsing for quiet mode and multi-op.
 - Added `meta_set` method to the meta protocol.
 - Added `meta_delete` method to the meta protocol.
+- Added `meta_increment` and `meta_decrement` methods to the meta protocol to cover Meta Arithmetic functionality.
 
 ### Changed
 - Refactored some wall-clock benchmarks to yield more realistic results for expensive set operations.

@@ -42,6 +42,17 @@ pub fn parse_meta_delete_status(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
     ))(buf)
 }
 
+pub fn parse_meta_arithmetic_status(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
+    alt((
+        value(MetaResponse::Status(Status::Value), tag(b"VA ")),
+        value(MetaResponse::Status(Status::Stored), tag(b"HD")),
+        value(MetaResponse::Status(Status::NotFound), tag(b"NF")),
+        value(MetaResponse::Status(Status::NotStored), tag(b"NS")),
+        value(MetaResponse::Status(Status::Exists), tag(b"EX")),
+        value(MetaResponse::Status(Status::NoOp), tag(b"MN\r\n")),
+    ))(buf)
+}
+
 pub fn parse_meta_get_response(buf: &[u8]) -> Result<Option<(usize, MetaResponse)>, ErrorKind> {
     let total_bytes = buf.len();
     let result = parse_meta_get_data_value(buf);
@@ -90,6 +101,24 @@ pub fn parse_meta_delete_response(buf: &[u8]) -> Result<Option<(usize, MetaRespo
     }
 }
 
+pub fn parse_meta_arithmetic_response(
+    buf: &[u8],
+) -> Result<Option<(usize, MetaResponse)>, ErrorKind> {
+    let total_bytes = buf.len();
+    let result = parse_meta_arithmetic_data_value(buf);
+
+    match result {
+        Ok((remaining_bytes, response)) => {
+            let read_bytes = total_bytes - remaining_bytes.len();
+            Ok(Some((read_bytes, response)))
+        }
+        Err(nom::Err::Incomplete(_)) => Ok(None),
+        Err(nom::Err::Error(e)) | Err(nom::Err::Failure(e)) => {
+            Err(ErrorKind::Protocol(Some(e.code.description().to_string())))
+        }
+    }
+}
+
 // example meta_get command sent to memcached server:
 // mg meta-get-test-key v h l t k
 // so it has flags of v h l t k
@@ -125,11 +154,14 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
 
             // After tombstoning a key, the memcached server will return size 0 and a trailing \r\n for the data block,
             // which can be interpreted as None.
-            let (input, data) = if size > 0 {
+            let (input, mut data) = if size > 0 {
                 take_until_size(input, size)? // parses the data from the input
             } else {
                 (input, None) // tombstoned key, no data block
             };
+
+            // trim the data block of any trailing whitespace
+            data = data.map(|d| d.trim_ascii_end());
 
             let meta_value =
                 construct_meta_value_from_flag_array(flag_array, data, Some(Status::Value))
@@ -165,7 +197,7 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
             // unexpected response code, should never happen, bail
             Err(nom::Err::Error(nom::error::Error::new(
                 input,
-                nom::error::ErrorKind::Eof,
+                nom::error::ErrorKind::Fail,
             )))
         }
     }
@@ -203,7 +235,7 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
         MetaResponse::Status(s) => process_meta_response_without_data_payload(input, s),
         _ => Err(nom::Err::Error(nom::error::Error::new(
             input,
-            nom::error::ErrorKind::Eof,
+            nom::error::ErrorKind::Fail,
         ))),
     }
 }
@@ -240,7 +272,35 @@ fn parse_meta_delete_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
         MetaResponse::Status(s) => process_meta_response_without_data_payload(input, s),
         _ => Err(nom::Err::Error(nom::error::Error::new(
             input,
-            nom::error::ErrorKind::Eof,
+            nom::error::ErrorKind::Fail,
+        ))),
+    }
+}
+
+fn parse_meta_arithmetic_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
+    let (input, status) = parse_meta_arithmetic_status(buf)?; // removes <CD> response code from the input
+
+    match status {
+        // match arm for "VA " response when v flag is used
+        MetaResponse::Status(Status::Value) => {
+            let (input, size) = parse_u32(input)?; // parses the size of the data from the input
+            let (input, flag_array) = parse_meta_flag_values_as_slice(input)?; // parses the flags from the input
+            let (input, _) = crlf(input)?; // removes the leading crlf from the data block
+            let (input, data) = take_until_size(input, size)?; // parses the data from the input
+
+            let meta_value =
+                construct_meta_value_from_flag_array(flag_array, data, Some(Status::Value))
+                    .map_err(|_| nom::Err::Failure(nom::error::Error::new(buf, Fail)))?; // Throw Fail as a generic nom error
+
+            Ok((input, MetaResponse::Data(Some(vec![meta_value]))))
+        }
+        // match arm for "MN\r\n" response
+        MetaResponse::Status(Status::NoOp) => Ok((input, MetaResponse::Status(Status::NoOp))),
+        // match arm for "HD", "NF" & "EX" responses
+        MetaResponse::Status(s) => process_meta_response_without_data_payload(input, s),
+        _ => Err(nom::Err::Error(nom::error::Error::new(
+            input,
+            nom::error::ErrorKind::Fail,
         ))),
     }
 }

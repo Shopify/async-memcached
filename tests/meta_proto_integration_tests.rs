@@ -1308,3 +1308,443 @@ async fn test_meta_delete_tombstones_key() {
     assert_eq!(get_result.ttl_remaining.unwrap(), -1);
     assert!(get_result.data.is_none());
 }
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_increment_with_no_flags() {
+    let key = "meta-increment-no-flags";
+    let initial_value = "9";
+    let expected_value = "10";
+
+    let mut client = setup_client(&[key]).await;
+
+    client.set(key, initial_value, None, None).await.unwrap();
+
+    let incr_result = client
+        .meta_increment(key, false, None, None, None)
+        .await
+        .unwrap();
+
+    // Verify the result is none because we didn't request any data back through meta flags
+    assert!(incr_result.is_none());
+
+    // Verify that the key was incremented by 1
+    let get_result = client.meta_get(key, Some(&["v"])).await.unwrap().unwrap();
+    assert_eq!(
+        String::from_utf8(get_result.data.unwrap()).unwrap(),
+        expected_value,
+        "Value after increment does not match expected value"
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_decrement_with_no_flags() {
+    let key = "meta-decrement-no-flags";
+    let initial_value = "100";
+    let expected_value = "9";
+
+    let mut client = setup_client(&[key]).await;
+
+    client.meta_set(key, initial_value, None).await.unwrap();
+
+    let decr_result = client
+        .meta_decrement(key, false, None, Some(91), None)
+        .await
+        .unwrap();
+
+    // Verify the result is none because we didn't request any data back through meta flags
+    assert!(decr_result.is_none());
+
+    // Verify that the key was decremented by 1
+    let get_result = client.meta_get(key, Some(&["v"])).await.unwrap().unwrap();
+
+    assert_eq!(
+        String::from_utf8(get_result.data.unwrap()).unwrap(),
+        expected_value,
+        "Value after decrement does not match expected value"
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_increment_with_in_quiet_mode() {
+    let key = "meta-arithmetic-increment-quiet-mode";
+    let initial_value = "20";
+    let expected_value = "21";
+
+    let mut client = setup_client(&[key]).await;
+
+    client.set(key, initial_value, None, None).await.unwrap();
+
+    let result = client
+        .meta_increment(key, true, None, None, None)
+        .await
+        .unwrap();
+
+    assert!(result.is_none());
+
+    let get_result = client.meta_get(key, Some(&["v"])).await.unwrap().unwrap();
+    assert_eq!(
+        String::from_utf8(get_result.data.unwrap()).unwrap(),
+        expected_value,
+        "Value after increment does not match expected value"
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_increment_on_nonexistent_key_in_quiet_mode() {
+    let key = "meta-increment-nonexistent-key-in-quiet-mode";
+
+    let mut client = setup_client(&[key]).await;
+
+    let incr_result = client.meta_increment(key, true, None, None, None).await;
+
+    assert!(matches!(
+        incr_result,
+        Err(Error::Protocol(Status::NotFound))
+    ));
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_increment_with_opaque_flag() {
+    let key = "meta-increment-opaque-flag";
+    let initial_value = "5";
+
+    let mut client = setup_client(&[key]).await;
+
+    client.set(key, initial_value, None, None).await.unwrap();
+
+    let opaque = "1001".as_bytes();
+    let result = client
+        .meta_increment(key, false, Some(opaque), None, None)
+        .await
+        .unwrap();
+
+    // Verify the result
+    assert!(result.is_some());
+    let meta_value = result.unwrap();
+
+    assert!(meta_value.data.is_none(), "Data should be empty");
+
+    assert_eq!(
+        meta_value.opaque_token.unwrap(),
+        opaque,
+        "Opaque token does not match"
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_increment_with_matching_cas_flag() {
+    let key = "meta-increment-matching-cas-flag";
+    let initial_value = "15";
+    let expected_value = "16";
+
+    let mut client = setup_client(&[key]).await;
+
+    // Set the initial value with a specific CAS value
+    client
+        .meta_set(key, initial_value, Some(&["E2002"]))
+        .await
+        .unwrap();
+
+    client
+        .meta_increment(key, false, None, None, Some(&["C2002"]))
+        .await
+        .unwrap();
+
+    let get_result = client.meta_get(key, Some(&["v"])).await.unwrap().unwrap();
+    assert_eq!(
+        String::from_utf8(get_result.data.unwrap()).unwrap(),
+        expected_value,
+        "Value after increment does not match expected value"
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_increment_with_mismatched_cas_flag() {
+    let key = "meta-increment-mismatched-cas-flag";
+    let initial_value = "15";
+
+    let mut client = setup_client(&[key]).await;
+
+    // Set the initial value with a specific CAS value
+    client
+        .meta_set(key, initial_value, Some(&["E2002"]))
+        .await
+        .unwrap();
+
+    // Perform arithmetic increment with a mismatched CAS flag
+    let mismatched_flags = ["C9999"];
+    let mismatched_result = client
+        .meta_increment(key, false, None, None, Some(&mismatched_flags))
+        .await;
+
+    // Expect an error due to CAS mismatch
+    assert!(
+        matches!(mismatched_result, Err(Error::Protocol(Status::Exists))),
+        "Expected CAS mismatch error"
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_increment_with_invalid_flags() {
+    let key = "meta-increment-invalid-flags";
+    let initial_value = "10";
+
+    let mut client = setup_client(&[key]).await;
+
+    client.meta_set(key, initial_value, None).await.unwrap();
+
+    // Perform arithmetic increment with invalid flag
+    let flags = ["invalid_flag"];
+    let result = client
+        .meta_increment(key, false, None, None, Some(&flags))
+        .await;
+
+    // Expect an error due to invalid flag
+    assert!(
+        matches!(result, Err(Error::Protocol(Status::Error(_)))),
+        "Expected error due to invalid flag"
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_increment_with_specified_delta() {
+    let key = "meta-increment-with-specified-delta";
+    let initial_value = 50_u64;
+    let delta = 50_u64;
+    let expected_value = initial_value + delta;
+
+    let meta_flags = ["v"];
+    let mut client = setup_client(&[key]).await;
+
+    client.meta_set(key, initial_value, None).await.unwrap();
+
+    let incr_result = client
+        .meta_increment(key, false, None, Some(delta), Some(&meta_flags))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        String::from_utf8(incr_result.unwrap().data.unwrap()).unwrap(),
+        expected_value.to_string()
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_decrement_with_specified_delta() {
+    let key = "meta-decrement-with-specified-delta";
+    let initial_value = 51_u64;
+    let delta = 50_u64;
+    let expected_value = initial_value - delta;
+
+    let meta_flags = ["v"];
+    let mut client = setup_client(&[key]).await;
+
+    client.meta_set(key, initial_value, None).await.unwrap();
+
+    let decr_result = client
+        .meta_decrement(key, false, None, Some(delta), Some(&meta_flags))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        String::from_utf8(decr_result.unwrap().data.unwrap()).unwrap(),
+        expected_value.to_string()
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_increment_overflows_with_proper_delta_when_incrementing_past_max_u64() {
+    let key = "meta-increment-overflows-with-proper-delta-when-incrementing-past-max-u64";
+    let initial_value = u64::MAX;
+    let delta = 3_u64;
+    let expected_value = 2;
+
+    let meta_flags = ["v"];
+    let mut client = setup_client(&[key]).await;
+
+    client.meta_set(key, initial_value, None).await.unwrap();
+
+    let incr_result = client
+        .meta_increment(key, false, None, Some(delta), Some(&meta_flags))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        String::from_utf8(incr_result.unwrap().data.unwrap()).unwrap(),
+        expected_value.to_string()
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_decrement_does_not_decrement_below_zero() {
+    let key = "meta-decrement-does-not-decrement-below-zero";
+    let initial_value = 10_u64;
+    let delta = 50_u64;
+    let expected_value = 0;
+
+    let meta_flags = ["v"];
+    let mut client = setup_client(&[key]).await;
+
+    client.meta_set(key, initial_value, None).await.unwrap();
+
+    let decr_result = client
+        .meta_decrement(key, false, None, Some(delta), Some(&meta_flags))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        String::from_utf8(decr_result.unwrap().data.unwrap()).unwrap(),
+        expected_value.to_string()
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_increment_sets_new_key_with_n_and_j_flags() {
+    let key = "meta-increment-n-and-j-flags";
+
+    let mut client = setup_client(&[key]).await;
+
+    let get_result = client.meta_get(key, Some(&["v"])).await.unwrap();
+    assert!(get_result.is_none());
+
+    let flags = ["N9001", "J99", "v", "t"];
+    let increment_result = client
+        .meta_increment(key, false, None, None, Some(&flags))
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        String::from_utf8(increment_result.data.unwrap()).unwrap(),
+        "99"
+    );
+    assert_eq!(increment_result.ttl_remaining.unwrap(), 9001);
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_increment_prefers_explicit_parameters_over_meta_flags() {
+    let key = "meta-increment-prefers-explicit-parameters-over-meta-flags";
+    let initial_value = 50_u64;
+    let delta = 50_u64;
+    let expected_value = initial_value + delta;
+    let opaque = "1337".as_bytes();
+
+    let meta_flags = ["v", "D9001", "MD", "q", "O1001"];
+    let mut client = setup_client(&[key]).await;
+
+    client.meta_set(key, initial_value, None).await.unwrap();
+
+    let incr_result = client
+        .meta_increment(key, false, Some(opaque), Some(delta), Some(&meta_flags))
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        String::from_utf8(incr_result.data.unwrap()).unwrap(),
+        expected_value.to_string()
+    );
+    assert_eq!(incr_result.opaque_token.unwrap(), opaque);
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_increment_uses_meta_flags_when_no_explicit_parameters_are_provided() {
+    let key = "meta-increment-uses-meta-flags-when-no-explicit-parameters-are-provided";
+    let initial_value = 50_u64;
+    let expected_value = initial_value + 50;
+
+    let meta_flags = ["v", "D50", "O1001"];
+    let mut client = setup_client(&[key]).await;
+
+    client.meta_set(key, initial_value, None).await.unwrap();
+
+    let incr_result = client
+        .meta_increment(key, false, None, None, Some(&meta_flags))
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        String::from_utf8(incr_result.data.unwrap()).unwrap(),
+        expected_value.to_string()
+    );
+    assert_eq!(incr_result.opaque_token.unwrap(), "1001".as_bytes());
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_increment_ignores_mode_switch_flag() {
+    let key = "meta-increment-ignores-mode-switch-flag";
+    let initial_value = 50_u64;
+    let delta = 50_u64;
+    let expected_value = initial_value + delta;
+
+    let meta_flags = ["v", "MD"];
+    let mut client = setup_client(&[key]).await;
+
+    client.meta_set(key, initial_value, None).await.unwrap();
+
+    let incr_result = client
+        .meta_increment(key, false, None, Some(delta), Some(&meta_flags))
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        String::from_utf8(incr_result.data.unwrap()).unwrap(),
+        expected_value.to_string()
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_increment_raises_error_when_opaque_is_too_long() {
+    let key = "meta-increment-raises-error-when-opaque-is-too-long";
+    let initial_value = 50_u64;
+    let opaque = "1".repeat(33);
+
+    let mut client = setup_client(&[key]).await;
+
+    client.meta_set(key, initial_value, None).await.unwrap();
+
+    let incr_result = client
+        .meta_increment(key, false, Some(opaque.as_bytes()), None, None)
+        .await;
+
+    assert!(matches!(
+        incr_result,
+        Err(Error::Protocol(Status::Error(ErrorKind::OpaqueTooLong)))
+    ));
+}
