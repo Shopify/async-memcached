@@ -99,8 +99,12 @@ pub enum ErrorKind {
     Client(String),
     /// An error from memcached related to SERVER_ERROR.
     Server(String),
-    /// An error from memcached related to a key that exceeds maximum allowed length.
+    /// An error from memcached related to a key that exceeds maximum allowed length (250 bytes).
     KeyTooLong,
+    /// An error from memcached related to a key that exceeds maximum allowed length (32 bytes).
+    OpaqueTooLong,
+    /// An error relating to duplicate or otherwise invalid meta flags.
+    InvalidMetaFlags,
 }
 
 /// Response to a memcached operation.
@@ -192,6 +196,8 @@ impl fmt::Display for ErrorKind {
             Self::Client(s) => write!(f, "client: {}", s),
             Self::Server(s) => write!(f, "server: {}", s),
             Self::KeyTooLong => write!(f, "Key exceeds maximum allowed length of 250 characters"),
+            Self::OpaqueTooLong => write!(f, "Opaque exceeds maximum allowed length of 32 characters"),
+            Self::InvalidMetaFlags => write!(f, "Invalid meta flags provided"),
         }
     }
 }
