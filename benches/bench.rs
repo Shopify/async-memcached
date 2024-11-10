@@ -60,7 +60,9 @@ fn bench_meta_get_small(c: &mut Criterion) {
             client.set("foo", "bar", None, None).await.unwrap();
             let start = std::time::Instant::now();
             for _ in 0..iters {
-                let _ = client.meta_get("foo", Some(&["v", "h", "t", "l"])).await;
+                let _ = client
+                    .meta_get("foo", false, None, Some(&["v", "h", "t", "l"]))
+                    .await;
             }
             start.elapsed()
         })
@@ -81,7 +83,9 @@ fn bench_meta_get_large(c: &mut Criterion) {
 
             let start = std::time::Instant::now();
             for _ in 0..iters {
-                let _ = client.meta_get(&key, Some(&["v", "h", "t", "l"])).await;
+                let _ = client
+                    .meta_get(&key, false, None, Some(&["v", "h", "t", "l"]))
+                    .await;
             }
             start.elapsed()
         });

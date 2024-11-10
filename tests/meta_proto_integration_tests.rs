@@ -38,7 +38,7 @@ async fn test_meta_get_cache_hit_with_no_flags() {
     client.set(key, value, None, None).await.unwrap();
 
     let flags = None;
-    let result = client.meta_get(key, flags).await.unwrap();
+    let result = client.meta_get(key, false, None, flags).await.unwrap();
 
     assert!(result.is_none());
 }
@@ -55,7 +55,10 @@ async fn test_meta_get_with_only_v_flag() {
     client.set(key, value, None, None).await.unwrap();
 
     let flags = ["v"];
-    let result = client.meta_get(key, Some(&flags)).await.unwrap();
+    let result = client
+        .meta_get(key, false, None, Some(&flags))
+        .await
+        .unwrap();
 
     assert!(result.is_some());
     let result_meta_value = result.unwrap();
@@ -78,7 +81,10 @@ async fn test_meta_get_with_large_key_and_value_item() {
     client.set(&key, &value, None, None).await.unwrap();
 
     let flags = ["v"];
-    let result = client.meta_get(key, Some(&flags)).await.unwrap();
+    let result = client
+        .meta_get(key, false, None, Some(&flags))
+        .await
+        .unwrap();
 
     assert!(result.is_some());
     let result_meta_value = result.unwrap();
@@ -111,7 +117,10 @@ async fn test_meta_get_with_many_flags() {
     );
 
     let flags = ["v", "h", "l", "t", "O9001"];
-    let result = client.meta_get(key, Some(&flags)).await.unwrap();
+    let result = client
+        .meta_get(key, false, None, Some(&flags))
+        .await
+        .unwrap();
 
     assert!(result.is_some());
     let result_meta_value = result.unwrap();
@@ -149,7 +158,10 @@ async fn test_meta_get_with_many_flags_and_no_value() {
     );
 
     let flags = ["h", "l", "t", "O9001"];
-    let meta_get_result = client.meta_get(key, Some(&flags)).await.unwrap();
+    let meta_get_result = client
+        .meta_get(key, false, None, Some(&flags))
+        .await
+        .unwrap();
 
     assert!(meta_get_result.is_some());
     let meta_get_result_value = meta_get_result.unwrap();
@@ -173,7 +185,10 @@ async fn test_meta_get_not_found() {
     let flags = ["v", "h", "l", "t"];
     let mut client = setup_client(&[key]).await;
 
-    let result = client.meta_get(key, Some(&flags)).await.unwrap();
+    let result = client
+        .meta_get(key, false, None, Some(&flags))
+        .await
+        .unwrap();
     assert_eq!(result, None);
 }
 
@@ -185,7 +200,10 @@ async fn test_meta_get_not_found_with_opaque_flag() {
     let flags = ["v", "O9001"];
     let mut client = setup_client(&[key]).await;
 
-    let result = client.meta_get(key, Some(&flags)).await.unwrap();
+    let result = client
+        .meta_get(key, false, None, Some(&flags))
+        .await
+        .unwrap();
 
     assert_eq!(
         result.unwrap().opaque_token.unwrap(),
@@ -201,7 +219,10 @@ async fn test_meta_get_not_found_with_k_flag() {
     let flags = ["v", "k"];
     let mut client = setup_client(&[key]).await;
 
-    let result = client.meta_get(key, Some(&flags)).await.unwrap();
+    let result = client
+        .meta_get(key, false, None, Some(&flags))
+        .await
+        .unwrap();
 
     assert_eq!(result.unwrap().key, Some(key.as_bytes().to_vec()));
 }
@@ -217,9 +238,13 @@ async fn test_quiet_mode_meta_get_with_k_flag_and_cache_hit() {
 
     client.set(key, value, None, None).await.unwrap();
 
-    let flags = ["v", "k", "q"];
+    let flags = ["v", "k"];
 
-    let result = client.meta_get(key, Some(&flags)).await.unwrap().unwrap();
+    let result = client
+        .meta_get(key, true, None, Some(&flags))
+        .await
+        .unwrap()
+        .unwrap();
 
     assert_eq!(result.key, Some(key.as_bytes().to_vec()));
     assert_eq!(result.data, Some(value.as_bytes().to_vec()));
@@ -233,9 +258,9 @@ async fn test_quiet_mode_meta_get_key_too_long() {
 
     let mut client = setup_client(&[&key]).await;
 
-    let flags = ["v", "q"];
+    let flags = ["v"];
 
-    let result = client.meta_get(&key, Some(&flags)).await;
+    let result = client.meta_get(&key, true, None, Some(&flags)).await;
 
     assert!(matches!(
         result,
@@ -251,9 +276,9 @@ async fn test_quiet_mode_meta_get_with_k_flag_and_cache_miss() {
 
     let mut client = setup_client(&[key]).await;
 
-    let flags = ["v", "k", "q"];
+    let flags = ["v", "k"];
 
-    let result = client.meta_get(key, Some(&flags)).await;
+    let result = client.meta_get(key, true, None, Some(&flags)).await;
 
     assert!(result.is_ok());
     assert!(result.unwrap().is_none());
@@ -277,7 +302,10 @@ async fn test_meta_set_with_no_flags() {
 
     // Retrieve the key using meta_get with v flag to verify that the item was stored
     let get_flags = ["v"];
-    let get_result = client.meta_get(key, Some(&get_flags)).await.unwrap();
+    let get_result = client
+        .meta_get(key, false, None, Some(&get_flags))
+        .await
+        .unwrap();
 
     assert!(get_result.is_some(), "Key not found after meta_set");
     let result_value = get_result.unwrap();
@@ -313,7 +341,10 @@ async fn test_meta_set_with_opaque_token() {
 
     // Retrieve the key using meta_get to verify
     let get_flags = ["v", "h", "l", "t"];
-    let get_result = client.meta_get(key, Some(&get_flags)).await.unwrap();
+    let get_result = client
+        .meta_get(key, false, None, Some(&get_flags))
+        .await
+        .unwrap();
 
     assert!(get_result.is_some(), "Key not found after meta_set");
     let result_value = get_result.unwrap();
@@ -357,7 +388,10 @@ async fn test_meta_set_with_k_flag() {
 
     // Retrieve the key using meta_get to verify
     let get_flags = ["v", "h", "l", "t"];
-    let get_result = client.meta_get(key, Some(&get_flags)).await.unwrap();
+    let get_result = client
+        .meta_get(key, false, None, Some(&get_flags))
+        .await
+        .unwrap();
 
     assert!(get_result.is_some(), "Key not found after meta_set");
     let result_value = get_result.unwrap();
@@ -410,7 +444,10 @@ async fn test_meta_set_with_cas_match_on_key_that_exists() {
     );
 
     let get_flags = ["v", "c"];
-    let get_result = client.meta_get(key, Some(&get_flags)).await.unwrap();
+    let get_result = client
+        .meta_get(key, false, None, Some(&get_flags))
+        .await
+        .unwrap();
     assert!(get_result.is_some(), "Key not found after meta_set");
 
     let get_value = get_result.unwrap();
@@ -432,7 +469,10 @@ async fn test_meta_set_with_cas_match_on_key_that_exists() {
     );
 
     let get_flags = ["v", "c"];
-    let get_result = client.meta_get(key, Some(&get_flags)).await.unwrap();
+    let get_result = client
+        .meta_get(key, false, None, Some(&get_flags))
+        .await
+        .unwrap();
     assert!(get_result.is_some(), "Key not found after meta_set");
 
     let get_value = get_result.unwrap();
@@ -462,7 +502,10 @@ async fn test_meta_set_with_cas_mismatch_on_key_that_exists() {
     );
 
     let get_flags = ["v", "c"];
-    let get_result = client.meta_get(key, Some(&get_flags)).await.unwrap();
+    let get_result = client
+        .meta_get(key, false, None, Some(&get_flags))
+        .await
+        .unwrap();
     assert!(get_result.is_some(), "Key not found after meta_set");
 
     let get_value = get_result.unwrap();
@@ -513,7 +556,7 @@ async fn test_meta_set_invalidate_on_expired_cas() {
 
     // Verify that the key was invalidated
     let get_flags = ["v", "c"];
-    let get_result = client.meta_get(key, Some(&get_flags)).await;
+    let get_result = client.meta_get(key, false, None, Some(&get_flags)).await;
 
     let get_value = get_result.unwrap().unwrap();
 
@@ -580,7 +623,7 @@ async fn test_meta_set_in_add_mode() {
     // Check initial set results
     let get_flags = ["v", "f"];
     let get_result_value = client
-        .meta_get(key, Some(&get_flags))
+        .meta_get(key, false, None, Some(&get_flags))
         .await
         .unwrap()
         .unwrap();
@@ -601,7 +644,7 @@ async fn test_meta_set_in_add_mode() {
     // Verify that the key was not re-added / modified
     let get_flags = ["v", "f"];
     let get_result_value = client
-        .meta_get(key, Some(&get_flags))
+        .meta_get(key, false, None, Some(&get_flags))
         .await
         .unwrap()
         .unwrap();
@@ -636,7 +679,7 @@ async fn test_meta_set_existing_key_in_prepend_mode() {
     // Check initial set results
     let get_flags = ["v", "f"];
     let get_result_value = client
-        .meta_get(key, Some(&get_flags))
+        .meta_get(key, false, None, Some(&get_flags))
         .await
         .unwrap()
         .unwrap();
@@ -661,7 +704,7 @@ async fn test_meta_set_existing_key_in_prepend_mode() {
     // Verify that the new value was prepended to the existing value and that the original flags are preserved
     let get_flags = ["v", "f"];
     let get_result_value = client
-        .meta_get(key, Some(&get_flags))
+        .meta_get(key, false, None, Some(&get_flags))
         .await
         .unwrap()
         .unwrap();
@@ -718,7 +761,7 @@ async fn test_meta_set_existing_key_in_append_mode() {
     // Check initial set results
     let get_flags = ["v", "f"];
     let get_result_value = client
-        .meta_get(key, Some(&get_flags))
+        .meta_get(key, false, None, Some(&get_flags))
         .await
         .unwrap()
         .unwrap();
@@ -743,7 +786,7 @@ async fn test_meta_set_existing_key_in_append_mode() {
     // Verify that the new value was appended to the existing value and that the original flags are preserved
     let get_flags = ["v", "f"];
     let get_result_value = client
-        .meta_get(key, Some(&get_flags))
+        .meta_get(key, false, None, Some(&get_flags))
         .await
         .unwrap()
         .unwrap();
@@ -800,7 +843,7 @@ async fn test_meta_set_nonexistent_key_in_append_mode_with_autovivify() {
     // Check initial set results
     let get_flags = ["v", "f", "t"];
     let get_result_value = client
-        .meta_get(key, Some(&get_flags))
+        .meta_get(key, false, None, Some(&get_flags))
         .await
         .unwrap()
         .unwrap();
@@ -836,7 +879,7 @@ async fn test_meta_set_existing_key_in_replace_mode() {
     // Check initial set results
     let get_flags = ["v", "f"];
     let get_result_value = client
-        .meta_get(key, Some(&get_flags))
+        .meta_get(key, false, None, Some(&get_flags))
         .await
         .unwrap()
         .unwrap();
@@ -861,7 +904,7 @@ async fn test_meta_set_existing_key_in_replace_mode() {
     // Verify that the new value was replaced and that the original flags are preserved
     let get_flags = ["v", "f"];
     let get_result_value = client
-        .meta_get(key, Some(&get_flags))
+        .meta_get(key, false, None, Some(&get_flags))
         .await
         .unwrap()
         .unwrap();
@@ -928,7 +971,10 @@ async fn test_quiet_mode_meta_set_with_cas_match_on_key_that_exists() {
     );
 
     let get_flags = ["v", "c"];
-    let get_result = client.meta_get(key, Some(&get_flags)).await.unwrap();
+    let get_result = client
+        .meta_get(key, false, None, Some(&get_flags))
+        .await
+        .unwrap();
     assert!(get_result.is_some(), "Key not found after meta_set");
 
     let get_value = get_result.unwrap();
@@ -950,7 +996,10 @@ async fn test_quiet_mode_meta_set_with_cas_match_on_key_that_exists() {
     );
 
     let get_flags = ["v", "c"];
-    let get_result = client.meta_get(key, Some(&get_flags)).await.unwrap();
+    let get_result = client
+        .meta_get(key, false, None, Some(&get_flags))
+        .await
+        .unwrap();
     assert!(get_result.is_some(), "Key not found after meta_set");
 
     let get_value = get_result.unwrap();
@@ -997,7 +1046,10 @@ async fn test_quiet_mode_meta_set_with_cas_mismatch_on_key_that_exists() {
     );
 
     let get_flags = ["v", "c"];
-    let get_result = client.meta_get(key, Some(&get_flags)).await.unwrap();
+    let get_result = client
+        .meta_get(key, false, None, Some(&get_flags))
+        .await
+        .unwrap();
     assert!(get_result.is_some(), "Key not found after meta_set");
 
     let get_value = get_result.unwrap();
@@ -1204,14 +1256,22 @@ async fn test_meta_delete_invalidates_key() {
     );
 
     // Attempt to get the key; depending on implementation, it might still exist but marked as invalid
-    let get_result = client.meta_get(key, Some(&["v"])).await.unwrap().unwrap();
+    let get_result = client
+        .meta_get(key, false, None, Some(&["v"]))
+        .await
+        .unwrap()
+        .unwrap();
 
     assert!(get_result.is_stale.unwrap());
     assert!(get_result.is_recache_winner.unwrap());
     assert_eq!(get_result.data.unwrap(), value.as_bytes());
 
     // Fetching the key again should show that subsequent gets do not qualify as recache winner
-    let get_result = client.meta_get(key, Some(&["v"])).await.unwrap().unwrap();
+    let get_result = client
+        .meta_get(key, false, None, Some(&["v"]))
+        .await
+        .unwrap()
+        .unwrap();
 
     assert!(get_result.is_stale.unwrap());
     assert!(!get_result.is_recache_winner.unwrap());
@@ -1233,7 +1293,11 @@ async fn test_meta_delete_invalidates_key_and_updates_ttl() {
         .await
         .expect("Failed to set key with meta_set");
 
-    let ttl_result = client.meta_get(key, Some(&["t"])).await.unwrap().unwrap();
+    let ttl_result = client
+        .meta_get(key, false, None, Some(&["t"]))
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(ttl_result.ttl_remaining.unwrap(), 1234);
 
     // Invalidate the key using the I flag and update the TTL to 60 seconds
@@ -1250,7 +1314,7 @@ async fn test_meta_delete_invalidates_key_and_updates_ttl() {
 
     // Attempt to get the key; depending on implementation, it might still exist but marked as invalid
     let get_result = client
-        .meta_get(key, Some(&["v", "t"]))
+        .meta_get(key, false, None, Some(&["v", "t"]))
         .await
         .unwrap()
         .unwrap();
@@ -1261,7 +1325,11 @@ async fn test_meta_delete_invalidates_key_and_updates_ttl() {
     assert_eq!(get_result.data.unwrap(), value.as_bytes());
 
     // Fetching the key again should show that subsequent gets do not qualify as recache winner
-    let get_result = client.meta_get(key, Some(&["v"])).await.unwrap().unwrap();
+    let get_result = client
+        .meta_get(key, false, None, Some(&["v"]))
+        .await
+        .unwrap()
+        .unwrap();
 
     assert!(get_result.is_stale.unwrap());
     assert!(!get_result.is_recache_winner.unwrap());
@@ -1283,7 +1351,11 @@ async fn test_meta_delete_tombstones_key() {
         .await
         .expect("Failed to set key with meta_set");
 
-    let ttl_result = client.meta_get(key, Some(&["t"])).await.unwrap().unwrap();
+    let ttl_result = client
+        .meta_get(key, false, None, Some(&["t"]))
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(ttl_result.ttl_remaining.unwrap(), 1234);
 
     // Invalidate the key using the I flag and update the TTL to 60 seconds
@@ -1300,7 +1372,7 @@ async fn test_meta_delete_tombstones_key() {
 
     // Attempt to get the key; depending on implementation, it might still exist but marked as invalid
     let get_result = client
-        .meta_get(key, Some(&["v", "t"]))
+        .meta_get(key, false, None, Some(&["v", "t"]))
         .await
         .unwrap()
         .unwrap();
@@ -1330,7 +1402,11 @@ async fn test_meta_increment_with_no_flags() {
     assert!(incr_result.is_none());
 
     // Verify that the key was incremented by 1
-    let get_result = client.meta_get(key, Some(&["v"])).await.unwrap().unwrap();
+    let get_result = client
+        .meta_get(key, false, None, Some(&["v"]))
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(
         String::from_utf8(get_result.data.unwrap()).unwrap(),
         expected_value,
@@ -1359,7 +1435,11 @@ async fn test_meta_decrement_with_no_flags() {
     assert!(decr_result.is_none());
 
     // Verify that the key was decremented by 1
-    let get_result = client.meta_get(key, Some(&["v"])).await.unwrap().unwrap();
+    let get_result = client
+        .meta_get(key, false, None, Some(&["v"]))
+        .await
+        .unwrap()
+        .unwrap();
 
     assert_eq!(
         String::from_utf8(get_result.data.unwrap()).unwrap(),
@@ -1387,7 +1467,11 @@ async fn test_meta_increment_with_in_quiet_mode() {
 
     assert!(result.is_none());
 
-    let get_result = client.meta_get(key, Some(&["v"])).await.unwrap().unwrap();
+    let get_result = client
+        .meta_get(key, false, None, Some(&["v"]))
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(
         String::from_utf8(get_result.data.unwrap()).unwrap(),
         expected_value,
@@ -1462,7 +1546,11 @@ async fn test_meta_increment_with_matching_cas_flag() {
         .await
         .unwrap();
 
-    let get_result = client.meta_get(key, Some(&["v"])).await.unwrap().unwrap();
+    let get_result = client
+        .meta_get(key, false, None, Some(&["v"]))
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(
         String::from_utf8(get_result.data.unwrap()).unwrap(),
         expected_value,
@@ -1630,7 +1718,10 @@ async fn test_meta_increment_sets_new_key_with_n_and_j_flags() {
 
     let mut client = setup_client(&[key]).await;
 
-    let get_result = client.meta_get(key, Some(&["v"])).await.unwrap();
+    let get_result = client
+        .meta_get(key, false, None, Some(&["v"]))
+        .await
+        .unwrap();
     assert!(get_result.is_none());
 
     let flags = ["N9001", "J99", "v", "t"];
