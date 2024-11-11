@@ -1106,7 +1106,10 @@ async fn test_meta_delete_existing_key_no_flags() {
     client.meta_set(key, value, None).await.unwrap();
 
     // Delete the key without any flags
-    let delete_result = client.meta_delete(key, None).await.unwrap();
+    let delete_result = client
+        .meta_delete(key, false, None, None)
+        .await
+        .unwrap();
 
     // Expect None as the key and no meta  flags were provided
     assert!(delete_result.is_none());
@@ -1128,8 +1131,11 @@ async fn test_meta_delete_existing_key_with_quiet_flag() {
     // Set the key using meta_set
     client.meta_set(key, value, None).await.unwrap();
 
-    // Delete the key with the "q" flag
-    let delete_result = client.meta_delete(key, Some(&["q"])).await.unwrap();
+    // Use `is_quiet = true` to write q flag
+    let delete_result = client
+        .meta_delete(key, true, None, None)
+        .await
+        .unwrap();
 
     // Expect None as the key was successfully deleted
     assert!(delete_result.is_none());
@@ -1148,7 +1154,9 @@ async fn test_meta_delete_nonexistent_key() {
     let mut client = setup_client(&[key]).await;
 
     // Attempt to delete a non-existent key
-    let delete_result = client.meta_delete(key, None).await;
+    let delete_result = client
+        .meta_delete(key, false, None, None)
+        .await;
 
     // Expect an error as the key does not exist
     assert!(matches!(
@@ -1166,7 +1174,9 @@ async fn test_meta_delete_key_too_long() {
     let mut client = setup_client(&[&key]).await;
 
     // Attempt to delete the key that is too long
-    let delete_result = client.meta_delete(&key, None).await;
+    let delete_result = client
+        .meta_delete(&key, false, None, None)
+        .await;
 
     // Expect an error indicating the key is too long
     assert!(matches!(
@@ -1192,7 +1202,10 @@ async fn test_meta_delete_with_matching_cas_flags() {
         .unwrap();
 
     // Attempt to delete with the correct CAS value
-    let delete_result = client.meta_delete(key, Some(&["C12345"])).await.unwrap();
+    let delete_result = client
+        .meta_delete(key, false, None, Some(&["C12345"]))
+        .await
+        .unwrap();
 
     // Expect None as the key was successfully deleted
     assert!(delete_result.is_none());
@@ -1219,7 +1232,9 @@ async fn test_meta_delete_with_mismatched_cas_flags() {
         .unwrap();
 
     // Attempt to delete with the mismatched CAS value
-    let delete_result = client.meta_delete(key, Some(&["C54321"])).await;
+    let delete_result = client
+        .meta_delete(key, false, None, Some(&["C54321"]))
+        .await;
 
     // Expect an error due to CAS mismatch
     assert!(matches!(
@@ -1245,7 +1260,7 @@ async fn test_meta_delete_invalidates_key() {
 
     // Delete the key using the I flag (invalidate)
     let delete_result = client
-        .meta_delete(key, Some(&["I"]))
+        .meta_delete(key, false, None, Some(&["I"]))
         .await
         .expect("Failed to delete key with meta_delete");
 
@@ -1302,7 +1317,7 @@ async fn test_meta_delete_invalidates_key_and_updates_ttl() {
 
     // Invalidate the key using the I flag and update the TTL to 60 seconds
     let delete_result = client
-        .meta_delete(key, Some(&["I", "T60"]))
+        .meta_delete(key, false, None, Some(&["I", "T60"]))
         .await
         .expect("Failed to delete key with meta_delete");
 
@@ -1360,7 +1375,7 @@ async fn test_meta_delete_tombstones_key() {
 
     // Invalidate the key using the I flag and update the TTL to 60 seconds
     let delete_result = client
-        .meta_delete(key, Some(&["x"]))
+        .meta_delete(key, false, None, Some(&["x"]))
         .await
         .expect("Failed to tombstone key with meta_delete");
 
