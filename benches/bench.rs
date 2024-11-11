@@ -149,7 +149,7 @@ fn bench_meta_set_small(c: &mut Criterion) {
 
             let start = std::time::Instant::now();
             for _ in 0..iters {
-                let _ = client.meta_set("foo", "bar", None).await;
+                let _ = client.meta_set("foo", "bar", false, None, None).await;
             }
             start.elapsed()
         });
@@ -168,7 +168,7 @@ fn bench_meta_set_large(c: &mut Criterion) {
                 let mut client = setup_client().await;
                 let start = std::time::Instant::now();
                 for _ in 0..iters {
-                    let _ = client.meta_set(&key, &value, None).await;
+                    let _ = client.meta_set(&key, &value, false, None, None).await;
                 }
                 start.elapsed()
             }

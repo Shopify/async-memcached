@@ -293,7 +293,7 @@ async fn test_meta_set_with_no_flags() {
     let mut client = setup_client(&[key]).await;
 
     // Set the key using meta_set
-    let result = client.meta_set(key, value, None).await;
+    let result = client.meta_set(key, value, false, None, None).await;
     assert!(
         result.is_ok(),
         "Failed to set key using meta_set: {:?}",
@@ -325,10 +325,12 @@ async fn test_meta_set_with_opaque_token() {
     let value = "test-value";
     let mut client = setup_client(&[key]).await;
 
-    let meta_flags = ["T3600", "F42", "Oopaque-token"];
+    let meta_flags = ["T3600", "F42"];
 
     // Set the key using meta_set
-    let set_result = client.meta_set(key, value, Some(&meta_flags)).await;
+    let set_result = client
+        .meta_set(key, value, false, Some(b"opaque-token"), Some(&meta_flags))
+        .await;
     assert!(
         set_result.is_ok(),
         "Failed to set key using meta_set: {:?}",
@@ -372,7 +374,9 @@ async fn test_meta_set_with_k_flag() {
     let meta_flags = ["MS", "T3600", "F42", "k"];
 
     // Set the key using meta_set
-    let set_result = client.meta_set(key, value, Some(&meta_flags)).await;
+    let set_result = client
+        .meta_set(key, value, false, None, Some(&meta_flags))
+        .await;
     assert!(
         set_result.is_ok(),
         "Failed to set key using meta_set: {:?}",
@@ -419,7 +423,9 @@ async fn test_meta_set_with_cas_semantics_on_nonexistent_key() {
 
     let meta_flags = ["C12321"];
 
-    let set_result = client.meta_set(key, value, Some(&meta_flags)).await;
+    let set_result = client
+        .meta_set(key, value, false, None, Some(&meta_flags))
+        .await;
     assert!(
         set_result.is_err(),
         "meta_set should have returned an error for a nonexistent key with CAS semantics"
@@ -436,7 +442,9 @@ async fn test_meta_set_with_cas_match_on_key_that_exists() {
 
     // Set the key using meta_set to prepopulate, use E flag to set CAS value
     let meta_flags = ["MS", "E12321"];
-    let set_result = client.meta_set(key, value, Some(&meta_flags)).await;
+    let set_result = client
+        .meta_set(key, value, false, None, Some(&meta_flags))
+        .await;
     assert!(
         set_result.is_ok(),
         "Failed to set key using meta_set: {:?}",
@@ -462,7 +470,9 @@ async fn test_meta_set_with_cas_match_on_key_that_exists() {
     let meta_flags = ["C12321"];
     let new_value = "new-value";
 
-    let set_result = client.meta_set(key, new_value, Some(&meta_flags)).await;
+    let set_result = client
+        .meta_set(key, new_value, false, None, Some(&meta_flags))
+        .await;
     assert!(
         set_result.is_ok(),
         "meta_set should set a new value when C flag token matches existing CAS value"
@@ -494,7 +504,9 @@ async fn test_meta_set_with_cas_mismatch_on_key_that_exists() {
 
     // Set the key using meta_set to prepopulate, use E flag to set CAS value
     let meta_flags = ["MS", "E99999"];
-    let set_result = client.meta_set(key, value, Some(&meta_flags)).await;
+    let set_result = client
+        .meta_set(key, value, false, None, Some(&meta_flags))
+        .await;
     assert!(
         set_result.is_ok(),
         "Failed to set key using meta_set: {:?}",
@@ -520,7 +532,9 @@ async fn test_meta_set_with_cas_mismatch_on_key_that_exists() {
     let meta_flags = ["C12321"];
     let new_value = "new-value";
 
-    let set_result = client.meta_set(key, new_value, Some(&meta_flags)).await;
+    let set_result = client
+        .meta_set(key, new_value, false, None, Some(&meta_flags))
+        .await;
     assert!(
         set_result.is_err(),
         "meta_set should err when C token doesn't match existing CAS value"
@@ -537,7 +551,9 @@ async fn test_meta_set_invalidate_on_expired_cas() {
 
     // Set the key using meta_set to prepopulate, use E flag to set CAS value
     let meta_flags = ["MS", "E99999"];
-    let set_result = client.meta_set(key, value, Some(&meta_flags)).await;
+    let set_result = client
+        .meta_set(key, value, false, None, Some(&meta_flags))
+        .await;
     assert!(
         set_result.is_ok(),
         "Failed to set key using meta_set: {:?}",
@@ -548,7 +564,9 @@ async fn test_meta_set_invalidate_on_expired_cas() {
     let meta_flags = ["C1", "I"];
     let new_value = "INVALID";
 
-    let set_result = client.meta_set(key, new_value, Some(&meta_flags)).await;
+    let set_result = client
+        .meta_set(key, new_value, false, None, Some(&meta_flags))
+        .await;
     assert!(
         set_result.is_ok(),
         "meta_set should invalidate the key when I flag is used with a C flag token that is lower than the existing CAS value"
@@ -581,7 +599,9 @@ async fn test_meta_set_invalidate_on_non_expired_cas() {
 
     // Set the key using meta_set to prepopulate, use E flag to set CAS value
     let meta_flags = ["MS", "E1"];
-    let set_result = client.meta_set(key, value, Some(&meta_flags)).await;
+    let set_result = client
+        .meta_set(key, value, false, None, Some(&meta_flags))
+        .await;
     assert!(
         set_result.is_ok(),
         "Failed to set key using meta_set: {:?}",
@@ -592,7 +612,9 @@ async fn test_meta_set_invalidate_on_non_expired_cas() {
     let meta_flags = ["C9999999", "I"];
     let new_value = "INVALID";
 
-    let set_result = client.meta_set(key, new_value, Some(&meta_flags)).await;
+    let set_result = client
+        .meta_set(key, new_value, false, None, Some(&meta_flags))
+        .await;
     assert!(
         set_result.is_err(),
         "meta_set should not invalidate the key when I flag is used with a C flag token that is greater than the existing CAS value"
@@ -612,7 +634,7 @@ async fn test_meta_set_in_add_mode() {
 
     // Set the key using meta_set to pre-populate (in add mode)
     let set_result = client
-        .meta_set(key, original_value, Some(&meta_flags))
+        .meta_set(key, original_value, false, None, Some(&meta_flags))
         .await;
     assert!(
         set_result.is_ok(),
@@ -637,7 +659,9 @@ async fn test_meta_set_in_add_mode() {
     meta_flags = ["ME", "F42"];
 
     // Set the key using meta_set again, this should fail with Status::NotStored
-    let add_result = client.meta_set(key, new_value, Some(&meta_flags)).await;
+    let add_result = client
+        .meta_set(key, new_value, false, None, Some(&meta_flags))
+        .await;
     let result = add_result.unwrap_err();
     assert_eq!(Error::Protocol(Status::NotStored), result);
 
@@ -668,7 +692,7 @@ async fn test_meta_set_existing_key_in_prepend_mode() {
 
     // Set the key using meta_set to pre-populate (in set mode)
     let set_result = client
-        .meta_set(key, original_value, Some(&meta_flags))
+        .meta_set(key, original_value, false, None, Some(&meta_flags))
         .await;
     assert!(
         set_result.is_ok(),
@@ -694,7 +718,9 @@ async fn test_meta_set_existing_key_in_prepend_mode() {
     let meta_flags = ["MP", "F42"];
 
     // Set the key using meta_set again, this should fail with Status::NotStored
-    let prepend_result = client.meta_set(key, new_value, Some(&meta_flags)).await;
+    let prepend_result = client
+        .meta_set(key, new_value, false, None, Some(&meta_flags))
+        .await;
     assert!(
         prepend_result.is_ok(),
         "Failed to set key using meta_set: {:?}",
@@ -728,7 +754,7 @@ async fn test_meta_set_nonexistent_key_in_prepend_mode() {
 
     // Set the key using meta_set to pre-populate (in prepend mode)
     let set_result = client
-        .meta_set(key, original_value, Some(&meta_flags))
+        .meta_set(key, original_value, false, None, Some(&meta_flags))
         .await;
     assert!(
         set_result.is_err(),
@@ -750,7 +776,7 @@ async fn test_meta_set_existing_key_in_append_mode() {
 
     // Set the key using meta_set to pre-populate (in set mode)
     let set_result = client
-        .meta_set(key, original_value, Some(&meta_flags))
+        .meta_set(key, original_value, false, None, Some(&meta_flags))
         .await;
     assert!(
         set_result.is_ok(),
@@ -776,7 +802,9 @@ async fn test_meta_set_existing_key_in_append_mode() {
     let meta_flags = ["MA", "F42"];
 
     // Set the key using meta_set again, this should fail with Status::NotStored
-    let append_result = client.meta_set(key, new_value, Some(&meta_flags)).await;
+    let append_result = client
+        .meta_set(key, new_value, false, None, Some(&meta_flags))
+        .await;
     assert!(
         append_result.is_ok(),
         "Failed to set key using meta_set: {:?}",
@@ -810,7 +838,7 @@ async fn test_meta_set_nonexistent_key_in_append_mode() {
 
     // Set the key using meta_set to pre-populate (in prepend mode)
     let set_result = client
-        .meta_set(key, original_value, Some(&meta_flags))
+        .meta_set(key, original_value, false, None, Some(&meta_flags))
         .await;
     assert!(
         set_result.is_err(),
@@ -832,7 +860,7 @@ async fn test_meta_set_nonexistent_key_in_append_mode_with_autovivify() {
 
     // Set the key using meta_set to pre-populate (in set mode)
     let set_result = client
-        .meta_set(key, original_value, Some(&meta_flags))
+        .meta_set(key, original_value, false, None, Some(&meta_flags))
         .await;
     assert!(
         set_result.is_ok(),
@@ -868,7 +896,7 @@ async fn test_meta_set_existing_key_in_replace_mode() {
 
     // Set the key using meta_set to pre-populate (in set mode)
     let set_result = client
-        .meta_set(key, original_value, Some(&meta_flags))
+        .meta_set(key, original_value, false, None, Some(&meta_flags))
         .await;
     assert!(
         set_result.is_ok(),
@@ -894,7 +922,9 @@ async fn test_meta_set_existing_key_in_replace_mode() {
     let meta_flags = ["MR", "F42"];
 
     // Set the key using meta_set again, this should fail with Status::NotStored
-    let replace_result = client.meta_set(key, new_value, Some(&meta_flags)).await;
+    let replace_result = client
+        .meta_set(key, new_value, false, None, Some(&meta_flags))
+        .await;
     assert!(
         replace_result.is_ok(),
         "Failed to set key using meta_set: {:?}",
@@ -928,7 +958,7 @@ async fn test_meta_set_nonexistent_key_in_replace_mode() {
 
     // Set the key using meta_set to pre-populate (in replace mode)
     let set_result = client
-        .meta_set(key, original_value, Some(&meta_flags))
+        .meta_set(key, original_value, false, None, Some(&meta_flags))
         .await;
     assert!(
         set_result.is_err(),
@@ -946,9 +976,9 @@ async fn test_quiet_mode_meta_set() {
 
     let mut client = setup_client(&[key]).await;
 
-    let flags = ["k", "q"];
+    let flags = ["k"];
 
-    let result = client.meta_set(key, value, Some(&flags)).await;
+    let result = client.meta_set(key, value, true, None, Some(&flags)).await;
 
     assert!(result.is_ok());
 }
@@ -962,8 +992,10 @@ async fn test_quiet_mode_meta_set_with_cas_match_on_key_that_exists() {
     let mut client = setup_client(&[key]).await;
 
     // Set the key using meta_set to prepopulate, use E flag to set CAS value
-    let meta_flags = ["MS", "E12321", "q"];
-    let set_result = client.meta_set(key, value, Some(&meta_flags)).await;
+    let meta_flags = ["MS", "E12321"];
+    let set_result = client
+        .meta_set(key, value, true, None, Some(&meta_flags))
+        .await;
     assert!(
         set_result.is_ok(),
         "Failed to set key using meta_set: {:?}",
@@ -986,10 +1018,12 @@ async fn test_quiet_mode_meta_set_with_cas_match_on_key_that_exists() {
     assert_eq!(get_value.cas.unwrap(), 12321);
 
     // Set the key again using the force-set CAS value via C flag
-    let meta_flags = ["C12321", "q"];
+    let meta_flags = ["C12321"];
     let new_value = "new-value";
 
-    let set_result = client.meta_set(key, new_value, Some(&meta_flags)).await;
+    let set_result = client
+        .meta_set(key, new_value, true, None, Some(&meta_flags))
+        .await;
     assert!(
         set_result.is_ok(),
         "meta_set should set a new value when C flag token matches existing CAS value"
@@ -1019,9 +1053,11 @@ async fn test_quiet_mode_meta_set_with_cas_semantics_on_nonexistent_key() {
     let value = "test-value";
     let mut client = setup_client(&[key]).await;
 
-    let meta_flags = ["C12321", "q"];
+    let meta_flags = ["C12321"];
 
-    let set_result = client.meta_set(key, value, Some(&meta_flags)).await;
+    let set_result = client
+        .meta_set(key, value, true, None, Some(&meta_flags))
+        .await;
     assert!(
         set_result.is_err(),
         "meta_set should have returned an error for a nonexistent key with CAS semantics"
@@ -1038,7 +1074,9 @@ async fn test_quiet_mode_meta_set_with_cas_mismatch_on_key_that_exists() {
 
     // Set the key using meta_set to prepopulate, use E flag to set CAS value
     let meta_flags = ["MS", "E99999"];
-    let set_result = client.meta_set(key, value, Some(&meta_flags)).await;
+    let set_result = client
+        .meta_set(key, value, true, None, Some(&meta_flags))
+        .await;
     assert!(
         set_result.is_ok(),
         "Failed to set key using meta_set: {:?}",
@@ -1061,10 +1099,12 @@ async fn test_quiet_mode_meta_set_with_cas_mismatch_on_key_that_exists() {
     assert_eq!(get_value.cas.unwrap(), 99999);
 
     // Try to set the key again with a CAS value that doesn't match
-    let meta_flags = ["C12321", "q"];
+    let meta_flags = ["C12321"];
     let new_value = "new-value";
 
-    let set_result = client.meta_set(key, new_value, Some(&meta_flags)).await;
+    let set_result = client
+        .meta_set(key, new_value, true, None, Some(&meta_flags))
+        .await;
     assert!(
         set_result.is_err(),
         "meta_set should err when C token doesn't match existing CAS value"
@@ -1080,11 +1120,11 @@ async fn test_quiet_mode_meta_set_nonexistent_key_in_replace_mode() {
 
     let mut client = setup_client(&[key]).await;
 
-    let meta_flags = ["MR", "F24", "q"];
+    let meta_flags = ["MR", "F24"];
 
     // Set the key using meta_set to pre-populate (in replace mode)
     let set_result = client
-        .meta_set(key, original_value, Some(&meta_flags))
+        .meta_set(key, original_value, true, None, Some(&meta_flags))
         .await;
     assert!(
         set_result.is_err(),
@@ -1103,13 +1143,13 @@ async fn test_meta_delete_existing_key_no_flags() {
     let mut client = setup_client(&[key]).await;
 
     // Set the key using meta_set
-    client.meta_set(key, value, None).await.unwrap();
-
-    // Delete the key without any flags
-    let delete_result = client
-        .meta_delete(key, false, None, None)
+    client
+        .meta_set(key, value, false, None, None)
         .await
         .unwrap();
+
+    // Delete the key without any flags
+    let delete_result = client.meta_delete(key, false, None, None).await.unwrap();
 
     // Expect None as the key and no meta  flags were provided
     assert!(delete_result.is_none());
@@ -1129,13 +1169,13 @@ async fn test_meta_delete_existing_key_with_quiet_flag() {
     let mut client = setup_client(&[key]).await;
 
     // Set the key using meta_set
-    client.meta_set(key, value, None).await.unwrap();
-
-    // Use `is_quiet = true` to write q flag
-    let delete_result = client
-        .meta_delete(key, true, None, None)
+    client
+        .meta_set(key, value, false, None, None)
         .await
         .unwrap();
+
+    // Use `is_quiet = true` to write q flag
+    let delete_result = client.meta_delete(key, true, None, None).await.unwrap();
 
     // Expect None as the key was successfully deleted
     assert!(delete_result.is_none());
@@ -1154,9 +1194,7 @@ async fn test_meta_delete_nonexistent_key() {
     let mut client = setup_client(&[key]).await;
 
     // Attempt to delete a non-existent key
-    let delete_result = client
-        .meta_delete(key, false, None, None)
-        .await;
+    let delete_result = client.meta_delete(key, false, None, None).await;
 
     // Expect an error as the key does not exist
     assert!(matches!(
@@ -1174,9 +1212,7 @@ async fn test_meta_delete_key_too_long() {
     let mut client = setup_client(&[&key]).await;
 
     // Attempt to delete the key that is too long
-    let delete_result = client
-        .meta_delete(&key, false, None, None)
-        .await;
+    let delete_result = client.meta_delete(&key, false, None, None).await;
 
     // Expect an error indicating the key is too long
     assert!(matches!(
@@ -1197,7 +1233,7 @@ async fn test_meta_delete_with_matching_cas_flags() {
     // Set the key using meta_set with a specific CAS value
     let meta_flags = ["E12345"];
     client
-        .meta_set(key, value, Some(&meta_flags))
+        .meta_set(key, value, false, None, Some(&meta_flags))
         .await
         .unwrap();
 
@@ -1227,7 +1263,7 @@ async fn test_meta_delete_with_mismatched_cas_flags() {
     // Set the key using meta_set with a specific CAS value
     let meta_flags = ["E12345"];
     client
-        .meta_set(key, value, Some(&meta_flags))
+        .meta_set(key, value, false, None, Some(&meta_flags))
         .await
         .unwrap();
 
@@ -1254,7 +1290,7 @@ async fn test_meta_delete_invalidates_key() {
 
     // Set the key using meta_set
     client
-        .meta_set(key, value, None)
+        .meta_set(key, value, false, None, None)
         .await
         .expect("Failed to set key with meta_set");
 
@@ -1304,7 +1340,7 @@ async fn test_meta_delete_invalidates_key_and_updates_ttl() {
 
     // Set the key using meta_set
     client
-        .meta_set(key, value, Some(&["T1234"]))
+        .meta_set(key, value, false, None, Some(&["T1234"]))
         .await
         .expect("Failed to set key with meta_set");
 
@@ -1362,7 +1398,7 @@ async fn test_meta_delete_tombstones_key() {
 
     // Set the key using meta_set
     client
-        .meta_set(key, value, Some(&["T1234"]))
+        .meta_set(key, value, false, None, Some(&["T1234"]))
         .await
         .expect("Failed to set key with meta_set");
 
@@ -1439,7 +1475,10 @@ async fn test_meta_decrement_with_no_flags() {
 
     let mut client = setup_client(&[key]).await;
 
-    client.meta_set(key, initial_value, None).await.unwrap();
+    client
+        .meta_set(key, initial_value, false, None, None)
+        .await
+        .unwrap();
 
     let decr_result = client
         .meta_decrement(key, false, None, Some(91), None)
@@ -1552,7 +1591,7 @@ async fn test_meta_increment_with_matching_cas_flag() {
 
     // Set the initial value with a specific CAS value
     client
-        .meta_set(key, initial_value, Some(&["E2002"]))
+        .meta_set(key, initial_value, false, None, Some(&["E2002"]))
         .await
         .unwrap();
 
@@ -1584,7 +1623,7 @@ async fn test_meta_increment_with_mismatched_cas_flag() {
 
     // Set the initial value with a specific CAS value
     client
-        .meta_set(key, initial_value, Some(&["E2002"]))
+        .meta_set(key, initial_value, false, None, Some(&["E2002"]))
         .await
         .unwrap();
 
@@ -1610,7 +1649,10 @@ async fn test_meta_increment_with_invalid_flags() {
 
     let mut client = setup_client(&[key]).await;
 
-    client.meta_set(key, initial_value, None).await.unwrap();
+    client
+        .meta_set(key, initial_value, false, None, None)
+        .await
+        .unwrap();
 
     // Perform arithmetic increment with invalid flag
     let flags = ["invalid_flag"];
@@ -1637,7 +1679,10 @@ async fn test_meta_increment_with_specified_delta() {
     let meta_flags = ["v"];
     let mut client = setup_client(&[key]).await;
 
-    client.meta_set(key, initial_value, None).await.unwrap();
+    client
+        .meta_set(key, initial_value, false, None, None)
+        .await
+        .unwrap();
 
     let incr_result = client
         .meta_increment(key, false, None, Some(delta), Some(&meta_flags))
@@ -1662,7 +1707,10 @@ async fn test_meta_decrement_with_specified_delta() {
     let meta_flags = ["v"];
     let mut client = setup_client(&[key]).await;
 
-    client.meta_set(key, initial_value, None).await.unwrap();
+    client
+        .meta_set(key, initial_value, false, None, None)
+        .await
+        .unwrap();
 
     let decr_result = client
         .meta_decrement(key, false, None, Some(delta), Some(&meta_flags))
@@ -1687,7 +1735,10 @@ async fn test_meta_increment_overflows_with_proper_delta_when_incrementing_past_
     let meta_flags = ["v"];
     let mut client = setup_client(&[key]).await;
 
-    client.meta_set(key, initial_value, None).await.unwrap();
+    client
+        .meta_set(key, initial_value, false, None, None)
+        .await
+        .unwrap();
 
     let incr_result = client
         .meta_increment(key, false, None, Some(delta), Some(&meta_flags))
@@ -1712,7 +1763,10 @@ async fn test_meta_decrement_does_not_decrement_below_zero() {
     let meta_flags = ["v"];
     let mut client = setup_client(&[key]).await;
 
-    client.meta_set(key, initial_value, None).await.unwrap();
+    client
+        .meta_set(key, initial_value, false, None, None)
+        .await
+        .unwrap();
 
     let decr_result = client
         .meta_decrement(key, false, None, Some(delta), Some(&meta_flags))
@@ -1766,7 +1820,10 @@ async fn test_meta_increment_prefers_explicit_parameters_over_meta_flags() {
     let meta_flags = ["v", "D9001", "MD", "q", "O1001"];
     let mut client = setup_client(&[key]).await;
 
-    client.meta_set(key, initial_value, None).await.unwrap();
+    client
+        .meta_set(key, initial_value, false, None, None)
+        .await
+        .unwrap();
 
     let incr_result = client
         .meta_increment(key, false, Some(opaque), Some(delta), Some(&meta_flags))
@@ -1792,7 +1849,10 @@ async fn test_meta_increment_uses_meta_flags_when_no_explicit_parameters_are_pro
     let meta_flags = ["v", "D50", "O1001"];
     let mut client = setup_client(&[key]).await;
 
-    client.meta_set(key, initial_value, None).await.unwrap();
+    client
+        .meta_set(key, initial_value, false, None, None)
+        .await
+        .unwrap();
 
     let incr_result = client
         .meta_increment(key, false, None, None, Some(&meta_flags))
@@ -1819,7 +1879,10 @@ async fn test_meta_increment_ignores_mode_switch_flag() {
     let meta_flags = ["v", "MD"];
     let mut client = setup_client(&[key]).await;
 
-    client.meta_set(key, initial_value, None).await.unwrap();
+    client
+        .meta_set(key, initial_value, false, None, None)
+        .await
+        .unwrap();
 
     let incr_result = client
         .meta_increment(key, false, None, Some(delta), Some(&meta_flags))
@@ -1843,7 +1906,10 @@ async fn test_meta_increment_raises_error_when_opaque_is_too_long() {
 
     let mut client = setup_client(&[key]).await;
 
-    client.meta_set(key, initial_value, None).await.unwrap();
+    client
+        .meta_set(key, initial_value, false, None, None)
+        .await
+        .unwrap();
 
     let incr_result = client
         .meta_increment(key, false, Some(opaque.as_bytes()), None, None)
