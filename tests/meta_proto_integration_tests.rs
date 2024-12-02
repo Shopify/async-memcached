@@ -337,6 +337,33 @@ async fn test_meta_get_uses_meta_flags_when_no_explicit_parameters_are_provided(
 
 #[ignore = "Relies on a running memcached server"]
 #[tokio::test]
+#[parallel]
+async fn test_meta_get_uses_is_quiet_param_and_ignores_q_flag() {
+    let key = "meta-get-uses-is-quiet-param-and-ignores-q-flag";
+
+    let meta_flags = ["v", "q"];
+    let mut client = setup_client(&[key]).await;
+
+    // skip setting the key, using is_quiet = false should still allow EN response
+
+    let get_result = client.meta_get(key, false, None, Some(&meta_flags)).await;
+
+    assert!(
+        get_result.is_ok(),
+        "Failed to get key using meta_get: {:?}",
+        get_result
+    );
+
+    let get_result = get_result.unwrap();
+    assert!(
+        get_result.is_none(),
+        "Cache miss in quiet mode should return Ok(None): {:?}",
+        get_result
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
 async fn test_meta_set_with_no_flags() {
     let key = "meta-set-test-key";
     let value = "test-value";
@@ -1187,6 +1214,73 @@ async fn test_quiet_mode_meta_set_nonexistent_key_in_replace_mode() {
 #[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
+async fn test_meta_set_prefers_explicit_parameters_over_meta_flags() {
+    let key = "meta-set-prefers-explicit-parameters-over-meta-flags";
+    let value = "test-value";
+    let opaque = b"prefer-the-param";
+
+    let meta_flags = ["q", "O1001"];
+    let mut client = setup_client(&[key]).await;
+
+    let set_result = client
+        .meta_set(key, value, false, Some(opaque), Some(&meta_flags))
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(set_result.opaque_token.unwrap(), opaque);
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_set_uses_meta_flags_when_no_explicit_parameters_are_provided() {
+    let key = "meta-set-uses-meta-flags-when-no-explicit-parameters-are-provided";
+    let value = "test-value";
+
+    let meta_flags = ["O1001"];
+    let mut client = setup_client(&[key]).await;
+
+    let set_result = client
+        .meta_set(key, value, false, None, Some(&meta_flags))
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(set_result.opaque_token.unwrap(), "1001".as_bytes());
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_set_uses_is_quiet_and_ignores_q_flag() {
+    let key = "meta-set-uses-is-quiet-and-ignores-q-flag";
+    let value = "test-value";
+
+    let meta_flags = ["q"];
+    let mut client = setup_client(&[key]).await;
+
+    let set_result = client
+        .meta_set(key, value, true, None, Some(&meta_flags))
+        .await;
+
+    assert!(
+        set_result.is_ok(),
+        "Failed to set key using meta_set: {:?}",
+        set_result
+    );
+
+    let set_result = set_result.unwrap();
+    assert!(
+        set_result.is_none(),
+        "Successful set in quiet mode should return Ok(None): {:?}",
+        set_result
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
 async fn test_meta_delete_existing_key_no_flags() {
     let key = "meta-delete-test-key-no-flags";
     let value = "test-value";
@@ -1481,6 +1575,69 @@ async fn test_meta_delete_tombstones_key() {
 
     assert_eq!(get_result.ttl_remaining.unwrap(), -1);
     assert!(get_result.data.is_none());
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_delete_prefers_explicit_parameters_over_meta_flags() {
+    let key = "meta-delete-prefers-explicit-parameters-over-meta-flags";
+    let opaque = b"prefer-the-param";
+    let value = "test-value";
+
+    let meta_flags = ["q", "O1001"];
+    let mut client = setup_client(&[key]).await;
+
+    client
+        .meta_set(key, value, false, None, Some(&meta_flags))
+        .await
+        .expect("Failed to set key with meta_set");
+
+    let delete_result = client
+        .meta_delete(key, false, Some(opaque), Some(&meta_flags))
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(delete_result.opaque_token.unwrap(), opaque);
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_delete_uses_meta_flags_when_no_explicit_parameters_are_provided() {
+    let key = "meta-delete-uses-meta-flags-when-no-explicit-parameters-are-provided";
+
+    let meta_flags = ["O1001"];
+    let mut client = setup_client(&[key]).await;
+
+    let delete_result = client
+        .meta_delete(key, false, None, Some(&meta_flags))
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(delete_result.opaque_token.unwrap(), "1001".as_bytes());
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_delete_uses_is_quiet_and_ignores_q_flag() {
+    let key = "meta-delete-uses-is-quiet-and-ignores-q-flag";
+
+    let meta_flags = ["q"];
+    let mut client = setup_client(&[key]).await;
+
+    let delete_result = client
+        .meta_delete(key, false, None, Some(&meta_flags))
+        .await;
+
+    // Expect an error as the key does not exist and is_quiet == false
+    assert!(matches!(
+        delete_result,
+        Err(Error::Protocol(Status::NotFound))
+    ));
 }
 
 #[ignore = "Relies on a running memcached server"]
