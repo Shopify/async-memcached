@@ -30,6 +30,8 @@ pub trait MetaProtocol {
     fn meta_get<K: AsRef<[u8]>>(
         &mut self,
         key: K,
+        is_quiet: bool,
+        opaque: Option<&[u8]>,
         meta_flags: Option<&[&str]>,
     ) -> impl Future<Output = Result<Option<MetaValue>, Error>>;
 
@@ -54,6 +56,8 @@ pub trait MetaProtocol {
         &mut self,
         key: K,
         value: V,
+        is_quiet: bool,
+        opaque: Option<&[u8]>,
         meta_flags: Option<&[&str]>,
     ) -> impl Future<Output = Result<Option<MetaValue>, Error>>
     where
@@ -75,6 +79,8 @@ pub trait MetaProtocol {
     fn meta_delete<K: AsRef<[u8]>>(
         &mut self,
         key: K,
+        is_quiet: bool,
+        opaque: Option<&[u8]>,
         meta_flags: Option<&[&str]>,
     ) -> impl Future<Output = Result<Option<MetaValue>, Error>>;
 
@@ -147,19 +153,38 @@ impl MetaProtocol for Client {
     async fn meta_get<K: AsRef<[u8]>>(
         &mut self,
         key: K,
+        is_quiet: bool,
+        opaque: Option<&[u8]>,
         meta_flags: Option<&[&str]>,
     ) -> Result<Option<MetaValue>, Error> {
         let kr = Self::validate_key_length(key.as_ref())?;
 
+        if let Some(opaque) = &opaque {
+            Self::validate_opaque_length(opaque)?;
+        }
+
         self.conn.write_all(b"mg ").await?;
         self.conn.write_all(kr).await?;
+
+        if let Some(opaque) = &opaque {
+            self.conn.write_all(b" O").await?;
+            self.conn.write_all(opaque.as_ref()).await?;
+        }
+
         if let Some(meta_flags) = meta_flags {
-            self.conn.write_all(b" ").await?;
-            self.conn.write_all(meta_flags.join(" ").as_bytes()).await?;
-            self.conn.write_all(b"\r\n").await?;
-            if meta_flags.contains(&"q") {
-                self.conn.write_all(b"mn\r\n").await?;
+            for flag in meta_flags {
+                // Ignore q flag and require use of param, prefer explicit opaque param over O meta flag
+                if flag.starts_with('q') || (flag.starts_with('O') && opaque.is_some()) {
+                    continue;
+                } else {
+                    self.conn.write_all(b" ").await?;
+                    self.conn.write_all(flag.as_bytes()).await?;
+                }
             }
+        }
+
+        if is_quiet {
+            self.conn.write_all(b" q\r\nmn\r\n").await?;
         } else {
             self.conn.write_all(b"\r\n").await?;
         }
@@ -183,6 +208,8 @@ impl MetaProtocol for Client {
         &mut self,
         key: K,
         value: V,
+        is_quiet: bool,
+        opaque: Option<&[u8]>,
         meta_flags: Option<&[&str]>,
     ) -> Result<Option<MetaValue>, Error>
     where
@@ -191,7 +218,6 @@ impl MetaProtocol for Client {
     {
         let kr = Self::validate_key_length(key.as_ref())?;
         let vr = value.as_bytes();
-        let mut quiet_mode = false;
 
         self.conn.write_all(b"ms ").await?;
         self.conn.write_all(kr).await?;
@@ -200,19 +226,32 @@ impl MetaProtocol for Client {
         self.conn.write_all(b" ").await?;
         self.conn.write_all(vlen.as_ref()).await?;
 
+        if let Some(opaque) = &opaque {
+            self.conn.write_all(b" O").await?;
+            self.conn.write_all(opaque.as_ref()).await?;
+        }
+
         if let Some(meta_flags) = meta_flags {
-            self.conn.write_all(b" ").await?;
-            self.conn.write_all(meta_flags.join(" ").as_bytes()).await?;
-            if meta_flags.contains(&"q") {
-                quiet_mode = true;
+            for flag in meta_flags {
+                // Ignore q flag and require use of param, prefer explicit opaque param over O meta flag
+                if flag.starts_with('q') || (flag.starts_with('O') && opaque.is_some()) {
+                    continue;
+                } else {
+                    self.conn.write_all(b" ").await?;
+                    self.conn.write_all(flag.as_bytes()).await?;
+                }
             }
+        }
+
+        if is_quiet {
+            self.conn.write_all(b" q").await?;
         }
 
         self.conn.write_all(b"\r\n").await?;
         self.conn.write_all(vr.as_ref()).await?;
         self.conn.write_all(b"\r\n").await?;
 
-        if quiet_mode {
+        if is_quiet {
             self.conn.write_all(b"mn\r\n").await?;
         }
 
@@ -234,19 +273,38 @@ impl MetaProtocol for Client {
     async fn meta_delete<K: AsRef<[u8]>>(
         &mut self,
         key: K,
+        is_quiet: bool,
+        opaque: Option<&[u8]>,
         meta_flags: Option<&[&str]>,
     ) -> Result<Option<MetaValue>, Error> {
         let kr = Self::validate_key_length(key.as_ref())?;
 
+        if let Some(opaque) = &opaque {
+            Self::validate_opaque_length(opaque)?;
+        }
+
         self.conn.write_all(b"md ").await?;
         self.conn.write_all(kr).await?;
+
+        if let Some(opaque) = &opaque {
+            self.conn.write_all(b" O").await?;
+            self.conn.write_all(opaque.as_ref()).await?;
+        }
+
         if let Some(meta_flags) = meta_flags {
-            self.conn.write_all(b" ").await?;
-            self.conn.write_all(meta_flags.join(" ").as_bytes()).await?;
-            self.conn.write_all(b"\r\n").await?;
-            if meta_flags.contains(&"q") {
-                self.conn.write_all(b"mn\r\n").await?;
+            for flag in meta_flags {
+                // Ignore q flag and require use of param, prefer explicit opaque param over O meta flag
+                if flag.starts_with('q') || (flag.starts_with('O') && opaque.is_some()) {
+                    continue;
+                } else {
+                    self.conn.write_all(b" ").await?;
+                    self.conn.write_all(flag.as_bytes()).await?;
+                }
             }
+        }
+
+        if is_quiet {
+            self.conn.write_all(b" q\r\nmn\r\n").await?;
         } else {
             self.conn.write_all(b"\r\n").await?;
         }

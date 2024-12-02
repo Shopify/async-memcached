@@ -60,7 +60,9 @@ fn bench_meta_get_small(c: &mut Criterion) {
             client.set("foo", "bar", None, None).await.unwrap();
             let start = std::time::Instant::now();
             for _ in 0..iters {
-                let _ = client.meta_get("foo", Some(&["v", "h", "t", "l"])).await;
+                let _ = client
+                    .meta_get("foo", false, None, Some(&["v", "h", "t", "l"]))
+                    .await;
             }
             start.elapsed()
         })
@@ -81,7 +83,9 @@ fn bench_meta_get_large(c: &mut Criterion) {
 
             let start = std::time::Instant::now();
             for _ in 0..iters {
-                let _ = client.meta_get(&key, Some(&["v", "h", "t", "l"])).await;
+                let _ = client
+                    .meta_get(&key, false, None, Some(&["v", "h", "t", "l"]))
+                    .await;
             }
             start.elapsed()
         });
@@ -145,7 +149,7 @@ fn bench_meta_set_small(c: &mut Criterion) {
 
             let start = std::time::Instant::now();
             for _ in 0..iters {
-                let _ = client.meta_set("foo", "bar", None).await;
+                let _ = client.meta_set("foo", "bar", false, None, None).await;
             }
             start.elapsed()
         });
@@ -164,7 +168,7 @@ fn bench_meta_set_large(c: &mut Criterion) {
                 let mut client = setup_client().await;
                 let start = std::time::Instant::now();
                 for _ in 0..iters {
-                    let _ = client.meta_set(&key, &value, None).await;
+                    let _ = client.meta_set(&key, &value, false, None, None).await;
                 }
                 start.elapsed()
             }
