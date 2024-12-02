@@ -217,7 +217,6 @@ impl Client {
     /// This operation invalidates all existing items immediately. Any items with an update time
     /// older than the time of the flush_all operation will be ignored for retrieval purposes.
     /// This operation does not free up memory taken up by the existing items.
-
     pub async fn flush_all(&mut self) -> Result<(), Error> {
         self.conn.write_all(b"flush_all\r\n").await?;
         self.conn.flush().await?;
