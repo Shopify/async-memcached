@@ -286,6 +286,57 @@ async fn test_quiet_mode_meta_get_with_k_flag_and_cache_miss() {
 
 #[ignore = "Relies on a running memcached server"]
 #[tokio::test]
+#[parallel]
+async fn test_meta_get_prefers_explicit_parameters_over_meta_flags() {
+    let key = "meta-get-prefers-explicit-parameters-over-meta-flags";
+    let value = "test-value";
+    let opaque = b"prefer-the-param";
+
+    let meta_flags = ["v", "q", "O1001"];
+    let mut client = setup_client(&[key]).await;
+
+    client
+        .meta_set(key, value, false, None, None)
+        .await
+        .unwrap();
+
+    // provide explicit parameters and meta flags, test should match explicit opaque token
+    let get_result = client
+        .meta_get(key, true, Some(opaque), Some(&meta_flags))
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(get_result.opaque_token.unwrap(), opaque);
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_get_uses_meta_flags_when_no_explicit_parameters_are_provided() {
+    let key = "meta-get-uses-meta-flags-when-no-explicit-parameters-are-provided";
+    let value = "test-value";
+
+    let meta_flags = ["v", "O1001"];
+    let mut client = setup_client(&[key]).await;
+
+    client
+        .meta_set(key, value, false, None, None)
+        .await
+        .unwrap();
+
+    let get_result = client
+        .meta_get(key, true, None, Some(&meta_flags))
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(String::from_utf8(get_result.data.unwrap()).unwrap(), value);
+    assert_eq!(get_result.opaque_token.unwrap(), "1001".as_bytes());
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
 async fn test_meta_set_with_no_flags() {
     let key = "meta-set-test-key";
     let value = "test-value";
