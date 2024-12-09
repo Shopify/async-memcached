@@ -166,28 +166,11 @@ impl MetaProtocol for Client {
         self.conn.write_all(b"mg ").await?;
         self.conn.write_all(kr).await?;
 
-        if let Some(opaque) = &opaque {
-            self.conn.write_all(b" O").await?;
-            self.conn.write_all(opaque.as_ref()).await?;
-        }
+        Self::check_and_write_opaque(self, opaque).await?;
 
-        if let Some(meta_flags) = meta_flags {
-            for flag in meta_flags {
-                // Ignore q flag and require use of param, prefer explicit opaque param over O meta flag
-                if flag.starts_with('q') || (flag.starts_with('O') && opaque.is_some()) {
-                    continue;
-                } else {
-                    self.conn.write_all(b" ").await?;
-                    self.conn.write_all(flag.as_bytes()).await?;
-                }
-            }
-        }
+        Self::check_and_write_meta_flags(self, meta_flags, opaque).await?;
 
-        if is_quiet {
-            self.conn.write_all(b" q\r\nmn\r\n").await?;
-        } else {
-            self.conn.write_all(b"\r\n").await?;
-        }
+        Self::check_and_write_quiet_mode(self, is_quiet).await?;
 
         self.conn.flush().await?;
 
@@ -231,17 +214,7 @@ impl MetaProtocol for Client {
             self.conn.write_all(opaque.as_ref()).await?;
         }
 
-        if let Some(meta_flags) = meta_flags {
-            for flag in meta_flags {
-                // Ignore q flag and require use of param, prefer explicit opaque param over O meta flag
-                if flag.starts_with('q') || (flag.starts_with('O') && opaque.is_some()) {
-                    continue;
-                } else {
-                    self.conn.write_all(b" ").await?;
-                    self.conn.write_all(flag.as_bytes()).await?;
-                }
-            }
-        }
+        Self::check_and_write_meta_flags(self, meta_flags, opaque).await?;
 
         if is_quiet {
             self.conn.write_all(b" q").await?;
@@ -286,28 +259,11 @@ impl MetaProtocol for Client {
         self.conn.write_all(b"md ").await?;
         self.conn.write_all(kr).await?;
 
-        if let Some(opaque) = &opaque {
-            self.conn.write_all(b" O").await?;
-            self.conn.write_all(opaque.as_ref()).await?;
-        }
+        Self::check_and_write_opaque(self, opaque).await?;
 
-        if let Some(meta_flags) = meta_flags {
-            for flag in meta_flags {
-                // Ignore q flag and require use of param, prefer explicit opaque param over O meta flag
-                if flag.starts_with('q') || (flag.starts_with('O') && opaque.is_some()) {
-                    continue;
-                } else {
-                    self.conn.write_all(b" ").await?;
-                    self.conn.write_all(flag.as_bytes()).await?;
-                }
-            }
-        }
+        Self::check_and_write_meta_flags(self, meta_flags, opaque).await?;
 
-        if is_quiet {
-            self.conn.write_all(b" q\r\nmn\r\n").await?;
-        } else {
-            self.conn.write_all(b"\r\n").await?;
-        }
+        Self::check_and_write_quiet_mode(self, is_quiet).await?;
 
         self.conn.flush().await?;
 
@@ -342,10 +298,7 @@ impl MetaProtocol for Client {
         self.conn.write_all(b"ma ").await?;
         self.conn.write_all(kr).await?;
 
-        if let Some(opaque) = &opaque {
-            self.conn.write_all(b" O").await?;
-            self.conn.write_all(opaque.as_ref()).await?;
-        }
+        Self::check_and_write_opaque(self, opaque).await?;
 
         // skip writing "MI" because it's default behaviour and we can save the bytes.
         if let Some(delta) = delta {
@@ -372,11 +325,7 @@ impl MetaProtocol for Client {
             }
         }
 
-        if is_quiet {
-            self.conn.write_all(b" q\r\nmn\r\n").await?;
-        } else {
-            self.conn.write_all(b"\r\n").await?;
-        }
+        Self::check_and_write_quiet_mode(self, is_quiet).await?;
 
         self.conn.flush().await?;
 
@@ -411,10 +360,7 @@ impl MetaProtocol for Client {
         self.conn.write_all(kr).await?;
         self.conn.write_all(b" MD").await?;
 
-        if let Some(opaque) = &opaque {
-            self.conn.write_all(b" O").await?;
-            self.conn.write_all(opaque.as_ref()).await?;
-        }
+        Self::check_and_write_opaque(self, opaque).await?;
 
         if let Some(delta) = delta {
             if delta != 1 {
@@ -440,11 +386,7 @@ impl MetaProtocol for Client {
             }
         }
 
-        if is_quiet {
-            self.conn.write_all(b" q\r\nmn\r\n").await?;
-        } else {
-            self.conn.write_all(b"\r\n").await?;
-        }
+        Self::check_and_write_quiet_mode(self, is_quiet).await?;
 
         self.conn.flush().await?;
 

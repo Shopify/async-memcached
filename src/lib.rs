@@ -246,6 +246,42 @@ impl Client {
         }
         Ok(opaque)
     }
+
+    async fn check_and_write_opaque(&mut self, opaque: Option<&[u8]>) -> Result<(), Error> {
+        if let Some(opaque) = &opaque {
+            self.conn.write_all(b" O").await?;
+            self.conn.write_all(opaque.as_ref()).await?;
+        }
+        Ok(())
+    }
+
+    async fn check_and_write_meta_flags(
+        &mut self,
+        meta_flags: Option<&[&str]>,
+        opaque: Option<&[u8]>,
+    ) -> Result<(), Error> {
+        if let Some(meta_flags) = meta_flags {
+            for flag in meta_flags {
+                // Ignore q flag and require use of param, prefer explicit opaque param over O meta flag
+                if flag.starts_with('q') || (flag.starts_with('O') && opaque.is_some()) {
+                    continue;
+                } else {
+                    self.conn.write_all(b" ").await?;
+                    self.conn.write_all(flag.as_bytes()).await?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn check_and_write_quiet_mode(&mut self, is_quiet: bool) -> Result<(), Error> {
+        if is_quiet {
+            self.conn.write_all(b" q\r\nmn\r\n").await?;
+        } else {
+            self.conn.write_all(b"\r\n").await?;
+        }
+        Ok(())
+    }
 }
 
 /// Asynchronous iterator for metadump operations.
