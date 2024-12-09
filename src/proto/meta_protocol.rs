@@ -200,6 +200,11 @@ impl MetaProtocol for Client {
         V: AsMemcachedValue,
     {
         let kr = Self::validate_key_length(key.as_ref())?;
+
+        if let Some(opaque) = &opaque {
+            Self::validate_opaque_length(opaque)?;
+        }
+
         let vr = value.as_bytes();
 
         self.conn.write_all(b"ms ").await?;
@@ -209,10 +214,7 @@ impl MetaProtocol for Client {
         self.conn.write_all(b" ").await?;
         self.conn.write_all(vlen.as_ref()).await?;
 
-        if let Some(opaque) = &opaque {
-            self.conn.write_all(b" O").await?;
-            self.conn.write_all(opaque.as_ref()).await?;
-        }
+        Self::check_and_write_opaque(self, opaque).await?;
 
         Self::check_and_write_meta_flags(self, meta_flags, opaque).await?;
 
