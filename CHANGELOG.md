@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `meta_set` method to the meta protocol.
 - Added `meta_delete` method to the meta protocol.
 - Added `meta_increment` and `meta_decrement` methods to the meta protocol to cover Meta Arithmetic functionality.
+- Added panic guard on `drive_receive` to prevent panics on `split_to` calls where the buffer is empty.
 
 ### Changed
 - Refactored some wall-clock benchmarks to yield more realistic results for expensive set operations.
