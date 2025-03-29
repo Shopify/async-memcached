@@ -86,7 +86,7 @@ async fn main() {
     client
         .set(increment_key, "0", None, None)
         .await
-        .expect(format!("failed to set {}", increment_key).as_str());
+        .unwrap_or_else(|_| panic!("failed to set {}", increment_key));
 
     match client.increment(increment_key, amount).await {
         Ok(value) => println!(
@@ -115,7 +115,7 @@ async fn main() {
     client
         .set(decrement_key, "10", None, None)
         .await
-        .expect(format!("failed to set {}", decrement_key).as_str());
+        .unwrap_or_else(|_| panic!("failed to set {}", decrement_key));
 
     match client.decrement(decrement_key, amount).await {
         Ok(value) => println!(

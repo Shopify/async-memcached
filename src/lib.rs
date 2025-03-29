@@ -67,7 +67,8 @@ impl Client {
             if n > self.buf.len() {
                 return Err(Status::Error(ErrorKind::Client(
                     "Buffer length is less than last read length".to_string(),
-                )).into());
+                ))
+                .into());
             }
             let _ = self.buf.split_to(n);
         }
@@ -299,7 +300,7 @@ pub struct MetadumpIter<'a> {
     done: bool,
 }
 
-impl<'a> MetadumpIter<'a> {
+impl MetadumpIter<'_> {
     /// Gets the next result for the current operation.
     ///
     /// If there is another key in the dump, `Some(Ok(KeyMetadata))` will be returned.  If there was

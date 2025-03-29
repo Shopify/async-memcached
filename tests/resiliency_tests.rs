@@ -286,7 +286,7 @@ mod tests {
 
         // Simulate a network error happening when the server responds back to the client.  A complete response is received for the first key but then
         // the connection is closed before the other responses are received.  Regardless, the server should still cache all the data.
-        let byte_limit = "STORED\r\n".as_bytes().len() + 1;
+        let byte_limit = "STORED\r\n".len() + 1;
 
         let _ = toxic_proxy
             .with_limit_data("downstream".into(), byte_limit as u32, 1.0)
