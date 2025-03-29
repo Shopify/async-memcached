@@ -60,6 +60,15 @@ impl Client {
     {
         // If we serviced a previous request, advance our buffer forward.
         if let Some(n) = self.last_read_n {
+            // Not sure how this situation occurs, but it seems to be related to transient network
+            // issues. This guard is here to prevent panics, but it's not clear what the correct
+            // behavior is. For now, we just return an error, which allows the caller to retry or
+            // fall back to the uncached data source as they see fit.
+            if n > self.buf.len() {
+                return Err(Status::Error(ErrorKind::Client(
+                    "Buffer length is less than last read length".to_string(),
+                )).into());
+            }
             let _ = self.buf.split_to(n);
         }
 
