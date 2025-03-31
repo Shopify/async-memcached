@@ -1,6 +1,6 @@
 [package]
 name = "async-memcached"
-version = "0.4.0"
+version = "0.5.0"
 authors = ["Toby Lawrence <toby@nuclearfurnace.com>"]
 edition = "2018"
 readme = "README.md"
@@ -12,7 +12,7 @@ documentation = "https://docs.rs/async-memcached"
 repository = "https://github.com/Shopify/async-memcached"
 
 [dependencies]
-bytes = "1.4"
+bytes = "1.10"
 nom = "7.1"
 dsn = "1.0"
 btoi = "0.4"
