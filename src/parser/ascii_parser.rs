@@ -215,7 +215,11 @@ pub fn parse_ascii_metadump_response(
 
 pub fn parse_ascii_stats_response(buf: &[u8]) -> Result<Option<(usize, StatsResponse)>, ErrorKind> {
     let bufn = buf.len();
-    let result = alt((value(StatsResponse::End, tag(&b"END\r\n"[..])), parse_stat_entry)).parse(buf);
+    let result = alt((
+        value(StatsResponse::End, tag(&b"END\r\n"[..])),
+        parse_stat_entry,
+    ))
+    .parse(buf);
 
     match result {
         Ok((left, response)) => {

@@ -223,11 +223,7 @@ pub(crate) fn parse_i64(buf: &[u8]) -> IResult<&[u8], i64> {
 }
 
 pub(crate) fn parse_bool(buf: &[u8]) -> IResult<&[u8], bool> {
-    alt((
-        value(true, tag(&b"yes"[..])),
-        value(false, tag(&b"no"[..])),
-    ))
-    .parse(buf)
+    alt((value(true, tag(&b"yes"[..])), value(false, tag(&b"no"[..])))).parse(buf)
 }
 
 pub(crate) fn parse_incrdecr(buf: &[u8]) -> IResult<&[u8], Response> {
