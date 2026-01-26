@@ -700,7 +700,7 @@ async fn test_set_multi_with_string_values_that_exceed_max_size() {
     let keys: Vec<String> = (0..NUM_PAIRS).map(|i| format!("multi-key{}", i)).collect();
     let mut values: Vec<String> = (0..NUM_PAIRS).map(|i| format!("value{}", i)).collect();
 
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let large_key_indices: Vec<usize> = (1..NUM_PAIRS)
         .choose_multiple(&mut rng, NUM_LARGE_KEYS)
         .into_iter()

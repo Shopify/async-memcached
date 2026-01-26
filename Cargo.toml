@@ -1,6 +1,6 @@
 [package]
 name = "async-memcached"
-version = "0.5.0"
+version = "0.5.1"
 authors = ["Toby Lawrence <toby@nuclearfurnace.com>"]
 edition = "2018"
 readme = "README.md"
@@ -13,23 +13,23 @@ repository = "https://github.com/Shopify/async-memcached"
 
 [dependencies]
 bytes = "1.10"
-nom = "7.1"
+nom = "8.0"
 dsn = "1.0"
-btoi = "0.4"
+btoi = "0.5"
 pin-project = "1.0"
 futures = "0.3"
 tokio = { version = "1.26", default-features = false, features = ["io-util"] }
 async-stream = "0.3"
-url = "2.5.2"
-toxiproxy_rust = "0.1.6"
-fxhash = "0.2.1"
+url = "2.5"
+toxiproxy_rust = "0.1"
+fxhash = "0.2"
 
 [dev-dependencies]
 lazy_static = "1.4"
 tokio = { version = "1.26", features = ["full"] }
-rand = "0.8"
-criterion = { version = "0.5.1", features = ["async_tokio"] }
-serial_test = "3.1.1"
+rand = "0.9"
+criterion = { version = "0.8", features = ["async_tokio"] }
+serial_test = "3.1"
 
 [features]
 default = []
