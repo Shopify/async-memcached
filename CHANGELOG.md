@@ -10,6 +10,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+## [0.6.0] - 2026-01-26
+
+### Changed
+
+- Updated `nom` dependency from 7.1 to 8.0 and refactored parser code to use the new `.parse()` method syntax.
+- Updated `btoi` dependency from 0.4 to 0.5.
+- Updated `rand` dev-dependency from 0.8 to 0.9.
+- Updated `criterion` dev-dependency from 0.5 to 0.8.
+
 ## [0.5.0] - 2025-03-31
 
 ### Added
