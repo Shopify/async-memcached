@@ -2,10 +2,10 @@ use btoi::{btoi, btou};
 use nom::{
     branch::alt,
     bytes::streaming::{tag, take_while_m_n},
-    character::{is_digit, streaming::crlf},
+    character::streaming::crlf,
     combinator::{map, map_res, value},
     sequence::terminated,
-    IResult,
+    AsChar, IResult, Parser,
 };
 use std::fmt;
 
@@ -215,19 +215,19 @@ impl From<MetadumpResponse> for Status {
 
 // shared parsing functions
 pub(crate) fn parse_u64(buf: &[u8]) -> IResult<&[u8], u64> {
-    map_res(take_while_m_n(1, 20, is_digit), btou)(buf)
+    map_res(take_while_m_n(1, 20, |c: u8| c.is_dec_digit()), btou).parse(buf)
 }
 
 pub(crate) fn parse_i64(buf: &[u8]) -> IResult<&[u8], i64> {
-    map_res(take_while_m_n(1, 20, is_signed_digit), btoi)(buf)
+    map_res(take_while_m_n(1, 20, is_signed_digit), btoi).parse(buf)
 }
 
 pub(crate) fn parse_bool(buf: &[u8]) -> IResult<&[u8], bool> {
-    alt((value(true, tag(b"yes")), value(false, tag(b"no"))))(buf)
+    alt((value(true, tag(&b"yes"[..])), value(false, tag(&b"no"[..])))).parse(buf)
 }
 
 pub(crate) fn parse_incrdecr(buf: &[u8]) -> IResult<&[u8], Response> {
-    terminated(map(parse_u64, Response::IncrDecr), crlf)(buf)
+    terminated(map(parse_u64, Response::IncrDecr), crlf).parse(buf)
 }
 
 pub(crate) fn is_key_char(chr: u8) -> bool {
@@ -239,5 +239,5 @@ pub(crate) fn is_signed_digit(chr: u8) -> bool {
 }
 
 pub(crate) fn parse_u32(buf: &[u8]) -> IResult<&[u8], u32> {
-    map_res(take_while_m_n(1, 10, is_digit), btou)(buf)
+    map_res(take_while_m_n(1, 10, |c: u8| c.is_dec_digit()), btou).parse(buf)
 }

@@ -5,8 +5,7 @@ use nom::{
     combinator::{map, opt, value},
     error::ErrorKind::Fail,
     multi::many0,
-    sequence::tuple,
-    IResult,
+    IResult, Parser,
 };
 
 use std::num::NonZero;
@@ -16,41 +15,45 @@ use crate::Error;
 
 pub fn parse_meta_get_status(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
     alt((
-        value(MetaResponse::Status(Status::Value), tag(b"VA ")),
-        value(MetaResponse::Status(Status::Exists), tag(b"HD")),
-        value(MetaResponse::Status(Status::NotFound), tag(b"EN")),
-        value(MetaResponse::Status(Status::NoOp), tag(b"MN\r\n")),
-    ))(buf)
+        value(MetaResponse::Status(Status::Value), tag(&b"VA "[..])),
+        value(MetaResponse::Status(Status::Exists), tag(&b"HD"[..])),
+        value(MetaResponse::Status(Status::NotFound), tag(&b"EN"[..])),
+        value(MetaResponse::Status(Status::NoOp), tag(&b"MN\r\n"[..])),
+    ))
+    .parse(buf)
 }
 
 pub fn parse_meta_set_status(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
     alt((
-        value(MetaResponse::Status(Status::Stored), tag(b"HD")),
-        value(MetaResponse::Status(Status::NotStored), tag(b"NS")),
-        value(MetaResponse::Status(Status::Exists), tag(b"EX")),
-        value(MetaResponse::Status(Status::NotFound), tag(b"NF")),
-        value(MetaResponse::Status(Status::NoOp), tag(b"MN\r\n")),
-    ))(buf)
+        value(MetaResponse::Status(Status::Stored), tag(&b"HD"[..])),
+        value(MetaResponse::Status(Status::NotStored), tag(&b"NS"[..])),
+        value(MetaResponse::Status(Status::Exists), tag(&b"EX"[..])),
+        value(MetaResponse::Status(Status::NotFound), tag(&b"NF"[..])),
+        value(MetaResponse::Status(Status::NoOp), tag(&b"MN\r\n"[..])),
+    ))
+    .parse(buf)
 }
 
 pub fn parse_meta_delete_status(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
     alt((
-        value(MetaResponse::Status(Status::Deleted), tag(b"HD")),
-        value(MetaResponse::Status(Status::NotFound), tag(b"NF")),
-        value(MetaResponse::Status(Status::Exists), tag(b"EX")),
-        value(MetaResponse::Status(Status::NoOp), tag(b"MN\r\n")),
-    ))(buf)
+        value(MetaResponse::Status(Status::Deleted), tag(&b"HD"[..])),
+        value(MetaResponse::Status(Status::NotFound), tag(&b"NF"[..])),
+        value(MetaResponse::Status(Status::Exists), tag(&b"EX"[..])),
+        value(MetaResponse::Status(Status::NoOp), tag(&b"MN\r\n"[..])),
+    ))
+    .parse(buf)
 }
 
 pub fn parse_meta_arithmetic_status(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
     alt((
-        value(MetaResponse::Status(Status::Value), tag(b"VA ")),
-        value(MetaResponse::Status(Status::Stored), tag(b"HD")),
-        value(MetaResponse::Status(Status::NotFound), tag(b"NF")),
-        value(MetaResponse::Status(Status::NotStored), tag(b"NS")),
-        value(MetaResponse::Status(Status::Exists), tag(b"EX")),
-        value(MetaResponse::Status(Status::NoOp), tag(b"MN\r\n")),
-    ))(buf)
+        value(MetaResponse::Status(Status::Value), tag(&b"VA "[..])),
+        value(MetaResponse::Status(Status::Stored), tag(&b"HD"[..])),
+        value(MetaResponse::Status(Status::NotFound), tag(&b"NF"[..])),
+        value(MetaResponse::Status(Status::NotStored), tag(&b"NS"[..])),
+        value(MetaResponse::Status(Status::Exists), tag(&b"EX"[..])),
+        value(MetaResponse::Status(Status::NoOp), tag(&b"MN\r\n"[..])),
+    ))
+    .parse(buf)
 }
 
 pub fn parse_meta_get_response(buf: &[u8]) -> Result<Option<(usize, MetaResponse)>, ErrorKind> {
@@ -320,7 +323,7 @@ pub fn take_until_size(buf: &[u8], byte_size: u32) -> IResult<&[u8], Option<&[u8
     let (extracted, remaining) = buf.split_at(size);
 
     // Ensure the remaining buffer starts with "\r\n"
-    let (remaining, _) = tag("\r\n")(remaining)?;
+    let (remaining, _) = tag("\r\n").parse(remaining)?;
 
     Ok((remaining, Some(extracted)))
 }
@@ -331,13 +334,14 @@ fn parse_meta_flag_values_as_slice(input: &[u8]) -> IResult<&[u8], Vec<(u8, Opti
         Ok((input, Vec::new()))
     } else {
         many0(map(
-            tuple((
+            (
                 space1,
                 map(take(1usize), |s: &[u8]| s[0]),
                 opt(take_while1(|c: u8| c != b'\r' && c != b' ')), // finding a space means more flags, finding \r means end of flags
-            )),
+            ),
             |(_, flag, value)| (flag, value),
-        ))(input)
+        ))
+        .parse(input)
     }
 }
 

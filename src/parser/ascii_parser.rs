@@ -4,8 +4,8 @@ use nom::{
     character::streaming::{crlf, newline},
     combinator::{map, map_res, opt, value},
     multi::fold_many0,
-    sequence::{preceded, terminated, tuple},
-    IResult,
+    sequence::{preceded, terminated},
+    IResult, Parser,
 };
 use std::str::Utf8Error;
 
@@ -17,37 +17,40 @@ use super::{
 pub fn parse_ascii_status(buf: &[u8]) -> IResult<&[u8], Response> {
     terminated(
         alt((
-            value(Response::Status(Status::Stored), tag(b"STORED")),
-            value(Response::Status(Status::NotStored), tag(b"NOT_STORED")),
-            value(Response::Status(Status::Deleted), tag(b"DELETED")),
-            value(Response::Status(Status::Touched), tag(b"TOUCHED")),
-            value(Response::Status(Status::Exists), tag(b"EXISTS")),
-            value(Response::Status(Status::NotFound), tag(b"NOT_FOUND")),
+            value(Response::Status(Status::Stored), tag(&b"STORED"[..])),
+            value(Response::Status(Status::NotStored), tag(&b"NOT_STORED"[..])),
+            value(Response::Status(Status::Deleted), tag(&b"DELETED"[..])),
+            value(Response::Status(Status::Touched), tag(&b"TOUCHED"[..])),
+            value(Response::Status(Status::Exists), tag(&b"EXISTS"[..])),
+            value(Response::Status(Status::NotFound), tag(&b"NOT_FOUND"[..])),
         )),
         crlf,
-    )(buf)
+    )
+    .parse(buf)
 }
 
 fn parse_ascii_error(buf: &[u8]) -> IResult<&[u8], Response> {
     let parser = terminated(
         alt((
-            value(ErrorKind::NonexistentCommand, tag(b"ERROR")),
-            map_res(preceded(tag(b"CLIENT_ERROR "), take_until("\r\n")), |s| {
-                std::str::from_utf8(s).map(|s| ErrorKind::Client(s.to_string()))
-            }),
-            map_res(preceded(tag(b"SERVER_ERROR "), take_until("\r\n")), |s| {
-                std::str::from_utf8(s).map(|s| ErrorKind::Server(s.to_string()))
-            }),
+            value(ErrorKind::NonexistentCommand, tag(&b"ERROR"[..])),
+            map_res(
+                preceded(tag(&b"CLIENT_ERROR "[..]), take_until("\r\n")),
+                |s| std::str::from_utf8(s).map(|s| ErrorKind::Client(s.to_string())),
+            ),
+            map_res(
+                preceded(tag(&b"SERVER_ERROR "[..]), take_until("\r\n")),
+                |s| std::str::from_utf8(s).map(|s| ErrorKind::Server(s.to_string())),
+            ),
         )),
         crlf,
     );
 
-    map(parser, |e| Response::Status(Status::Error(e)))(buf)
+    map(parser, |e| Response::Status(Status::Error(e))).parse(buf)
 }
 
 fn parse_ascii_value(buf: &[u8]) -> IResult<&[u8], Value> {
     let kf = take_while1(is_key_char);
-    let (buf, (_, key, _, flags, _, len, _, cas, _)) = tuple((
+    let (buf, (_, key, _, flags, _, len, _, cas, _)) = (
         // VALUE key flags data_len [cas id]\r\n
         // data block\r\n
         tag("VALUE "),
@@ -59,8 +62,9 @@ fn parse_ascii_value(buf: &[u8]) -> IResult<&[u8], Value> {
         opt(tag(" ")),
         opt(parse_u64),
         crlf,
-    ))(buf)?;
-    let (buf, data) = terminated(take(len), crlf)(buf)?;
+    )
+        .parse(buf)?;
+    let (buf, data) = terminated(take(len), crlf).parse(buf)?;
     Ok((
         buf,
         Value {
@@ -86,7 +90,7 @@ fn parse_ascii_data(buf: &[u8]) -> IResult<&[u8], Response> {
         Response::Data,
     );
 
-    terminated(values, tag("END\r\n"))(buf)
+    terminated(values, tag("END\r\n")).parse(buf)
 }
 
 pub fn parse_ascii_response(buf: &[u8]) -> Result<Option<(usize, Response)>, ErrorKind> {
@@ -96,7 +100,8 @@ pub fn parse_ascii_response(buf: &[u8]) -> Result<Option<(usize, Response)>, Err
         parse_ascii_error,
         parse_incrdecr,
         parse_ascii_data,
-    ))(buf);
+    ))
+    .parse(buf);
 
     match result {
         Ok((left, response)) => {
@@ -113,21 +118,22 @@ pub fn parse_ascii_response(buf: &[u8]) -> Result<Option<(usize, Response)>, Err
 fn parse_lru_crawler_errors(buf: &[u8]) -> IResult<&[u8], MetadumpResponse> {
     terminated(
         alt((
-            map_res(preceded(tag(b"BUSY "), take_until("\r\n")), |s| {
+            map_res(preceded(tag(&b"BUSY "[..]), take_until("\r\n")), |s| {
                 std::str::from_utf8(s).map(|s| MetadumpResponse::Busy(s.to_string()))
             }),
-            map_res(preceded(tag(b"BADCLASS "), take_until("\r\n")), |s| {
+            map_res(preceded(tag(&b"BADCLASS "[..]), take_until("\r\n")), |s| {
                 std::str::from_utf8(s).map(|s| MetadumpResponse::BadClass(s.to_string()))
             }),
         )),
         crlf,
-    )(buf)
+    )
+    .parse(buf)
 }
 
 fn parse_lru_crawler_metadata(buf: &[u8]) -> IResult<&[u8], MetadumpResponse> {
     // key=boo exp=-1 la=1597801411 cas=157043 fetch=yes cls=1 size=75
     // key=foo exp=-1 la=1597801394 cas=63208 fetch=yes cls=1 size=73
-    let (buf, (_, _, key, _, exp, _, la, _, cas, _, fetch, _, cls, _, size, _)) = tuple((
+    let (buf, (_, _, key, _, exp, _, la, _, cas, _, fetch, _, cls, _, size, _)) = (
         opt(newline),
         tag("key="),
         take_while1(is_key_char),
@@ -144,7 +150,8 @@ fn parse_lru_crawler_metadata(buf: &[u8]) -> IResult<&[u8], MetadumpResponse> {
         tag(" size="),
         parse_u32,
         newline,
-    ))(buf)?;
+    )
+        .parse(buf)?;
 
     Ok((
         buf,
@@ -163,12 +170,12 @@ fn parse_lru_crawler_metadata(buf: &[u8]) -> IResult<&[u8], MetadumpResponse> {
 fn parse_stat_entry(buf: &[u8]) -> IResult<&[u8], StatsResponse> {
     terminated(
         map_res(
-            tuple((
+            (
                 tag("STAT "),
                 take_while1(is_key_char),
                 tag(" "),
                 take_while1(is_key_char),
-            )),
+            ),
             |(_, key, _, value)| {
                 let keystr = std::str::from_utf8(key)?;
                 let valuestr = std::str::from_utf8(value)?;
@@ -179,7 +186,8 @@ fn parse_stat_entry(buf: &[u8]) -> IResult<&[u8], StatsResponse> {
             },
         ),
         crlf,
-    )(buf)
+    )
+    .parse(buf)
 }
 
 pub fn parse_ascii_metadump_response(
@@ -187,10 +195,11 @@ pub fn parse_ascii_metadump_response(
 ) -> Result<Option<(usize, MetadumpResponse)>, ErrorKind> {
     let bufn = buf.len();
     let result = alt((
-        value(MetadumpResponse::End, tag(b"END\r\n")),
+        value(MetadumpResponse::End, tag(&b"END\r\n"[..])),
         parse_lru_crawler_errors,
         parse_lru_crawler_metadata,
-    ))(buf);
+    ))
+    .parse(buf);
 
     match result {
         Ok((left, response)) => {
@@ -206,7 +215,11 @@ pub fn parse_ascii_metadump_response(
 
 pub fn parse_ascii_stats_response(buf: &[u8]) -> Result<Option<(usize, StatsResponse)>, ErrorKind> {
     let bufn = buf.len();
-    let result = alt((value(StatsResponse::End, tag(b"END\r\n")), parse_stat_entry))(buf);
+    let result = alt((
+        value(StatsResponse::End, tag(&b"END\r\n"[..])),
+        parse_stat_entry,
+    ))
+    .parse(buf);
 
     match result {
         Ok((left, response)) => {
