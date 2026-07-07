@@ -1,5 +1,7 @@
 use async_memcached::{AsciiProtocol, Client, Error, ErrorKind, MetaProtocol, Status};
 use serial_test::parallel;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
 
 // NOTE: Each test should run with keys unique to that test to avoid async conflicts.  Because these tests run concurrently,
 // it's possible to delete/overwrite keys created by another test before they're read.
@@ -24,6 +26,353 @@ async fn setup_client(keys: &[&str]) -> Client {
     }
 
     client
+}
+
+async fn read_until_contains(socket: &mut tokio::net::TcpStream, needle: &[u8]) -> Vec<u8> {
+    let mut buf = Vec::new();
+    let mut tmp = [0; 1024];
+
+    loop {
+        // Bounded test with timeout to avoid any potential hangs
+        let n = tokio::time::timeout(std::time::Duration::from_secs(5), socket.read(&mut tmp))
+            .await
+            .expect("timed out waiting for expected command")
+            .unwrap();
+        assert_ne!(n, 0, "socket closed before expected command was received");
+        buf.extend_from_slice(&tmp[..n]);
+
+        if buf.windows(needle.len()).any(|window| window == needle) {
+            return buf;
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum QuietMetaOperation {
+    GetError,
+    GetData,
+    GetNoop,
+    SetStored,
+    SetError,
+    DeleteDeleted,
+    DeleteError,
+    IncrementValue,
+    IncrementError,
+    DecrementValue,
+    DecrementError,
+}
+
+impl QuietMetaOperation {
+    async fn run(self, client: &mut Client) {
+        match self {
+            Self::GetError => {
+                let result = client
+                    .meta_get("bad-client-error", true, None, Some(&["badflag"]))
+                    .await;
+                assert_eq!(
+                    result,
+                    Err(Error::Protocol(Status::Error(ErrorKind::Client(
+                        "bad flag".to_string()
+                    ))))
+                );
+            }
+            Self::GetData => {
+                let result = client
+                    .meta_get("quiet-hit", true, None, Some(&["v"]))
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(result.data, Some(b"value".to_vec()));
+            }
+            Self::GetNoop => {
+                let result = tokio::time::timeout(
+                    std::time::Duration::from_secs(5),
+                    client.meta_get("quiet-miss", true, None, Some(&["v"])),
+                )
+                .await
+                .expect("quiet no-op response should not wait for an extra drain")
+                .unwrap();
+                assert_eq!(result, None);
+            }
+            Self::SetStored => {
+                let result = client
+                    .meta_set("quiet-set", "value", true, None, None)
+                    .await
+                    .unwrap();
+                assert_eq!(result, None);
+            }
+            Self::SetError => {
+                let result = client
+                    .meta_set("quiet-set-error", "value", true, None, None)
+                    .await;
+                assert_eq!(
+                    result,
+                    Err(Error::Protocol(Status::Error(ErrorKind::Client(
+                        "bad set".to_string()
+                    ))))
+                );
+            }
+            Self::DeleteDeleted => {
+                let result = client
+                    .meta_delete("quiet-delete", true, None, None)
+                    .await
+                    .unwrap();
+                assert_eq!(result, None);
+            }
+            Self::DeleteError => {
+                let result = client
+                    .meta_delete("quiet-delete-error", true, None, None)
+                    .await;
+                assert_eq!(
+                    result,
+                    Err(Error::Protocol(Status::Error(ErrorKind::Client(
+                        "bad delete".to_string()
+                    ))))
+                );
+            }
+            Self::IncrementValue => {
+                let result = client
+                    .meta_increment("quiet-increment", true, None, None, Some(&["v"]))
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(result.data, Some(b"2".to_vec()));
+            }
+            Self::IncrementError => {
+                let result = client
+                    .meta_increment(
+                        "quiet-increment-error",
+                        true,
+                        None,
+                        None,
+                        Some(&["badflag"]),
+                    )
+                    .await;
+                assert_eq!(
+                    result,
+                    Err(Error::Protocol(Status::Error(ErrorKind::Client(
+                        "bad increment".to_string()
+                    ))))
+                );
+            }
+            Self::DecrementValue => {
+                let result = client
+                    .meta_decrement("quiet-decrement", true, None, None, Some(&["v"]))
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(result.data, Some(b"1".to_vec()));
+            }
+            Self::DecrementError => {
+                let result = client
+                    .meta_decrement(
+                        "quiet-decrement-error",
+                        true,
+                        None,
+                        None,
+                        Some(&["badflag"]),
+                    )
+                    .await;
+                assert_eq!(
+                    result,
+                    Err(Error::Protocol(Status::Error(ErrorKind::Client(
+                        "bad decrement".to_string()
+                    ))))
+                );
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct QuietMetaCase {
+    name: &'static str,
+    operation: QuietMetaOperation,
+    expected_command: &'static [u8],
+    response: &'static [u8],
+}
+
+#[tokio::test]
+async fn test_quiet_meta_operations_drain_internal_noop_before_next_response() {
+    let cases = [
+        QuietMetaCase {
+            name: "meta_get error",
+            operation: QuietMetaOperation::GetError,
+            expected_command: b"mg bad-client-error badflag q\r\nmn\r\n",
+            response: b"CLIENT_ERROR bad flag\r\nMN\r\n",
+        },
+        QuietMetaCase {
+            name: "meta_get data",
+            operation: QuietMetaOperation::GetData,
+            expected_command: b"mg quiet-hit v q\r\nmn\r\n",
+            response: b"VA 5\r\nvalue\r\nMN\r\n",
+        },
+        QuietMetaCase {
+            name: "meta_get no-op",
+            operation: QuietMetaOperation::GetNoop,
+            expected_command: b"mg quiet-miss v q\r\nmn\r\n",
+            response: b"MN\r\n",
+        },
+        QuietMetaCase {
+            name: "meta_set stored",
+            operation: QuietMetaOperation::SetStored,
+            expected_command: b"ms quiet-set 5 q\r\nvalue\r\nmn\r\n",
+            response: b"HD\r\nMN\r\n",
+        },
+        QuietMetaCase {
+            name: "meta_set error",
+            operation: QuietMetaOperation::SetError,
+            expected_command: b"ms quiet-set-error 5 q\r\nvalue\r\nmn\r\n",
+            response: b"CLIENT_ERROR bad set\r\nMN\r\n",
+        },
+        QuietMetaCase {
+            name: "meta_delete deleted",
+            operation: QuietMetaOperation::DeleteDeleted,
+            expected_command: b"md quiet-delete q\r\nmn\r\n",
+            response: b"HD\r\nMN\r\n",
+        },
+        QuietMetaCase {
+            name: "meta_delete error",
+            operation: QuietMetaOperation::DeleteError,
+            expected_command: b"md quiet-delete-error q\r\nmn\r\n",
+            response: b"CLIENT_ERROR bad delete\r\nMN\r\n",
+        },
+        QuietMetaCase {
+            name: "meta_increment value",
+            operation: QuietMetaOperation::IncrementValue,
+            expected_command: b"ma quiet-increment v q\r\nmn\r\n",
+            response: b"VA 1\r\n2\r\nMN\r\n",
+        },
+        QuietMetaCase {
+            name: "meta_increment error",
+            operation: QuietMetaOperation::IncrementError,
+            expected_command: b"ma quiet-increment-error badflag q\r\nmn\r\n",
+            response: b"CLIENT_ERROR bad increment\r\nMN\r\n",
+        },
+        QuietMetaCase {
+            name: "meta_decrement value",
+            operation: QuietMetaOperation::DecrementValue,
+            expected_command: b"ma quiet-decrement MD v q\r\nmn\r\n",
+            response: b"VA 1\r\n1\r\nMN\r\n",
+        },
+        QuietMetaCase {
+            name: "meta_decrement error",
+            operation: QuietMetaOperation::DecrementError,
+            expected_command: b"ma quiet-decrement-error MD badflag q\r\nmn\r\n",
+            response: b"CLIENT_ERROR bad decrement\r\nMN\r\n",
+        },
+    ];
+
+    for case in cases {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+
+            let first_command = read_until_contains(&mut socket, b"mn\r\n").await;
+            assert_eq!(
+                first_command.as_slice(),
+                case.expected_command,
+                "{} sent unexpected first command",
+                case.name
+            );
+            socket.write_all(case.response).await.unwrap();
+
+            let second_command = read_until_contains(&mut socket, b"\r\n").await;
+            assert_eq!(
+                second_command.as_slice(),
+                b"mg next-key v\r\n",
+                "{} left the stream misaligned before the second command",
+                case.name
+            );
+            socket.write_all(b"VA 4\r\nnext\r\n").await.unwrap();
+        });
+
+        let mut client = Client::new(format!("tcp://{addr}")).await.unwrap();
+
+        case.operation.run(&mut client).await;
+
+        let result = client
+            .meta_get("next-key", false, None, Some(&["v"]))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            result.data,
+            Some(b"next".to_vec()),
+            "{} did not leave the connection reusable",
+            case.name
+        );
+
+        server.await.unwrap();
+    }
+}
+
+#[derive(Clone, Copy)]
+struct UnexpectedQuietDrainCase {
+    name: &'static str,
+    expected_command: &'static [u8],
+    response: &'static [u8],
+    expected_error: &'static str,
+}
+
+#[tokio::test]
+async fn test_quiet_meta_unexpected_drain_response_reports_response_kind() {
+    let cases = [
+        UnexpectedQuietDrainCase {
+            name: "status response",
+            expected_command: b"ms quiet-set 5 q\r\nvalue\r\nmn\r\n",
+            response: b"HD\r\nNS\r\n",
+            expected_error: "Expected quiet-mode no-op response, got status not stored",
+        },
+        UnexpectedQuietDrainCase {
+            name: "data response",
+            expected_command: b"mg quiet-hit v q\r\nmn\r\n",
+            response: b"VA 5\r\nvalue\r\nVA 4\r\noops\r\n",
+            expected_error: "Expected quiet-mode no-op response, got data response",
+        },
+    ];
+
+    for case in cases {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+
+            let command = read_until_contains(&mut socket, b"mn\r\n").await;
+            assert_eq!(
+                command.as_slice(),
+                case.expected_command,
+                "{} sent unexpected command",
+                case.name
+            );
+            socket.write_all(case.response).await.unwrap();
+        });
+
+        let mut client = Client::new(format!("tcp://{addr}")).await.unwrap();
+        let result = match case.name {
+            "status response" => {
+                client
+                    .meta_set("quiet-set", "value", true, None, None)
+                    .await
+            }
+            "data response" => client.meta_get("quiet-hit", true, None, Some(&["v"])).await,
+            _ => unreachable!(),
+        };
+
+        assert_eq!(
+            result,
+            Err(Error::Protocol(Status::Error(ErrorKind::Protocol(Some(
+                case.expected_error.to_string()
+            ))))),
+            "{} reported an unexpected error",
+            case.name
+        );
+
+        server.await.unwrap();
+    }
 }
 
 #[ignore = "Relies on a running memcached server"]

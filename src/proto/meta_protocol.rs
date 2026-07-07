@@ -1,4 +1,4 @@
-use crate::{AsMemcachedValue, Client, Error, Status};
+use crate::{AsMemcachedValue, Client, Error, ErrorKind, Status};
 
 use crate::parser::{
     parse_meta_arithmetic_response, parse_meta_delete_response, parse_meta_get_response,
@@ -9,6 +9,25 @@ use crate::parser::{MetaResponse, MetaValue};
 use std::future::Future;
 
 use tokio::io::AsyncWriteExt;
+
+type MetaResponseParser = fn(&[u8]) -> Result<Option<(usize, MetaResponse)>, ErrorKind>;
+
+async fn drain_quiet_noop_response(
+    client: &mut Client,
+    parser: MetaResponseParser,
+) -> Result<(), Error> {
+    match client.drive_receive(parser).await? {
+        MetaResponse::Status(Status::NoOp) => Ok(()),
+        MetaResponse::Status(status) => Err(Status::Error(ErrorKind::Protocol(Some(format!(
+            "Expected quiet-mode no-op response, got status {status}"
+        ))))
+        .into()),
+        MetaResponse::Data(_) => Err(Status::Error(ErrorKind::Protocol(Some(
+            "Expected quiet-mode no-op response, got data response".to_string(),
+        )))
+        .into()),
+    }
+}
 
 /// Trait defining Meta protocol-specific methods for the Client.
 pub trait MetaProtocol {
@@ -174,7 +193,12 @@ impl MetaProtocol for Client {
 
         self.conn.flush().await?;
 
-        match self.drive_receive(parse_meta_get_response).await? {
+        let response = self.drive_receive(parse_meta_get_response).await?;
+        if is_quiet && !matches!(response, MetaResponse::Status(Status::NoOp)) {
+            drain_quiet_noop_response(self, parse_meta_get_response).await?;
+        }
+
+        match response {
             MetaResponse::Status(Status::NotFound) => Ok(None),
             MetaResponse::Status(Status::NoOp) => Ok(None),
             MetaResponse::Status(s) => Err(s.into()),
@@ -232,7 +256,12 @@ impl MetaProtocol for Client {
 
         self.conn.flush().await?;
 
-        match self.drive_receive(parse_meta_set_response).await? {
+        let response = self.drive_receive(parse_meta_set_response).await?;
+        if is_quiet && !matches!(response, MetaResponse::Status(Status::NoOp)) {
+            drain_quiet_noop_response(self, parse_meta_set_response).await?;
+        }
+
+        match response {
             MetaResponse::Status(Status::Stored) => Ok(None),
             MetaResponse::Status(Status::NoOp) => Ok(None),
             MetaResponse::Status(s) => Err(s.into()),
@@ -269,7 +298,12 @@ impl MetaProtocol for Client {
 
         self.conn.flush().await?;
 
-        match self.drive_receive(parse_meta_delete_response).await? {
+        let response = self.drive_receive(parse_meta_delete_response).await?;
+        if is_quiet && !matches!(response, MetaResponse::Status(Status::NoOp)) {
+            drain_quiet_noop_response(self, parse_meta_delete_response).await?;
+        }
+
+        match response {
             MetaResponse::Status(Status::Deleted) => Ok(None),
             MetaResponse::Status(Status::Exists) => Err(Error::Protocol(Status::Exists)),
             MetaResponse::Status(Status::NoOp) => Ok(None),
@@ -331,7 +365,12 @@ impl MetaProtocol for Client {
 
         self.conn.flush().await?;
 
-        match self.drive_receive(parse_meta_arithmetic_response).await? {
+        let response = self.drive_receive(parse_meta_arithmetic_response).await?;
+        if is_quiet && !matches!(response, MetaResponse::Status(Status::NoOp)) {
+            drain_quiet_noop_response(self, parse_meta_arithmetic_response).await?;
+        }
+
+        match response {
             MetaResponse::Status(Status::Stored) => Ok(None),
             MetaResponse::Status(Status::NoOp) => Ok(None),
             MetaResponse::Status(s) => Err(s.into()),
@@ -392,7 +431,12 @@ impl MetaProtocol for Client {
 
         self.conn.flush().await?;
 
-        match self.drive_receive(parse_meta_arithmetic_response).await? {
+        let response = self.drive_receive(parse_meta_arithmetic_response).await?;
+        if is_quiet && !matches!(response, MetaResponse::Status(Status::NoOp)) {
+            drain_quiet_noop_response(self, parse_meta_arithmetic_response).await?;
+        }
+
+        match response {
             MetaResponse::Status(Status::Stored) => Ok(None),
             MetaResponse::Status(Status::NoOp) => Ok(None),
             MetaResponse::Status(s) => Err(s.into()),

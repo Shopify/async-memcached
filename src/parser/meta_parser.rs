@@ -1,10 +1,11 @@
 use nom::{
     branch::alt,
-    bytes::streaming::{tag, take, take_while1},
+    bytes::streaming::{tag, take, take_until, take_while1},
     character::streaming::{crlf, space1},
-    combinator::{map, opt, value},
+    combinator::{map, map_res, opt, value},
     error::ErrorKind::Fail,
     multi::many0,
+    sequence::{preceded, terminated},
     IResult, Parser,
 };
 
@@ -13,12 +14,32 @@ use std::num::NonZero;
 use super::{parse_u32, ErrorKind, MetaResponse, MetaValue, Status};
 use crate::Error;
 
+fn parse_meta_error(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
+    let parser = terminated(
+        alt((
+            value(ErrorKind::NonexistentCommand, tag(&b"ERROR"[..])),
+            map_res(
+                preceded(tag(&b"CLIENT_ERROR "[..]), take_until("\r\n")),
+                |s| std::str::from_utf8(s).map(|s| ErrorKind::Client(s.to_string())),
+            ),
+            map_res(
+                preceded(tag(&b"SERVER_ERROR "[..]), take_until("\r\n")),
+                |s| std::str::from_utf8(s).map(|s| ErrorKind::Server(s.to_string())),
+            ),
+        )),
+        crlf,
+    );
+
+    map(parser, |e| MetaResponse::Status(Status::Error(e))).parse(buf)
+}
+
 pub fn parse_meta_get_status(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
     alt((
         value(MetaResponse::Status(Status::Value), tag(&b"VA "[..])),
         value(MetaResponse::Status(Status::Exists), tag(&b"HD"[..])),
         value(MetaResponse::Status(Status::NotFound), tag(&b"EN"[..])),
         value(MetaResponse::Status(Status::NoOp), tag(&b"MN\r\n"[..])),
+        parse_meta_error,
     ))
     .parse(buf)
 }
@@ -30,6 +51,7 @@ pub fn parse_meta_set_status(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
         value(MetaResponse::Status(Status::Exists), tag(&b"EX"[..])),
         value(MetaResponse::Status(Status::NotFound), tag(&b"NF"[..])),
         value(MetaResponse::Status(Status::NoOp), tag(&b"MN\r\n"[..])),
+        parse_meta_error,
     ))
     .parse(buf)
 }
@@ -40,6 +62,7 @@ pub fn parse_meta_delete_status(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
         value(MetaResponse::Status(Status::NotFound), tag(&b"NF"[..])),
         value(MetaResponse::Status(Status::Exists), tag(&b"EX"[..])),
         value(MetaResponse::Status(Status::NoOp), tag(&b"MN\r\n"[..])),
+        parse_meta_error,
     ))
     .parse(buf)
 }
@@ -52,6 +75,7 @@ pub fn parse_meta_arithmetic_status(buf: &[u8]) -> IResult<&[u8], MetaResponse> 
         value(MetaResponse::Status(Status::NotStored), tag(&b"NS"[..])),
         value(MetaResponse::Status(Status::Exists), tag(&b"EX"[..])),
         value(MetaResponse::Status(Status::NoOp), tag(&b"MN\r\n"[..])),
+        parse_meta_error,
     ))
     .parse(buf)
 }
@@ -196,6 +220,8 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
         }
         // match arm for "MN\r\n" response
         MetaResponse::Status(Status::NoOp) => Ok((input, MetaResponse::Status(Status::NoOp))),
+        // match arm for standard ASCII error responses: ERROR, CLIENT_ERROR, SERVER_ERROR
+        MetaResponse::Status(Status::Error(_)) => Ok((input, status)),
         _ => {
             // unexpected response code, should never happen, bail
             Err(nom::Err::Error(nom::error::Error::new(
@@ -234,6 +260,8 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
     match status {
         // match arm for "MN\r\n" response
         MetaResponse::Status(Status::NoOp) => Ok((input, MetaResponse::Status(Status::NoOp))),
+        // match arm for standard ASCII error responses: ERROR, CLIENT_ERROR, SERVER_ERROR
+        MetaResponse::Status(Status::Error(_)) => Ok((input, status)),
         // match arm for "HD", "NS", "EX" & "NF" responses
         MetaResponse::Status(s) => process_meta_response_without_data_payload(input, s),
         _ => Err(nom::Err::Error(nom::error::Error::new(
@@ -271,6 +299,8 @@ fn parse_meta_delete_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
     match status {
         // match arm for "MN\r\n" response
         MetaResponse::Status(Status::NoOp) => Ok((input, MetaResponse::Status(Status::NoOp))),
+        // match arm for standard ASCII error responses: ERROR, CLIENT_ERROR, SERVER_ERROR
+        MetaResponse::Status(Status::Error(_)) => Ok((input, status)),
         // match arm for "HD", "NF" & "EX" responses
         MetaResponse::Status(s) => process_meta_response_without_data_payload(input, s),
         _ => Err(nom::Err::Error(nom::error::Error::new(
@@ -299,6 +329,8 @@ fn parse_meta_arithmetic_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> 
         }
         // match arm for "MN\r\n" response
         MetaResponse::Status(Status::NoOp) => Ok((input, MetaResponse::Status(Status::NoOp))),
+        // match arm for standard ASCII error responses: ERROR, CLIENT_ERROR, SERVER_ERROR
+        MetaResponse::Status(Status::Error(_)) => Ok((input, status)),
         // match arm for "HD", "NF" & "EX" responses
         MetaResponse::Status(s) => process_meta_response_without_data_payload(input, s),
         _ => Err(nom::Err::Error(nom::error::Error::new(
@@ -987,5 +1019,59 @@ mod tests {
             }
             _ => panic!("Expected Response::Data, got something else"),
         }
+    }
+
+    #[test]
+    fn test_parse_meta_get_response_handles_error() {
+        let response = parse_meta_get_response(b"ERROR\r\n").unwrap().unwrap();
+
+        assert_eq!(response.0, 7);
+        assert_eq!(
+            response.1,
+            MetaResponse::Status(Status::Error(ErrorKind::NonexistentCommand))
+        );
+    }
+
+    #[test]
+    fn test_parse_meta_set_response_handles_client_error() {
+        let response = parse_meta_set_response(b"CLIENT_ERROR bad command line format\r\n")
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(response.0, 38);
+        assert_eq!(
+            response.1,
+            MetaResponse::Status(Status::Error(ErrorKind::Client(
+                "bad command line format".to_string()
+            )))
+        );
+    }
+
+    #[test]
+    fn test_parse_meta_delete_response_handles_server_error() {
+        let response = parse_meta_delete_response(b"SERVER_ERROR out of memory\r\n")
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(response.0, 28);
+        assert_eq!(
+            response.1,
+            MetaResponse::Status(Status::Error(ErrorKind::Server(
+                "out of memory".to_string()
+            )))
+        );
+    }
+
+    #[test]
+    fn test_parse_meta_arithmetic_response_handles_client_error() {
+        let response = parse_meta_arithmetic_response(b"CLIENT_ERROR bad flag\r\n")
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(response.0, 23);
+        assert_eq!(
+            response.1,
+            MetaResponse::Status(Status::Error(ErrorKind::Client("bad flag".to_string())))
+        );
     }
 }
