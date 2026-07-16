@@ -1,10 +1,11 @@
 use nom::{
     branch::alt,
-    bytes::streaming::{tag, take, take_while1},
+    bytes::streaming::{tag, take, take_until, take_while1},
     character::streaming::{crlf, space1},
-    combinator::{map, opt, value},
+    combinator::{map, map_res, opt, value},
     error::ErrorKind::Fail,
     multi::many0,
+    sequence::{preceded, terminated},
     IResult, Parser,
 };
 
@@ -54,6 +55,28 @@ pub fn parse_meta_arithmetic_status(buf: &[u8]) -> IResult<&[u8], MetaResponse> 
         value(MetaResponse::Status(Status::NoOp), tag(&b"MN\r\n"[..])),
     ))
     .parse(buf)
+}
+
+// Parse a meta error line (`ERROR` / `CLIENT_ERROR` / `SERVER_ERROR`) into a
+// `Status::Error`. Shared verbatim with the classic protocol's parse_ascii_error;
+// without this, error lines fail every status tag and surface as an opaque "Tag".
+fn parse_meta_error(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
+    let parser = terminated(
+        alt((
+            value(ErrorKind::NonexistentCommand, tag(&b"ERROR"[..])),
+            map_res(
+                preceded(tag(&b"CLIENT_ERROR "[..]), take_until("\r\n")),
+                |s| std::str::from_utf8(s).map(|s| ErrorKind::Client(s.to_string())),
+            ),
+            map_res(
+                preceded(tag(&b"SERVER_ERROR "[..]), take_until("\r\n")),
+                |s| std::str::from_utf8(s).map(|s| ErrorKind::Server(s.to_string())),
+            ),
+        )),
+        crlf,
+    );
+
+    map(parser, |e| MetaResponse::Status(Status::Error(e))).parse(buf)
 }
 
 pub fn parse_meta_get_response(buf: &[u8]) -> Result<Option<(usize, MetaResponse)>, ErrorKind> {
@@ -146,7 +169,11 @@ pub fn parse_meta_arithmetic_response(
 //     is_recache_winner: None,
 // }
 fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
-    let (input, status) = parse_meta_get_status(buf)?; // removes <CD> response code from the input
+    let (input, status) = match parse_meta_get_status(buf) {
+        Ok(res) => res, // removes <CD> response code from the input
+        Err(nom::Err::Error(_)) => return parse_meta_error(buf), // e.g. SERVER_ERROR line
+        Err(e) => return Err(e),
+    };
 
     match status {
         // match arm for "VA " response when v flag is used
@@ -157,14 +184,13 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
 
             // After tombstoning a key, the memcached server will return size 0 and a trailing \r\n for the data block,
             // which can be interpreted as None.
-            let (input, mut data) = if size > 0 {
+            // `size` is authoritative: read exactly that many bytes and do not trim, so binary
+            // values whose final byte is ASCII whitespace are returned intact.
+            let (input, data) = if size > 0 {
                 take_until_size(input, size)? // parses the data from the input
             } else {
                 (input, None) // tombstoned key, no data block
             };
-
-            // trim the data block of any trailing whitespace
-            data = data.map(|d| d.trim_ascii_end());
 
             let meta_value =
                 construct_meta_value_from_flag_array(flag_array, data, Some(Status::Value))
@@ -229,7 +255,11 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
 //     is_recache_winner: None,
 // }
 fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
-    let (input, status) = parse_meta_set_status(buf)?;
+    let (input, status) = match parse_meta_set_status(buf) {
+        Ok(res) => res,
+        Err(nom::Err::Error(_)) => return parse_meta_error(buf), // e.g. SERVER_ERROR line
+        Err(e) => return Err(e),
+    };
 
     match status {
         // match arm for "MN\r\n" response
@@ -266,7 +296,11 @@ fn parse_meta_set_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
 //     is_recache_winner: None,
 // }
 fn parse_meta_delete_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
-    let (input, status) = parse_meta_delete_status(buf)?; // removes <CD> response code from the input
+    let (input, status) = match parse_meta_delete_status(buf) {
+        Ok(res) => res, // removes <CD> response code from the input
+        Err(nom::Err::Error(_)) => return parse_meta_error(buf), // e.g. SERVER_ERROR line
+        Err(e) => return Err(e),
+    };
 
     match status {
         // match arm for "MN\r\n" response
@@ -281,7 +315,11 @@ fn parse_meta_delete_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
 }
 
 fn parse_meta_arithmetic_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
-    let (input, status) = parse_meta_arithmetic_status(buf)?; // removes <CD> response code from the input
+    let (input, status) = match parse_meta_arithmetic_status(buf) {
+        Ok(res) => res, // removes <CD> response code from the input
+        Err(nom::Err::Error(_)) => return parse_meta_error(buf), // e.g. SERVER_ERROR line
+        Err(e) => return Err(e),
+    };
 
     match status {
         // match arm for "VA " response when v flag is used
@@ -984,6 +1022,94 @@ mod tests {
                 assert_eq!(meta_value.flags, None);
                 assert_eq!(meta_value.cas, None);
                 assert_eq!(meta_value.status, Some(Status::Stored));
+            }
+            _ => panic!("Expected Response::Data, got something else"),
+        }
+    }
+
+    #[test]
+    fn test_parse_meta_get_data_value_surfaces_server_error() {
+        // A proxy/server SERVER_ERROR must surface as Status::Error, not "Tag".
+        let input = b"SERVER_ERROR upstream error\r\n";
+        let (remaining, response) = parse_meta_get_data_value(input).unwrap();
+        assert_eq!(remaining, b"");
+        assert_eq!(
+            response,
+            MetaResponse::Status(Status::Error(ErrorKind::Server(
+                "upstream error".to_string()
+            )))
+        );
+    }
+
+    #[test]
+    fn test_parse_meta_get_data_value_surfaces_client_error() {
+        let input = b"CLIENT_ERROR bad command line format\r\n";
+        let (remaining, response) = parse_meta_get_data_value(input).unwrap();
+        assert_eq!(remaining, b"");
+        assert_eq!(
+            response,
+            MetaResponse::Status(Status::Error(ErrorKind::Client(
+                "bad command line format".to_string()
+            )))
+        );
+    }
+
+    #[test]
+    fn test_parse_meta_get_data_value_surfaces_bare_error() {
+        let input = b"ERROR\r\n";
+        let (remaining, response) = parse_meta_get_data_value(input).unwrap();
+        assert_eq!(remaining, b"");
+        assert_eq!(
+            response,
+            MetaResponse::Status(Status::Error(ErrorKind::NonexistentCommand))
+        );
+    }
+
+    #[test]
+    fn test_parse_meta_get_data_value_error_line_incomplete_waits_for_more() {
+        // A partially-received error line must ask for more bytes, not misparse.
+        let input = b"SERVER_ERROR upst";
+        assert!(matches!(
+            parse_meta_get_data_value(input),
+            Err(nom::Err::Incomplete(_))
+        ));
+    }
+
+    #[test]
+    fn test_parse_meta_set_data_value_surfaces_server_error() {
+        let input = b"SERVER_ERROR out of memory\r\n";
+        let (remaining, response) = parse_meta_set_data_value(input).unwrap();
+        assert_eq!(remaining, b"");
+        assert_eq!(
+            response,
+            MetaResponse::Status(Status::Error(ErrorKind::Server(
+                "out of memory".to_string()
+            )))
+        );
+    }
+
+    #[test]
+    fn test_parse_meta_get_data_value_preserves_trailing_newline_in_binary_value() {
+        // `size` is authoritative: a value ending in 0x0a must not be trimmed.
+        let input = b"VA 6\r\nhello\n\r\n";
+        let (remaining, response) = parse_meta_get_data_value(input).unwrap();
+        assert_eq!(remaining, b"");
+        match response {
+            MetaResponse::Data(Some(meta_values)) => {
+                assert_eq!(meta_values[0].data.as_deref(), Some(b"hello\n".as_ref()));
+            }
+            _ => panic!("Expected Response::Data, got something else"),
+        }
+    }
+
+    #[test]
+    fn test_parse_meta_get_data_value_preserves_trailing_space_in_binary_value() {
+        let input = b"VA 6\r\nhello \r\n";
+        let (remaining, response) = parse_meta_get_data_value(input).unwrap();
+        assert_eq!(remaining, b"");
+        match response {
+            MetaResponse::Data(Some(meta_values)) => {
+                assert_eq!(meta_values[0].data.as_deref(), Some(b"hello ".as_ref()));
             }
             _ => panic!("Expected Response::Data, got something else"),
         }
