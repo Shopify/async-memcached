@@ -13,7 +13,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Meta protocol error lines (`ERROR`, `CLIENT_ERROR`, `SERVER_ERROR`) are now parsed into `Status::Error` instead of failing every status tag and surfacing as an opaque `Protocol("Tag")` error, so the real server/proxy message reaches the caller.
-- `meta_get` no longer trims trailing whitespace from the value block. The `size` field is authoritative, so binary values whose final byte is an ASCII whitespace character (e.g. `0x0a`) are returned intact rather than silently truncated.
 
 ## [0.6.0] - 2026-01-26
 

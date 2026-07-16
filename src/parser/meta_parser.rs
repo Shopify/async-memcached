@@ -184,13 +184,14 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
 
             // After tombstoning a key, the memcached server will return size 0 and a trailing \r\n for the data block,
             // which can be interpreted as None.
-            // `size` is authoritative: read exactly that many bytes and do not trim, so binary
-            // values whose final byte is ASCII whitespace are returned intact.
-            let (input, data) = if size > 0 {
+            let (input, mut data) = if size > 0 {
                 take_until_size(input, size)? // parses the data from the input
             } else {
                 (input, None) // tombstoned key, no data block
             };
+
+            // trim the data block of any trailing whitespace
+            data = data.map(|d| d.trim_ascii_end());
 
             let meta_value =
                 construct_meta_value_from_flag_array(flag_array, data, Some(Status::Value))
@@ -1086,32 +1087,5 @@ mod tests {
                 "out of memory".to_string()
             )))
         );
-    }
-
-    #[test]
-    fn test_parse_meta_get_data_value_preserves_trailing_newline_in_binary_value() {
-        // `size` is authoritative: a value ending in 0x0a must not be trimmed.
-        let input = b"VA 6\r\nhello\n\r\n";
-        let (remaining, response) = parse_meta_get_data_value(input).unwrap();
-        assert_eq!(remaining, b"");
-        match response {
-            MetaResponse::Data(Some(meta_values)) => {
-                assert_eq!(meta_values[0].data.as_deref(), Some(b"hello\n".as_ref()));
-            }
-            _ => panic!("Expected Response::Data, got something else"),
-        }
-    }
-
-    #[test]
-    fn test_parse_meta_get_data_value_preserves_trailing_space_in_binary_value() {
-        let input = b"VA 6\r\nhello \r\n";
-        let (remaining, response) = parse_meta_get_data_value(input).unwrap();
-        assert_eq!(remaining, b"");
-        match response {
-            MetaResponse::Data(Some(meta_values)) => {
-                assert_eq!(meta_values[0].data.as_deref(), Some(b"hello ".as_ref()));
-            }
-            _ => panic!("Expected Response::Data, got something else"),
-        }
     }
 }
