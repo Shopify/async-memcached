@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+- Prevent cancelled meta protocol operations from leaving reusable, stream-misaligned connections
+- Consume parsed responses immediately instead of deferring buffer advancement to the next operation
+
 ## [0.7.0] - 2026-07-27
 
 - Fixed meta protocol error parsing

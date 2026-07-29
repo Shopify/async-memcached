@@ -1,17 +1,24 @@
 use pin_project::pin_project;
 use std::io;
 use std::pin::Pin;
+use std::sync::{
+    atomic::{AtomicU8, Ordering},
+    Arc,
+};
 use std::task::{Context, Poll};
 use tokio::io::{AsyncBufRead, AsyncRead, AsyncWrite, BufReader, BufWriter};
 use tokio::net::{lookup_host, TcpSocket, TcpStream, UnixStream};
 
-use crate::Error;
+use crate::{Error, REQUEST_POISONED};
+
+const INCOMPLETE_OPERATION_MESSAGE: &str =
+    "Connection is not reusable because a previous operation did not complete";
 
 #[pin_project(project = ConnectionProjection)]
 #[derive(Debug)]
 pub enum Connection {
-    Tcp(#[pin] BufReader<BufWriter<TcpStream>>),
-    Unix(#[pin] BufReader<BufWriter<UnixStream>>),
+    Tcp(#[pin] BufReader<BufWriter<TcpStream>>, Arc<AtomicU8>),
+    Unix(#[pin] BufReader<BufWriter<UnixStream>>, Arc<AtomicU8>),
 }
 
 impl AsyncRead for Connection {
@@ -21,8 +28,8 @@ impl AsyncRead for Connection {
         buf: &mut tokio::io::ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
         match self.project() {
-            ConnectionProjection::Tcp(s) => s.poll_read(cx, buf),
-            ConnectionProjection::Unix(s) => s.poll_read(cx, buf),
+            ConnectionProjection::Tcp(s, _) => s.poll_read(cx, buf),
+            ConnectionProjection::Unix(s, _) => s.poll_read(cx, buf),
         }
     }
 }
@@ -30,22 +37,40 @@ impl AsyncRead for Connection {
 impl AsyncWrite for Connection {
     fn poll_write(self: Pin<&mut Self>, cx: &mut Context, buf: &[u8]) -> Poll<io::Result<usize>> {
         match self.project() {
-            ConnectionProjection::Tcp(s) => s.poll_write(cx, buf),
-            ConnectionProjection::Unix(s) => s.poll_write(cx, buf),
+            ConnectionProjection::Tcp(s, state) => {
+                if state.load(Ordering::Acquire) == REQUEST_POISONED {
+                    Poll::Ready(Err(io::Error::new(
+                        io::ErrorKind::BrokenPipe,
+                        INCOMPLETE_OPERATION_MESSAGE,
+                    )))
+                } else {
+                    s.poll_write(cx, buf)
+                }
+            }
+            ConnectionProjection::Unix(s, state) => {
+                if state.load(Ordering::Acquire) == REQUEST_POISONED {
+                    Poll::Ready(Err(io::Error::new(
+                        io::ErrorKind::BrokenPipe,
+                        INCOMPLETE_OPERATION_MESSAGE,
+                    )))
+                } else {
+                    s.poll_write(cx, buf)
+                }
+            }
         }
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<()>> {
         match self.project() {
-            ConnectionProjection::Tcp(s) => s.poll_flush(cx),
-            ConnectionProjection::Unix(s) => s.poll_flush(cx),
+            ConnectionProjection::Tcp(s, _) => s.poll_flush(cx),
+            ConnectionProjection::Unix(s, _) => s.poll_flush(cx),
         }
     }
 
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<()>> {
         match self.project() {
-            ConnectionProjection::Tcp(s) => s.poll_shutdown(cx),
-            ConnectionProjection::Unix(s) => s.poll_shutdown(cx),
+            ConnectionProjection::Tcp(s, _) => s.poll_shutdown(cx),
+            ConnectionProjection::Unix(s, _) => s.poll_shutdown(cx),
         }
     }
 }
@@ -53,15 +78,15 @@ impl AsyncWrite for Connection {
 impl AsyncBufRead for Connection {
     fn poll_fill_buf(self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<&[u8]>> {
         match self.project() {
-            ConnectionProjection::Tcp(s) => s.poll_fill_buf(cx),
-            ConnectionProjection::Unix(s) => s.poll_fill_buf(cx),
+            ConnectionProjection::Tcp(s, _) => s.poll_fill_buf(cx),
+            ConnectionProjection::Unix(s, _) => s.poll_fill_buf(cx),
         }
     }
 
     fn consume(self: Pin<&mut Self>, amt: usize) {
         match self.project() {
-            ConnectionProjection::Tcp(s) => s.consume(amt),
-            ConnectionProjection::Unix(s) => s.consume(amt),
+            ConnectionProjection::Tcp(s, _) => s.consume(amt),
+            ConnectionProjection::Unix(s, _) => s.consume(amt),
         }
     }
 }
@@ -102,11 +127,11 @@ impl Addr {
 }
 
 impl Connection {
-    pub async fn new<S: AsRef<str>>(dsn: S) -> Result<Self, Error> {
+    pub async fn new<S: AsRef<str>>(dsn: S, request_state: Arc<AtomicU8>) -> Result<Self, Error> {
         match Addr::parse(dsn.as_ref())? {
             Addr::Unix(path) => UnixStream::connect(path)
                 .await
-                .map(|c| Connection::Unix(BufReader::new(BufWriter::new(c))))
+                .map(|c| Connection::Unix(BufReader::new(BufWriter::new(c)), request_state))
                 .map_err(Error::Connect),
             Addr::Tcp(url) | Addr::Unknown(url) => {
                 let addrs = lookup_host(url).await.map_err(Error::Connect)?;
@@ -118,7 +143,10 @@ impl Connection {
                     socket.set_nodelay(true).map_err(Error::Connect)?;
                     match socket.connect(addr).await {
                         Ok(stream) => {
-                            return Ok(Connection::Tcp(BufReader::new(BufWriter::new(stream))))
+                            return Ok(Connection::Tcp(
+                                BufReader::new(BufWriter::new(stream)),
+                                request_state,
+                            ))
                         }
                         Err(e) => last_err = Some(Error::Connect(e)),
                     }

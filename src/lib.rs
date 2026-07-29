@@ -3,6 +3,10 @@
 
 use bytes::BytesMut;
 use fxhash::FxHashMap;
+use std::sync::{
+    atomic::{AtomicU8, Ordering},
+    Arc,
+};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 
 mod connection;
@@ -32,10 +36,40 @@ const MAX_KEY_LENGTH: usize = 250; // reference in memcached documentation: http
 ///
 /// [`Client`] is mapped one-to-one with a given connection to a memcached server, and provides a
 /// high-level API for executing commands on that connection.
+///
+/// If an in-flight meta protocol operation is cancelled or otherwise exits before its complete
+/// response is consumed, the connection is permanently marked as not reusable. All later command
+/// writes are rejected because an unread response could otherwise be associated with the wrong
+/// request. Callers using a pool must discard that [`Client`]; direct callers must drop it and
+/// create a new one.
 pub struct Client {
     buf: BytesMut,
-    last_read_n: Option<usize>,
     conn: Connection,
+    request_state: Arc<AtomicU8>,
+}
+
+const REQUEST_IDLE: u8 = 0;
+const REQUEST_ACTIVE: u8 = 1;
+pub(crate) const REQUEST_POISONED: u8 = 2;
+
+pub(crate) struct RequestGuard {
+    state: Arc<AtomicU8>,
+    completed: bool,
+}
+
+impl RequestGuard {
+    pub(crate) fn complete(&mut self) {
+        self.state.store(REQUEST_IDLE, Ordering::Release);
+        self.completed = true;
+    }
+}
+
+impl Drop for RequestGuard {
+    fn drop(&mut self) {
+        if !self.completed {
+            self.state.store(REQUEST_POISONED, Ordering::Release);
+        }
+    }
 }
 
 impl Client {
@@ -45,12 +79,34 @@ impl Client {
     /// For TCP: the DSN should be in the format of `tcp://<IP>:<port>` or `<IP>:<port>`.
     /// For UNIX: the DSN should be in the format of `unix://<path>`.
     pub async fn new<S: AsRef<str>>(dsn: S) -> Result<Client, Error> {
-        let connection = Connection::new(dsn).await?;
+        let request_state = Arc::new(AtomicU8::new(REQUEST_IDLE));
+        let connection = Connection::new(dsn, Arc::clone(&request_state)).await?;
 
         Ok(Client {
             buf: BytesMut::new(),
-            last_read_n: None,
             conn: connection,
+            request_state,
+        })
+    }
+
+    pub(crate) fn begin_request(&self) -> Result<RequestGuard, Error> {
+        self.request_state
+            .compare_exchange(
+                REQUEST_IDLE,
+                REQUEST_ACTIVE,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .map_err(|_| {
+                Status::Error(ErrorKind::Client(
+                    "Connection is not reusable because a previous operation did not complete"
+                        .to_string(),
+                ))
+            })?;
+
+        Ok(RequestGuard {
+            state: Arc::clone(&self.request_state),
+            completed: false,
         })
     }
 
@@ -58,33 +114,18 @@ impl Client {
     where
         F: Fn(&[u8]) -> Result<Option<(usize, R)>, ErrorKind>,
     {
-        // If we serviced a previous request, advance our buffer forward.
-        if let Some(n) = self.last_read_n {
-            // Not sure how this situation occurs, but it seems to be related to transient network
-            // issues. This guard is here to prevent panics, but it's not clear what the correct
-            // behavior is. For now, we just return an error, which allows the caller to retry or
-            // fall back to the uncached data source as they see fit.
-            if n > self.buf.len() {
-                return Err(Status::Error(ErrorKind::Client(
-                    "Buffer length is less than last read length".to_string(),
-                ))
-                .into());
-            }
-            let _ = self.buf.split_to(n);
-        }
-
         let mut needs_more_data = false;
         loop {
             if self.buf.is_empty() || needs_more_data {
                 match self.conn {
-                    Connection::Tcp(ref mut s) => {
+                    Connection::Tcp(ref mut s, _) => {
                         self.buf.reserve(1024);
                         let n = s.read_buf(&mut self.buf).await?;
                         if n == 0 {
                             return Err(Error::Io(std::io::ErrorKind::UnexpectedEof.into()));
                         }
                     }
-                    Connection::Unix(ref mut s) => {
+                    Connection::Unix(ref mut s, _) => {
                         self.buf.reserve(1024);
                         let n = s.read_buf(&mut self.buf).await?;
                         if n == 0 {
@@ -98,7 +139,7 @@ impl Client {
             match op(&self.buf) {
                 // We got a response.
                 Ok(Some((n, response))) => {
-                    self.last_read_n = Some(n);
+                    let _ = self.buf.split_to(n);
                     return Ok(response);
                 }
                 // We didn't have enough data, so loop around and try again.

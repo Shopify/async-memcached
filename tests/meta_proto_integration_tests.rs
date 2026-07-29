@@ -2,6 +2,7 @@ use async_memcached::{AsciiProtocol, Client, Error, ErrorKind, MetaProtocol, Sta
 use serial_test::parallel;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
+use tokio::sync::oneshot;
 
 // NOTE: Each test should run with keys unique to that test to avoid async conflicts.  Because these tests run concurrently,
 // it's possible to delete/overwrite keys created by another test before they're read.
@@ -307,6 +308,96 @@ async fn test_quiet_meta_operations_drain_internal_noop_before_next_response() {
 
         server.await.unwrap();
     }
+}
+
+#[tokio::test]
+async fn test_cancelled_meta_operation_rejects_reuse_of_delayed_response() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (command_received_tx, command_received_rx) = oneshot::channel();
+    let (send_response_tx, send_response_rx) = oneshot::channel();
+
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let command = read_until_contains(&mut socket, b"\r\n").await;
+        assert_eq!(command, b"mg cancelled-key v\r\n");
+        command_received_tx.send(()).unwrap();
+
+        send_response_rx.await.unwrap();
+        socket.write_all(b"VA 5\r\nstale\r\n").await.unwrap();
+    });
+
+    let mut client = Client::new(format!("tcp://{addr}")).await.unwrap();
+
+    {
+        let operation = client.meta_get("cancelled-key", false, None, Some(&["v"]));
+        tokio::pin!(operation);
+        tokio::select! {
+            result = &mut operation => panic!("operation unexpectedly completed: {:?}", result),
+            result = command_received_rx => result.unwrap(),
+        }
+    }
+
+    send_response_tx.send(()).unwrap();
+
+    let result = client.meta_get("next-key", false, None, Some(&["v"])).await;
+    assert_eq!(
+        result,
+        Err(Error::Protocol(Status::Error(ErrorKind::Client(
+            "Connection is not reusable because a previous operation did not complete".to_string()
+        ))))
+    );
+
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn test_cancelled_meta_operation_rejects_following_ascii_mutation_before_write() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (command_received_tx, command_received_rx) = oneshot::channel();
+    let (send_response_tx, send_response_rx) = oneshot::channel();
+
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let command = read_until_contains(&mut socket, b"\r\n").await;
+        assert_eq!(command, b"mg cancelled-key v\r\n");
+        command_received_tx.send(()).unwrap();
+
+        send_response_rx.await.unwrap();
+        socket
+            .write_all(b"CLIENT_ERROR delayed response\r\n")
+            .await
+            .unwrap();
+
+        let mut buf = [0; 128];
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(100), socket.read(&mut buf))
+                .await
+                .is_err(),
+            "a command was written after the connection became poisoned"
+        );
+    });
+
+    let mut client = Client::new(format!("tcp://{addr}")).await.unwrap();
+
+    {
+        let operation = client.meta_get("cancelled-key", false, None, Some(&["v"]));
+        tokio::pin!(operation);
+        tokio::select! {
+            result = &mut operation => panic!("operation unexpectedly completed: {:?}", result),
+            result = command_received_rx => result.unwrap(),
+        }
+    }
+
+    send_response_tx.send(()).unwrap();
+
+    let result = client.set("next-key", "value", None, None).await;
+    assert!(
+        matches!(result, Err(Error::Io(ref error)) if error.kind() == std::io::ErrorKind::BrokenPipe)
+    );
+
+    server.await.unwrap();
 }
 
 #[derive(Clone, Copy)]

@@ -30,6 +30,10 @@ async fn drain_quiet_noop_response(
 }
 
 /// Trait defining Meta protocol-specific methods for the Client.
+///
+/// Cancelling an in-flight meta operation can leave a response outstanding on the connection.
+/// When that happens, the client rejects every subsequent command write. Connection pools must
+/// discard the client, and direct callers must replace it with a newly connected client.
 pub trait MetaProtocol {
     /// Gets the given key with additional metadata.
     ///
@@ -182,6 +186,8 @@ impl MetaProtocol for Client {
             Self::validate_opaque_length(opaque)?;
         }
 
+        let mut request = self.begin_request()?;
+
         self.conn.write_all(b"mg ").await?;
         self.conn.write_all(kr).await?;
 
@@ -197,6 +203,7 @@ impl MetaProtocol for Client {
         if is_quiet && !matches!(response, MetaResponse::Status(Status::NoOp)) {
             drain_quiet_noop_response(self, parse_meta_get_response).await?;
         }
+        request.complete();
 
         match response {
             MetaResponse::Status(Status::NotFound) => Ok(None),
@@ -230,6 +237,7 @@ impl MetaProtocol for Client {
         }
 
         let vr = value.as_bytes();
+        let mut request = self.begin_request()?;
 
         self.conn.write_all(b"ms ").await?;
         self.conn.write_all(kr).await?;
@@ -260,6 +268,7 @@ impl MetaProtocol for Client {
         if is_quiet && !matches!(response, MetaResponse::Status(Status::NoOp)) {
             drain_quiet_noop_response(self, parse_meta_set_response).await?;
         }
+        request.complete();
 
         match response {
             MetaResponse::Status(Status::Stored) => Ok(None),
@@ -287,6 +296,8 @@ impl MetaProtocol for Client {
             Self::validate_opaque_length(opaque)?;
         }
 
+        let mut request = self.begin_request()?;
+
         self.conn.write_all(b"md ").await?;
         self.conn.write_all(kr).await?;
 
@@ -302,6 +313,7 @@ impl MetaProtocol for Client {
         if is_quiet && !matches!(response, MetaResponse::Status(Status::NoOp)) {
             drain_quiet_noop_response(self, parse_meta_delete_response).await?;
         }
+        request.complete();
 
         match response {
             MetaResponse::Status(Status::Deleted) => Ok(None),
@@ -330,6 +342,8 @@ impl MetaProtocol for Client {
         if let Some(opaque) = &opaque {
             Self::validate_opaque_length(opaque)?;
         }
+
+        let mut request = self.begin_request()?;
 
         self.conn.write_all(b"ma ").await?;
         self.conn.write_all(kr).await?;
@@ -369,6 +383,7 @@ impl MetaProtocol for Client {
         if is_quiet && !matches!(response, MetaResponse::Status(Status::NoOp)) {
             drain_quiet_noop_response(self, parse_meta_arithmetic_response).await?;
         }
+        request.complete();
 
         match response {
             MetaResponse::Status(Status::Stored) => Ok(None),
@@ -396,6 +411,8 @@ impl MetaProtocol for Client {
         if let Some(opaque) = &opaque {
             Self::validate_opaque_length(opaque)?;
         }
+
+        let mut request = self.begin_request()?;
 
         self.conn.write_all(b"ma ").await?;
         self.conn.write_all(kr).await?;
@@ -435,6 +452,7 @@ impl MetaProtocol for Client {
         if is_quiet && !matches!(response, MetaResponse::Status(Status::NoOp)) {
             drain_quiet_noop_response(self, parse_meta_arithmetic_response).await?;
         }
+        request.complete();
 
         match response {
             MetaResponse::Status(Status::Stored) => Ok(None),
