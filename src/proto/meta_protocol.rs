@@ -166,6 +166,100 @@ pub trait MetaProtocol {
         delta: Option<u64>,
         meta_flags: Option<&[&str]>,
     ) -> impl Future<Output = Result<Option<MetaValue>, Error>>;
+
+    /// Gets many keys in one round trip.
+    ///
+    /// Every key is sent as a quiet `mg` carrying the `k` flag, followed by a single `mn`. The
+    /// server suppresses misses in quiet mode, so only hits come back; each returned `MetaValue`
+    /// has `key` populated so the caller can match hits to the requested keys. Keys that were
+    /// not found are simply absent from the result.
+    ///
+    /// Every key is validated before anything is written, so a key that is too long fails the
+    /// whole call without leaving a partial pipeline on the connection.
+    ///
+    /// An error line (`CLIENT_ERROR`, `SERVER_ERROR`, `ERROR`) for any key fails the call and
+    /// leaves later responses of the same pipeline unread; the connection should be discarded
+    /// rather than reused.
+    //
+    // Command format:
+    // mg <key> <meta_flags>* k q\r\n  (once per key)
+    // mn\r\n
+    //
+    // - <meta_flags> is an optional slice of string references applied to every key, for example
+    //   `v` to return values. `k` and `q` are always added and are ignored if supplied.
+    fn meta_get_multi<K: AsRef<[u8]>>(
+        &mut self,
+        keys: &[K],
+        meta_flags: Option<&[&str]>,
+    ) -> impl Future<Output = Result<Vec<MetaValue>, Error>>;
+
+    /// Sets many keys in one round trip.
+    ///
+    /// Every item is sent as a quiet `ms` carrying the `k` flag, followed by a single `mn`. The
+    /// server suppresses `HD` in quiet mode, so a fully successful pipeline returns an empty
+    /// `Vec`. Items the server refused (`NS`, `EX`, `NF`) are returned with `key` and `status`
+    /// populated.
+    ///
+    /// Every key is validated before anything is written, so a key that is too long fails the
+    /// whole call without leaving a partial pipeline on the connection.
+    ///
+    /// An error line (`CLIENT_ERROR`, `SERVER_ERROR`, `ERROR`) for any item fails the call and
+    /// leaves later responses of the same pipeline unread; the connection should be discarded
+    /// rather than reused.
+    //
+    // Command format:
+    // ms <key> <datalen> <meta_flags>* k q\r\n<data_block>\r\n  (once per item)
+    // mn\r\n
+    //
+    // - <meta_flags> is an optional slice of string references applied to every item, for example
+    //   `T300` for a TTL. `k` and `q` are always added and are ignored if supplied.
+    fn meta_set_multi<K, V>(
+        &mut self,
+        items: &[(K, V)],
+        meta_flags: Option<&[&str]>,
+    ) -> impl Future<Output = Result<Vec<MetaValue>, Error>>
+    where
+        K: AsRef<[u8]>,
+        V: AsMemcachedValue;
+}
+
+/// Writes the caller's meta flags for a pipelined command, skipping the flags the pipeline
+/// itself owns (`k` and `q`).
+async fn write_pipeline_meta_flags(
+    client: &mut Client,
+    meta_flags: Option<&[&str]>,
+) -> Result<(), Error> {
+    if let Some(meta_flags) = meta_flags {
+        for flag in meta_flags {
+            if flag.starts_with('k') || flag.starts_with('q') {
+                continue;
+            }
+            client.conn.write_all(b" ").await?;
+            client.conn.write_all(flag.as_bytes()).await?;
+        }
+    }
+    Ok(())
+}
+
+/// Reads pipelined responses until the terminating `MN`, collecting every response that carries
+/// per-key metadata. Bare success and miss statuses are skipped; error lines fail the read.
+async fn collect_pipeline_responses(
+    client: &mut Client,
+    parser: MetaResponseParser,
+) -> Result<Vec<MetaValue>, Error> {
+    let mut collected = Vec::new();
+
+    loop {
+        match client.drive_receive(parser).await? {
+            MetaResponse::Status(Status::NoOp) => return Ok(collected),
+            MetaResponse::Status(Status::Error(kind)) => {
+                return Err(Error::Protocol(Status::Error(kind)))
+            }
+            MetaResponse::Status(_) => {}
+            MetaResponse::Data(Some(values)) => collected.extend(values),
+            MetaResponse::Data(None) => {}
+        }
+    }
 }
 
 impl MetaProtocol for Client {
@@ -447,5 +541,67 @@ impl MetaProtocol for Client {
                 })
                 .transpose(),
         }
+    }
+
+    async fn meta_get_multi<K: AsRef<[u8]>>(
+        &mut self,
+        keys: &[K],
+        meta_flags: Option<&[&str]>,
+    ) -> Result<Vec<MetaValue>, Error> {
+        if keys.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        for key in keys {
+            Self::validate_key_length(key.as_ref())?;
+        }
+
+        for key in keys {
+            self.conn.write_all(b"mg ").await?;
+            self.conn.write_all(key.as_ref()).await?;
+            write_pipeline_meta_flags(self, meta_flags).await?;
+            self.conn.write_all(b" k q\r\n").await?;
+        }
+
+        self.conn.write_all(b"mn\r\n").await?;
+        self.conn.flush().await?;
+
+        collect_pipeline_responses(self, parse_meta_get_response).await
+    }
+
+    async fn meta_set_multi<K, V>(
+        &mut self,
+        items: &[(K, V)],
+        meta_flags: Option<&[&str]>,
+    ) -> Result<Vec<MetaValue>, Error>
+    where
+        K: AsRef<[u8]>,
+        V: AsMemcachedValue,
+    {
+        if items.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        for (key, _) in items {
+            Self::validate_key_length(key.as_ref())?;
+        }
+
+        for (key, value) in items {
+            let vr = value.as_bytes();
+
+            self.conn.write_all(b"ms ").await?;
+            self.conn.write_all(key.as_ref()).await?;
+            self.conn.write_all(b" ").await?;
+            self.conn.write_all(vr.len().to_string().as_bytes()).await?;
+            write_pipeline_meta_flags(self, meta_flags).await?;
+            self.conn.write_all(b" k q\r\n").await?;
+            self.conn.write_all(vr.as_ref()).await?;
+            self.conn.write_all(b"\r\n").await?;
+        }
+
+        self.conn.write_all(b"mn\r\n").await?;
+        self.conn.flush().await?;
+
+        collect_pipeline_responses(self, parse_meta_set_response).await
     }
 }

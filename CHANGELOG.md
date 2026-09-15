@@ -10,6 +10,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+
+- Added `MetaProtocol::meta_get_multi`, which reads many keys in one round trip by pipelining quiet `mg ... k q` commands behind a single `mn`. Hits are returned with `key` populated; misses are absent.
+- Added `MetaProtocol::meta_set_multi`, which stores many items in one round trip by pipelining quiet `ms ... k q` commands behind a single `mn`. Items the server refused (`NS`, `EX`, `NF`) are returned with `key` and `status` populated; an empty result means every item was stored.
+
+### Changed
+
+- **Breaking:** `mg` values are now returned byte-for-byte. The parser previously stripped trailing ASCII whitespace from every value, which corrupted binary payloads ending in a whitespace byte. Counters that memcached pads with trailing spaces after a shrinking `ma` are no longer trimmed; callers reading counters through `mg` should trim the padding themselves.
+
+### Fixed
+
+- A zero-length `mg` value (for example after a tombstoning `md … x`) left the empty data block's `\r\n` in the read buffer, misframing the next response on the connection. The terminator is now consumed.
+
 ## [0.7.0] - 2026-07-27
 
 - Fixed meta protocol error parsing

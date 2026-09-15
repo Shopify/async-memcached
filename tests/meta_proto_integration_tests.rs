@@ -2028,7 +2028,9 @@ async fn test_meta_increment_with_no_flags() {
 async fn test_meta_decrement_with_no_flags() {
     let key = "meta-decrement-no-flags";
     let initial_value = "100";
-    let expected_value = "9";
+    // memcached rewrites a shrinking counter in place and pads it with spaces to its previous
+    // length. The client returns the stored bytes exactly; counter readers trim the padding.
+    let expected_value = "9  ";
 
     let mut client = setup_client(&[key]).await;
 
@@ -2052,11 +2054,12 @@ async fn test_meta_decrement_with_no_flags() {
         .unwrap()
         .unwrap();
 
+    let stored = String::from_utf8(get_result.data.unwrap()).unwrap();
     assert_eq!(
-        String::from_utf8(get_result.data.unwrap()).unwrap(),
-        expected_value,
+        stored, expected_value,
         "Value after decrement does not match expected value"
     );
+    assert_eq!(stored.trim_end(), "9");
 }
 
 #[ignore = "Relies on a running memcached server"]
@@ -2476,4 +2479,330 @@ async fn test_meta_increment_raises_error_when_opaque_is_too_long() {
         incr_result,
         Err(Error::Protocol(Status::Error(ErrorKind::OpaqueTooLong)))
     ));
+}
+
+#[tokio::test]
+#[parallel]
+async fn test_meta_get_multi_sends_one_quiet_pipeline_and_matches_hits_by_key() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+
+        let command = read_until_contains(&mut socket, b"mn\r\n").await;
+        assert_eq!(
+            command.as_slice(),
+            b"mg first v k q\r\nmg missing v k q\r\nmg second v k q\r\nmn\r\n"
+        );
+        // Quiet mode suppresses the miss; hits arrive with the key echoed, and binary
+        // payloads ending in whitespace come back byte-for-byte.
+        socket
+            .write_all(b"VA 3 kfirst\r\none\r\nVA 4 ksecond\r\ntwo \r\nMN\r\n")
+            .await
+            .unwrap();
+
+        // The connection is still aligned for the next command.
+        let next = read_until_contains(&mut socket, b"\r\n").await;
+        assert_eq!(next.as_slice(), b"mg next-key v\r\n");
+        socket.write_all(b"VA 4\r\nnext\r\n").await.unwrap();
+    });
+
+    let mut client = Client::new(format!("tcp://{addr}")).await.unwrap();
+
+    let hits = client
+        .meta_get_multi(&["first", "missing", "second"], Some(&["v", "q", "k"]))
+        .await
+        .unwrap();
+
+    assert_eq!(hits.len(), 2);
+    assert_eq!(hits[0].key, Some(b"first".to_vec()));
+    assert_eq!(hits[0].data, Some(b"one".to_vec()));
+    assert_eq!(hits[1].key, Some(b"second".to_vec()));
+    assert_eq!(hits[1].data, Some(b"two ".to_vec()));
+
+    let next = client
+        .meta_get("next-key", false, None, Some(&["v"]))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(next.data, Some(b"next".to_vec()));
+
+    server.await.unwrap();
+}
+
+#[tokio::test]
+#[parallel]
+async fn test_meta_get_multi_surfaces_error_lines() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        read_until_contains(&mut socket, b"mn\r\n").await;
+        socket
+            .write_all(b"VA 3 kfirst\r\none\r\nCLIENT_ERROR bad command line format\r\nMN\r\n")
+            .await
+            .unwrap();
+    });
+
+    let mut client = Client::new(format!("tcp://{addr}")).await.unwrap();
+
+    let result = client
+        .meta_get_multi(&["first", "second"], Some(&["v"]))
+        .await;
+
+    assert_eq!(
+        result,
+        Err(Error::Protocol(Status::Error(ErrorKind::Client(
+            "bad command line format".to_string()
+        ))))
+    );
+
+    server.await.unwrap();
+}
+
+#[tokio::test]
+#[parallel]
+async fn test_meta_multi_with_no_items_does_no_io() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut buf = [0; 16];
+        let read = tokio::time::timeout(std::time::Duration::from_secs(5), socket.read(&mut buf))
+            .await
+            .expect("client did not close the connection")
+            .unwrap();
+        assert_eq!(read, 0, "an empty multi command wrote to the socket");
+    });
+
+    let mut client = Client::new(format!("tcp://{addr}")).await.unwrap();
+
+    let keys: [&str; 0] = [];
+    assert!(client
+        .meta_get_multi(&keys, Some(&["v"]))
+        .await
+        .unwrap()
+        .is_empty());
+
+    let items: [(&str, &str); 0] = [];
+    assert!(client
+        .meta_set_multi(&items, None)
+        .await
+        .unwrap()
+        .is_empty());
+
+    drop(client);
+    server.await.unwrap();
+}
+
+#[tokio::test]
+#[parallel]
+async fn test_meta_multi_rejects_long_keys_before_writing() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut buf = [0; 16];
+        let read = tokio::time::timeout(std::time::Duration::from_secs(5), socket.read(&mut buf))
+            .await
+            .expect("client did not close the connection")
+            .unwrap();
+        assert_eq!(read, 0, "a rejected multi command wrote a partial pipeline");
+    });
+
+    let mut client = Client::new(format!("tcp://{addr}")).await.unwrap();
+    let long_key = "a".repeat(MAX_KEY_LENGTH + 1);
+
+    let get = client
+        .meta_get_multi(&["short", long_key.as_str()], Some(&["v"]))
+        .await;
+    assert!(matches!(
+        get,
+        Err(Error::Protocol(Status::Error(ErrorKind::KeyTooLong)))
+    ));
+
+    let set = client
+        .meta_set_multi(&[("short", "value"), (long_key.as_str(), "value")], None)
+        .await;
+    assert!(matches!(
+        set,
+        Err(Error::Protocol(Status::Error(ErrorKind::KeyTooLong)))
+    ));
+
+    drop(client);
+    server.await.unwrap();
+}
+
+#[tokio::test]
+#[parallel]
+async fn test_meta_set_multi_sends_one_quiet_pipeline_and_reports_refused_items() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+
+        let command = read_until_contains(&mut socket, b"mn\r\n").await;
+        assert_eq!(
+            command.as_slice(),
+            b"ms first 3 T300 ME k q\r\none\r\nms second 3 T300 ME k q\r\ntwo\r\nmn\r\n"
+        );
+        // Quiet mode suppresses HD; the refused item comes back with its key.
+        socket.write_all(b"NS ksecond\r\nMN\r\n").await.unwrap();
+
+        let next = read_until_contains(&mut socket, b"\r\n").await;
+        assert_eq!(next.as_slice(), b"mg next-key v\r\n");
+        socket.write_all(b"VA 4\r\nnext\r\n").await.unwrap();
+    });
+
+    let mut client = Client::new(format!("tcp://{addr}")).await.unwrap();
+
+    let refused = client
+        .meta_set_multi(
+            &[("first", "one"), ("second", "two")],
+            Some(&["T300", "ME", "q"]),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(refused.len(), 1);
+    assert_eq!(refused[0].key, Some(b"second".to_vec()));
+    assert_eq!(refused[0].status, Some(Status::NotStored));
+
+    let next = client
+        .meta_get("next-key", false, None, Some(&["v"]))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(next.data, Some(b"next".to_vec()));
+
+    server.await.unwrap();
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_get_multi_against_server_returns_only_hits() {
+    let hit_one = "meta-get-multi-hit-one";
+    let hit_two = "meta-get-multi-hit-two";
+    let miss = "meta-get-multi-miss";
+
+    let mut client = setup_client(&[hit_one, hit_two, miss]).await;
+
+    client
+        .meta_set(hit_one, "one", false, None, None)
+        .await
+        .unwrap();
+    client
+        .meta_set(hit_two, "two", false, None, None)
+        .await
+        .unwrap();
+
+    let mut hits = client
+        .meta_get_multi(&[hit_one, miss, hit_two], Some(&["v"]))
+        .await
+        .unwrap();
+    hits.sort_by(|a, b| a.key.cmp(&b.key));
+
+    assert_eq!(hits.len(), 2);
+    assert_eq!(hits[0].key, Some(hit_one.as_bytes().to_vec()));
+    assert_eq!(hits[0].data, Some(b"one".to_vec()));
+    assert_eq!(hits[1].key, Some(hit_two.as_bytes().to_vec()));
+    assert_eq!(hits[1].data, Some(b"two".to_vec()));
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_set_multi_against_server_stores_every_item() {
+    let first = "meta-set-multi-first";
+    let second = "meta-set-multi-second";
+
+    let mut client = setup_client(&[first, second]).await;
+
+    let refused = client
+        .meta_set_multi(&[(first, "one"), (second, "two")], Some(&["T60"]))
+        .await
+        .unwrap();
+    assert!(refused.is_empty());
+
+    let first_value = client
+        .meta_get(first, false, None, Some(&["v"]))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(first_value.data, Some(b"one".to_vec()));
+
+    // `ME` (add) refuses keys that already exist and reports them by key.
+    let refused = client
+        .meta_set_multi(
+            &[(first, "again"), ("meta-set-multi-third", "three")],
+            Some(&["ME"]),
+        )
+        .await
+        .unwrap();
+    assert_eq!(refused.len(), 1);
+    assert_eq!(refused[0].key, Some(first.as_bytes().to_vec()));
+    assert_eq!(refused[0].status, Some(Status::NotStored));
+
+    client
+        .delete_no_reply("meta-set-multi-third")
+        .await
+        .unwrap();
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_get_returns_binary_values_with_trailing_whitespace_intact() {
+    let key = "meta-get-binary-value-trailing-whitespace";
+    let value: &[u8] = b"\x01\x02payload \t\r\n ";
+
+    let mut client = setup_client(&[key]).await;
+
+    client
+        .meta_set(key, value, false, None, None)
+        .await
+        .unwrap();
+
+    let result = client
+        .meta_get(key, false, None, Some(&["v"]))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(result.data.as_deref(), Some(value));
+
+    let hits = client.meta_get_multi(&[key], Some(&["v"])).await.unwrap();
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].data.as_deref(), Some(value));
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_meta_get_zero_length_value_keeps_connection_aligned() {
+    let key = "meta-get-zero-length-value";
+
+    let mut client = setup_client(&[key]).await;
+
+    client.meta_set(key, "", false, None, None).await.unwrap();
+
+    let empty = client
+        .meta_get(key, false, None, Some(&["v"]))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(empty.data, None);
+
+    // A second command on the same connection must not see the empty block's terminator.
+    let again = client
+        .meta_get(key, false, None, Some(&["v", "k"]))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(again.key, Some(key.as_bytes().to_vec()));
 }
