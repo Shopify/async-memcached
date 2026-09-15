@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added `MetaProtocol::meta_get_multi`, which reads many keys in one round trip by pipelining quiet `mg ... k q` commands behind a single `mn`. Hits are returned with `key` populated; misses are absent.
 - Added `MetaProtocol::meta_set_multi`, which stores many items in one round trip by pipelining quiet `ms ... k q` commands behind a single `mn`. Items the server refused (`NS`, `EX`, `NF`) are returned with `key` and `status` populated; an empty result means every item was stored.
+- Re-exported `MetaValue` from the crate root so callers can name the type the meta protocol methods return.
 
 ### Changed
 

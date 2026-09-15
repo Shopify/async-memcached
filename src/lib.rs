@@ -16,7 +16,7 @@ use self::parser::{
     parse_ascii_metadump_response, parse_ascii_response, parse_ascii_stats_response,
 };
 pub use self::parser::{
-    ErrorKind, KeyMetadata, MetadumpResponse, Response, StatsResponse, Status, Value,
+    ErrorKind, KeyMetadata, MetaValue, MetadumpResponse, Response, StatsResponse, Status, Value,
 };
 
 /// Ascii & Meta protocol implementations
