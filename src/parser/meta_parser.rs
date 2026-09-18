@@ -179,16 +179,20 @@ fn parse_meta_get_data_value(buf: &[u8]) -> IResult<&[u8], MetaResponse> {
             let (input, flag_array) = parse_meta_flag_values_as_slice(input)?; // parses the flags from the input
             let (input, _) = crlf(input)?; // removes the leading crlf from the data block
 
-            // After tombstoning a key, the memcached server will return size 0 and a trailing \r\n for the data block,
-            // which can be interpreted as None.
-            let (input, mut data) = if size > 0 {
+            // The data block is returned byte-for-byte: the declared size is authoritative, so values
+            // may legitimately end in whitespace (binary payloads, or counters that memcached pads
+            // with trailing spaces after a shrinking decrement). Callers that read counters through
+            // `mg` trim the padding themselves.
+            //
+            // After tombstoning a key, the memcached server returns size 0 followed by an empty data
+            // block, which is reported as `None`. The block's terminating \r\n is still consumed so
+            // the next response starts on a frame boundary.
+            let (input, data) = if size > 0 {
                 take_until_size(input, size)? // parses the data from the input
             } else {
+                let (input, _) = crlf(input)?; // consume the empty data block's terminator
                 (input, None) // tombstoned key, no data block
             };
-
-            // trim the data block of any trailing whitespace
-            data = data.map(|d| d.trim_ascii_end());
 
             let meta_value =
                 construct_meta_value_from_flag_array(flag_array, data, Some(Status::Value))
@@ -1073,5 +1077,46 @@ mod tests {
             response.1,
             MetaResponse::Status(Status::Error(ErrorKind::Client("bad flag".to_string())))
         );
+    }
+
+    #[test]
+    fn test_parse_meta_get_response_preserves_trailing_whitespace_in_value() {
+        // Binary payloads and space-padded counters both end in whitespace bytes; the declared
+        // size is authoritative and the value must come back byte-for-byte.
+        let (read, response) = parse_meta_get_response(b"VA 6 kbinary\r\n\x01ab \t\n\r\nHD\r\n")
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(read, b"VA 6 kbinary\r\n\x01ab \t\n\r\n".len());
+        match response {
+            MetaResponse::Data(Some(values)) => {
+                assert_eq!(values.len(), 1);
+                assert_eq!(values[0].key, Some(b"binary".to_vec()));
+                assert_eq!(values[0].data, Some(b"\x01ab \t\n".to_vec()));
+            }
+            other => panic!("expected a data response, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_meta_get_response_consumes_empty_data_block() {
+        // A zero-size value still carries its data block terminator; leaving it in the buffer
+        // would misframe the next pipelined response.
+        let (read, response) = parse_meta_get_response(b"VA 0 t-1\r\n\r\nMN\r\n")
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(read, b"VA 0 t-1\r\n\r\n".len());
+        match response {
+            MetaResponse::Data(Some(values)) => {
+                assert_eq!(values[0].data, None);
+                assert_eq!(values[0].ttl_remaining, Some(-1));
+            }
+            other => panic!("expected a data response, got {:?}", other),
+        }
+
+        let (read, response) = parse_meta_get_response(b"MN\r\n").unwrap().unwrap();
+        assert_eq!(read, 4);
+        assert_eq!(response, MetaResponse::Status(Status::NoOp));
     }
 }
