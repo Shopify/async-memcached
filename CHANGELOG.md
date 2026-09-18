@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+## [0.8.0] - 2026-09-18
+
 ### Added
 
 - Added `MetaProtocol::meta_get_multi`, which reads many keys in one round trip by pipelining quiet `mg ... k q` commands behind a single `mn`. Hits are returned with `key` populated; misses are absent.
@@ -25,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A zero-length `mg` value (for example after a tombstoning `md … x`) left the empty data block's `\r\n` in the read buffer, misframing the next response on the connection. The terminator is now consumed.
 
 ## [0.7.0] - 2026-07-27
+
+### Fixed
 
 - Fixed meta protocol error parsing
 
