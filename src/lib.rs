@@ -3,6 +3,7 @@
 
 use bytes::BytesMut;
 use fxhash::FxHashMap;
+use std::ops::{Deref, DerefMut};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 
 mod connection;
@@ -32,9 +33,11 @@ const MAX_KEY_LENGTH: usize = 250; // reference in memcached documentation: http
 ///
 /// [`Client`] is mapped one-to-one with a given connection to a memcached server, and provides a
 /// high-level API for executing commands on that connection.
+///
+/// Cancelling a meta operation or failing before its response is complete closes the connection.
+/// Later I/O returns [`Error::ConnectionClosed`]; operations are not retried.
 pub struct Client {
     buf: BytesMut,
-    last_read_n: Option<usize>,
     conn: Connection,
 }
 
@@ -49,8 +52,25 @@ impl Client {
 
         Ok(Client {
             buf: BytesMut::new(),
-            last_read_n: None,
             conn: connection,
+        })
+    }
+
+    /// Returns whether an incomplete meta operation closed this client's connection.
+    ///
+    /// This checks local state only; it does not check whether the server is reachable.
+    pub fn is_closed(&self) -> bool {
+        matches!(self.conn, Connection::Closed)
+    }
+
+    fn start_operation(&mut self) -> Result<OperationGuard<'_>, Error> {
+        if self.is_closed() {
+            return Err(Error::ConnectionClosed);
+        }
+
+        Ok(OperationGuard {
+            client: self,
+            completed: false,
         })
     }
 
@@ -58,39 +78,13 @@ impl Client {
     where
         F: Fn(&[u8]) -> Result<Option<(usize, R)>, ErrorKind>,
     {
-        // If we serviced a previous request, advance our buffer forward.
-        if let Some(n) = self.last_read_n {
-            // Not sure how this situation occurs, but it seems to be related to transient network
-            // issues. This guard is here to prevent panics, but it's not clear what the correct
-            // behavior is. For now, we just return an error, which allows the caller to retry or
-            // fall back to the uncached data source as they see fit.
-            if n > self.buf.len() {
-                return Err(Status::Error(ErrorKind::Client(
-                    "Buffer length is less than last read length".to_string(),
-                ))
-                .into());
-            }
-            let _ = self.buf.split_to(n);
-        }
-
         let mut needs_more_data = false;
         loop {
             if self.buf.is_empty() || needs_more_data {
-                match self.conn {
-                    Connection::Tcp(ref mut s) => {
-                        self.buf.reserve(1024);
-                        let n = s.read_buf(&mut self.buf).await?;
-                        if n == 0 {
-                            return Err(Error::Io(std::io::ErrorKind::UnexpectedEof.into()));
-                        }
-                    }
-                    Connection::Unix(ref mut s) => {
-                        self.buf.reserve(1024);
-                        let n = s.read_buf(&mut self.buf).await?;
-                        if n == 0 {
-                            return Err(Error::Io(std::io::ErrorKind::UnexpectedEof.into()));
-                        }
-                    }
+                self.buf.reserve(1024);
+                let n = self.conn.read_buf(&mut self.buf).await?;
+                if n == 0 {
+                    return Err(Error::Io(std::io::ErrorKind::UnexpectedEof.into()));
                 }
             }
 
@@ -98,7 +92,7 @@ impl Client {
             match op(&self.buf) {
                 // We got a response.
                 Ok(Some((n, response))) => {
-                    self.last_read_n = Some(n);
+                    let _ = self.buf.split_to(n);
                     return Ok(response);
                 }
                 // We didn't have enough data, so loop around and try again.
@@ -291,6 +285,41 @@ impl Client {
             self.conn.write_all(b"\r\n").await?;
         }
         Ok(())
+    }
+}
+
+struct OperationGuard<'a> {
+    client: &'a mut Client,
+    completed: bool,
+}
+
+impl OperationGuard<'_> {
+    fn complete(mut self) {
+        self.completed = true;
+    }
+}
+
+impl Deref for OperationGuard<'_> {
+    type Target = Client;
+
+    fn deref(&self) -> &Self::Target {
+        self.client
+    }
+}
+
+impl DerefMut for OperationGuard<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.client
+    }
+}
+
+impl Drop for OperationGuard<'_> {
+    fn drop(&mut self) {
+        if !self.completed {
+            // Dropping the transport discards buffered writes without flushing them.
+            self.client.conn = Connection::Closed;
+            self.client.buf = BytesMut::new();
+        }
     }
 }
 
