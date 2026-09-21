@@ -110,10 +110,7 @@ impl Addr {
 
 impl Connection {
     pub(crate) fn closed_error() -> io::Error {
-        io::Error::new(
-            io::ErrorKind::NotConnected,
-            "connection closed after an incomplete operation",
-        )
+        io::Error::new(io::ErrorKind::NotConnected, Error::ConnectionClosed)
     }
 
     pub async fn new<S: AsRef<str>>(dsn: S) -> Result<Self, Error> {

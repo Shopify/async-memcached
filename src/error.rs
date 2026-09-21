@@ -7,6 +7,9 @@ pub enum Error {
     /// Connect error.
     /// Useful for distinguishing between transitive I/O errors and connection errors.
     Connect(io::Error),
+    /// The connection was closed after an incomplete meta operation and cannot be reused.
+    /// Create a new [`Client`](crate::Client) before sending more commands.
+    ConnectionClosed,
     /// I/O-related error.
     Io(io::Error),
     /// A protocol-level error i.e. a failed operation or message that
@@ -20,6 +23,7 @@ impl PartialEq for Error {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Connect(e1), Self::Connect(e2)) => e1.kind() == e2.kind(),
+            (Self::ConnectionClosed, Self::ConnectionClosed) => true,
             (Self::Io(e1), Self::Io(e2)) => e1.kind() == e2.kind(),
             (Self::Protocol(s1), Self::Protocol(s2)) => s1 == s2,
             _ => false,
@@ -40,6 +44,7 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Connect(e) => write!(f, "connect: {}", e),
+            Self::ConnectionClosed => write!(f, "connection closed after an incomplete operation"),
             Self::Io(e) => write!(f, "io: {}", e),
             Self::Protocol(e) => write!(f, "protocol: {}", e),
             Self::ParseError(e) => write!(f, "parse error: {:?}", e),
@@ -49,7 +54,14 @@ impl fmt::Display for Error {
 
 impl From<std::io::Error> for Error {
     fn from(e: std::io::Error) -> Self {
-        Error::Io(e)
+        if matches!(
+            e.get_ref().and_then(|inner| inner.downcast_ref::<Self>()),
+            Some(Self::ConnectionClosed)
+        ) {
+            Self::ConnectionClosed
+        } else {
+            Self::Io(e)
+        }
     }
 }
 
@@ -62,5 +74,36 @@ impl From<Status> for Error {
 impl From<nom::error::ErrorKind> for Error {
     fn from(e: nom::error::ErrorKind) -> Self {
         Error::ParseError(e)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{io, Error, Status};
+
+    #[test]
+    fn other_io_errors_keep_their_kind_and_message() {
+        for error in [
+            io::Error::from(io::ErrorKind::NotConnected),
+            io::Error::new(
+                io::ErrorKind::NotConnected,
+                "connection closed after an incomplete operation",
+            ),
+            io::Error::new(
+                io::ErrorKind::NotConnected,
+                Error::Protocol(Status::NotFound),
+            ),
+            io::Error::from(io::ErrorKind::BrokenPipe),
+        ] {
+            let kind = error.kind();
+            let message = error.to_string();
+            match Error::from(error) {
+                Error::Io(error) => {
+                    assert_eq!(error.kind(), kind);
+                    assert_eq!(error.to_string(), message);
+                }
+                error => panic!("expected an I/O error, got {:?}", error),
+            }
+        }
     }
 }

@@ -36,11 +36,8 @@ async fn expect_closed(peer: &mut TcpStream) {
     }
 }
 
-fn expect_not_connected<T>(result: Result<T, Error>) {
-    match result {
-        Err(Error::Io(error)) => assert_eq!(error.kind(), io::ErrorKind::NotConnected),
-        _ => panic!("expected a closed connection error"),
-    }
+fn expect_connection_closed<T>(result: Result<T, Error>) {
+    assert_eq!(result.map(|_| ()), Err(Error::ConnectionClosed));
 }
 
 async fn exchange<T>(
@@ -141,6 +138,7 @@ async fn cancellation_closes_each_meta_entry_point() {
             "{:?} left the connection open",
             operation
         );
+        expect_connection_closed(operation.run(&mut client).await);
         expect_closed(&mut peer).await;
     }
 }
@@ -172,8 +170,8 @@ async fn cancellation_after_success_rejects_delayed_response_and_later_writes() 
         .await
         .expect("delayed response write timed out");
     timeout(TEST_TIMEOUT, async {
-        expect_not_connected(client.meta_get("next", false, None, Some(&["v"])).await);
-        expect_not_connected(client.set("next", "value", None, None).await);
+        expect_connection_closed(client.meta_get("next", false, None, Some(&["v"])).await);
+        expect_connection_closed(client.set("next", "value", None, None).await);
     })
     .await
     .expect("closed client attempted I/O");
@@ -271,7 +269,7 @@ async fn batch_error_closes_even_if_terminator_is_already_buffered() {
             ))))
         );
         assert!(client.is_closed());
-        expect_not_connected(client.meta_get("next", false, None, Some(&["v"])).await);
+        expect_connection_closed(client.meta_get("next", false, None, Some(&["v"])).await);
         expect_closed(&mut peer).await;
     }
 }
@@ -325,7 +323,10 @@ async fn quiet_operation_cancellation_before_complete_terminator_closes_connecti
 
 #[tokio::test]
 async fn malformed_or_truncated_response_closes_connection() {
-    for response in [&b"invalid response\r\n"[..], &b"VA 5\r\npart"[..]] {
+    for (response, expect_io_error) in [
+        (&b"invalid response\r\n"[..], false),
+        (&b"VA 5\r\npart"[..], true),
+    ] {
         let (mut client, mut peer) = pair().await;
         let (result, ()) = timeout(TEST_TIMEOUT, async {
             tokio::join!(client.meta_get("key", false, None, Some(&["v"])), async {
@@ -336,8 +337,15 @@ async fn malformed_or_truncated_response_closes_connection() {
         })
         .await
         .unwrap();
-        assert!(result.is_err());
+        if expect_io_error {
+            assert!(
+                matches!(result, Err(Error::Io(ref error)) if error.kind() == io::ErrorKind::UnexpectedEof)
+            );
+        } else {
+            assert!(matches!(result, Err(Error::Protocol(_))));
+        }
         assert!(client.is_closed());
+        expect_connection_closed(client.meta_get("next", false, None, Some(&["v"])).await);
         expect_closed(&mut peer).await;
     }
 }

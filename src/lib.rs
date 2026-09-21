@@ -35,7 +35,7 @@ const MAX_KEY_LENGTH: usize = 250; // reference in memcached documentation: http
 /// high-level API for executing commands on that connection.
 ///
 /// Cancelling a meta operation or failing before its response is complete closes the connection.
-/// Use [`Client::is_closed`] to check whether a replacement client is needed. Operations are not retried.
+/// Later I/O returns [`Error::ConnectionClosed`]; operations are not retried.
 pub struct Client {
     buf: BytesMut,
     conn: Connection,
@@ -65,7 +65,7 @@ impl Client {
 
     fn start_operation(&mut self) -> Result<OperationGuard<'_>, Error> {
         if self.is_closed() {
-            return Err(Connection::closed_error().into());
+            return Err(Error::ConnectionClosed);
         }
 
         Ok(OperationGuard {

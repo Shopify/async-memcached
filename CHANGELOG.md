@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added `Client::is_closed` so callers can discard a connection closed by an incomplete meta operation.
 
+### Changed
+
+- **Breaking:** Added `Error::ConnectionClosed` for I/O attempted after an incomplete meta operation closes the client. Exhaustive matches on `Error` must handle the new variant.
+
 ### Fixed
 
 - Close the connection when a meta operation is cancelled or fails before its response is complete, including early batch errors. Discard buffered writes and consume each parsed response once.
