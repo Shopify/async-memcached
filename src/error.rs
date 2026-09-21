@@ -82,6 +82,13 @@ mod tests {
     use super::{io, Error, Status};
 
     #[test]
+    fn closed_transport_error_becomes_connection_closed() {
+        let error = io::Error::new(io::ErrorKind::NotConnected, Error::ConnectionClosed);
+
+        assert_eq!(Error::from(error), Error::ConnectionClosed);
+    }
+
+    #[test]
     fn other_io_errors_keep_their_kind_and_message() {
         for error in [
             io::Error::from(io::ErrorKind::NotConnected),
