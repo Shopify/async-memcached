@@ -10,6 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+
+- Added `Client::is_closed` so callers can discard a connection closed by an incomplete meta operation.
+
+### Fixed
+
+- Close the connection when a meta operation is cancelled or fails before its response is complete, including early batch errors. Discard buffered writes and consume each parsed response once.
+
 ## [0.8.0] - 2026-09-18
 
 ### Added

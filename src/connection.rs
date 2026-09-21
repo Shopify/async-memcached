@@ -12,6 +12,7 @@ use crate::Error;
 pub enum Connection {
     Tcp(#[pin] BufReader<BufWriter<TcpStream>>),
     Unix(#[pin] BufReader<BufWriter<UnixStream>>),
+    Closed,
 }
 
 impl AsyncRead for Connection {
@@ -23,6 +24,7 @@ impl AsyncRead for Connection {
         match self.project() {
             ConnectionProjection::Tcp(s) => s.poll_read(cx, buf),
             ConnectionProjection::Unix(s) => s.poll_read(cx, buf),
+            ConnectionProjection::Closed => Poll::Ready(Err(Self::closed_error())),
         }
     }
 }
@@ -32,6 +34,7 @@ impl AsyncWrite for Connection {
         match self.project() {
             ConnectionProjection::Tcp(s) => s.poll_write(cx, buf),
             ConnectionProjection::Unix(s) => s.poll_write(cx, buf),
+            ConnectionProjection::Closed => Poll::Ready(Err(Self::closed_error())),
         }
     }
 
@@ -39,6 +42,7 @@ impl AsyncWrite for Connection {
         match self.project() {
             ConnectionProjection::Tcp(s) => s.poll_flush(cx),
             ConnectionProjection::Unix(s) => s.poll_flush(cx),
+            ConnectionProjection::Closed => Poll::Ready(Err(Self::closed_error())),
         }
     }
 
@@ -46,6 +50,7 @@ impl AsyncWrite for Connection {
         match self.project() {
             ConnectionProjection::Tcp(s) => s.poll_shutdown(cx),
             ConnectionProjection::Unix(s) => s.poll_shutdown(cx),
+            ConnectionProjection::Closed => Poll::Ready(Err(Self::closed_error())),
         }
     }
 }
@@ -55,6 +60,7 @@ impl AsyncBufRead for Connection {
         match self.project() {
             ConnectionProjection::Tcp(s) => s.poll_fill_buf(cx),
             ConnectionProjection::Unix(s) => s.poll_fill_buf(cx),
+            ConnectionProjection::Closed => Poll::Ready(Err(Self::closed_error())),
         }
     }
 
@@ -62,6 +68,7 @@ impl AsyncBufRead for Connection {
         match self.project() {
             ConnectionProjection::Tcp(s) => s.consume(amt),
             ConnectionProjection::Unix(s) => s.consume(amt),
+            ConnectionProjection::Closed => {}
         }
     }
 }
@@ -102,6 +109,13 @@ impl Addr {
 }
 
 impl Connection {
+    pub(crate) fn closed_error() -> io::Error {
+        io::Error::new(
+            io::ErrorKind::NotConnected,
+            "connection closed after an incomplete operation",
+        )
+    }
+
     pub async fn new<S: AsRef<str>>(dsn: S) -> Result<Self, Error> {
         match Addr::parse(dsn.as_ref())? {
             Addr::Unix(path) => UnixStream::connect(path)
