@@ -27,15 +27,18 @@ pub use self::proto::{AsciiProtocol, MetaProtocol};
 mod value_serializer;
 pub use self::value_serializer::AsMemcachedValue;
 
-const MAX_KEY_LENGTH: usize = 250; // reference in memcached documentation: https://github.com/memcached/memcached/blob/5609673ed29db98a377749fab469fe80777de8fd/doc/protocol.txt#L46
+pub(crate) const MAX_KEY_LENGTH: usize = 250; // reference in memcached documentation: https://github.com/memcached/memcached/blob/5609673ed29db98a377749fab469fe80777de8fd/doc/protocol.txt#L46
 
 /// High-level memcached client.
 ///
 /// [`Client`] is mapped one-to-one with a given connection to a memcached server, and provides a
 /// high-level API for executing commands on that connection.
 ///
-/// Cancelling a meta operation or failing before its response is complete closes the connection.
-/// Later I/O returns [`Error::ConnectionClosed`]; operations are not retried.
+/// Cancelling an operation or failing before its response is complete closes the connection,
+/// because the unread bytes would otherwise be mistaken for the next operation's response.
+/// This applies to every ASCII, meta, and administrative command, and to dropping a
+/// [`MetadumpIter`] before it has been drained. Later I/O returns
+/// [`Error::ConnectionClosed`]; operations are not retried.
 pub struct Client {
     buf: BytesMut,
     conn: Connection,
@@ -56,7 +59,7 @@ impl Client {
         })
     }
 
-    /// Returns whether an incomplete meta operation closed this client's connection.
+    /// Returns whether an incomplete operation closed this client's connection.
     ///
     /// This checks local state only; it does not check whether the server is reachable.
     pub fn is_closed(&self) -> bool {
@@ -161,11 +164,14 @@ impl Client {
     /// For some setups, such as those using Twemproxy, this will return an error as those
     /// intermediate proxies do not support the version command.
     pub async fn version(&mut self) -> Result<String, Error> {
-        self.conn.write_all(b"version\r\n").await?;
-        self.conn.flush().await?;
+        let mut operation = self.start_operation()?;
+
+        operation.conn.write_all(b"version\r\n").await?;
+        operation.conn.flush().await?;
 
         let mut version = String::new();
-        let bytes = self.conn.read_line(&mut version).await?;
+        let bytes = operation.conn.read_line(&mut version).await?;
+        operation.complete();
 
         // Peel off the leading "VERSION " header.
         if bytes >= 8 && version.is_char_boundary(8) {
@@ -187,14 +193,22 @@ impl Client {
     /// started, as this call will only return [`Error`] if the command failed to be written to the
     /// server at all.
     ///
+    /// The dump occupies the connection until the iterator yields `None`. Dropping the iterator
+    /// before then closes the connection, since the remaining entries would otherwise be read as
+    /// the next operation's response.
+    ///
     /// Available as of memcached 1.4.31.
     pub async fn dump_keys(&mut self) -> Result<MetadumpIter<'_>, Error> {
-        self.conn.write_all(b"lru_crawler metadump all\r\n").await?;
-        self.conn.flush().await?;
+        let mut operation = self.start_operation()?;
+
+        operation
+            .conn
+            .write_all(b"lru_crawler metadump all\r\n")
+            .await?;
+        operation.conn.flush().await?;
 
         Ok(MetadumpIter {
-            client: self,
-            done: false,
+            operation: Some(operation),
         })
     }
 
@@ -206,12 +220,15 @@ impl Client {
     pub async fn stats(&mut self) -> Result<FxHashMap<String, String>, Error> {
         let mut entries = FxHashMap::default();
 
-        self.conn.write_all(b"stats\r\n").await?;
-        self.conn.flush().await?;
+        let mut operation = self.start_operation()?;
 
-        while let StatsResponse::Entry(key, value) = self.get_stats_response().await? {
+        operation.conn.write_all(b"stats\r\n").await?;
+        operation.conn.flush().await?;
+
+        while let StatsResponse::Entry(key, value) = operation.get_stats_response().await? {
             entries.insert(key, value);
         }
+        operation.complete();
 
         Ok(entries)
     }
@@ -222,11 +239,15 @@ impl Client {
     /// older than the time of the flush_all operation will be ignored for retrieval purposes.
     /// This operation does not free up memory taken up by the existing items.
     pub async fn flush_all(&mut self) -> Result<(), Error> {
-        self.conn.write_all(b"flush_all\r\n").await?;
-        self.conn.flush().await?;
+        let mut operation = self.start_operation()?;
+
+        operation.conn.write_all(b"flush_all\r\n").await?;
+        operation.conn.flush().await?;
 
         let mut response = String::new();
-        self.conn.read_line(&mut response).await?;
+        operation.conn.read_line(&mut response).await?;
+        operation.complete();
+
         // check if response is ok
         if response.trim() == "OK" {
             Ok(())
@@ -324,9 +345,12 @@ impl Drop for OperationGuard<'_> {
 }
 
 /// Asynchronous iterator for metadump operations.
+///
+/// The iterator holds the connection until it yields `None`. Dropping it earlier closes the
+/// connection; see [`Client::dump_keys`].
 pub struct MetadumpIter<'a> {
-    client: &'a mut Client,
-    done: bool,
+    /// `None` once the dump has ended, whether by `END`, a refusal, or an error.
+    operation: Option<OperationGuard<'a>>,
 }
 
 impl MetadumpIter<'_> {
@@ -338,25 +362,40 @@ impl MetadumpIter<'_> {
     ///
     /// Otherwise, `None` will be returned and signals the end of the iterator.  Subsequent calls
     /// will return `None`.
+    ///
+    /// A `BUSY` or `BADCLASS` refusal ends the iterator after the error is returned and leaves the
+    /// connection usable, since the whole refusal line has been read. A network or protocol error
+    /// also ends the iterator but closes the connection. Cancelling a call to `next` is safe: any
+    /// partially read entry stays buffered and the following call resumes from it.
     pub async fn next(&mut self) -> Option<Result<KeyMetadata, Error>> {
-        if self.done {
-            return None;
-        }
+        let operation = self.operation.as_mut()?;
 
-        match self.client.get_metadump_response().await {
+        match operation.get_metadump_response().await {
             Ok(MetadumpResponse::End) => {
-                self.done = true;
+                self.finish();
                 None
             }
             Ok(MetadumpResponse::BadClass(s)) => {
-                self.done = true;
+                self.finish();
                 Some(Err(Error::Protocol(MetadumpResponse::BadClass(s).into())))
             }
             Ok(MetadumpResponse::Busy(s)) => {
+                self.finish();
                 Some(Err(Error::Protocol(MetadumpResponse::Busy(s).into())))
             }
             Ok(MetadumpResponse::Entry(km)) => Some(Ok(km)),
-            Err(e) => Some(Err(e)),
+            Err(e) => {
+                // The stream is in an unknown state; dropping the guard uncompleted closes it.
+                self.operation = None;
+                Some(Err(e))
+            }
+        }
+    }
+
+    /// Marks the dump as fully read so the connection stays open.
+    fn finish(&mut self) {
+        if let Some(operation) = self.operation.take() {
+            operation.complete();
         }
     }
 }
