@@ -1,17 +1,14 @@
-use async_memcached::{AsciiProtocol, Client, Error, ErrorKind, Status};
-use rand::seq::IteratorRandom;
-use serial_test::{parallel, serial};
+mod support;
 
-// NOTE: Each test should run with keys unique to that test to avoid async conflicts.  Because these tests run concurrently,
-// it's possible to delete/overwrite keys created by another test before they're read.
+use async_memcached::{AsciiProtocol, Error, ErrorKind, Status};
+use serial_test::{parallel, serial};
+use support::TestClient;
 
 const MAX_KEY_LENGTH: usize = 250; // 250 bytes, default memcached max key length
 const LARGE_PAYLOAD_SIZE: usize = 1024 * 1024 - 310; // Memcached's default maximum payload size ~1MB minus max key length + metadata
 
-async fn setup_client(keys: &[&str]) -> Client {
-    let mut client = Client::new("tcp://127.0.0.1:11211")
-        .await
-        .expect("Failed to connect to server");
+async fn setup_client(keys: &[&str]) -> TestClient {
+    let mut client = TestClient::new().await;
 
     for key in keys {
         if key.len() > MAX_KEY_LENGTH {
@@ -44,14 +41,10 @@ async fn test_get_with_cached_key() {
         set_result
     );
 
-    let get_result = client.get(key).await;
-
-    assert!(
-        get_result.is_ok(),
-        "failed to get {}, {:?}",
-        key,
-        get_result
-    );
+    let get_result = client.get(key).await.unwrap().unwrap();
+    assert_eq!(get_result.key, key.as_bytes());
+    assert_eq!(get_result.data.as_deref(), Some(value.as_bytes()));
+    assert_eq!(get_result.flags, Some(0));
 }
 
 #[ignore = "Relies on a running memcached server"]
@@ -95,6 +88,10 @@ async fn test_add_with_string_value() {
     let result = client.add(key, "value", None, None).await;
 
     assert!(result.is_ok(), "failed to add {}, {:?}", key, result);
+    assert_eq!(
+        client.get(key).await.unwrap().unwrap().data,
+        Some(b"value".to_vec())
+    );
 }
 
 #[ignore = "Relies on a running memcached server"]
@@ -109,6 +106,10 @@ async fn test_add_with_u64_value() {
     let result = client.add(key, value, None, None).await;
 
     assert!(result.is_ok(), "failed to add {}, {:?}", key, result);
+    assert_eq!(
+        client.get(key).await.unwrap().unwrap().data,
+        Some(b"10".to_vec())
+    );
 }
 
 #[ignore = "Relies on a running memcached server"]
@@ -158,12 +159,15 @@ async fn test_add_multi() {
 
     let result = client.add_multi(&kv, None, None).await;
 
-    assert!(
-        result.is_ok(),
-        "failed to add_multi {:?}, {:?}",
-        &keys,
-        result
-    );
+    let result = result.unwrap();
+    assert_eq!(result.len(), keys.len());
+    assert!(result.values().all(Result::is_ok));
+    for (key, value) in kv {
+        assert_eq!(
+            client.get(key).await.unwrap().unwrap().data.as_deref(),
+            Some(value.as_bytes())
+        );
+    }
 }
 
 #[ignore = "Relies on a running memcached server"]
@@ -217,10 +221,10 @@ async fn test_add_multi_with_a_key_that_already_exists() {
     let add_response = client.add_multi(&kv, None, None).await;
 
     assert!(
-        &add_response.is_ok(),
+        add_response.is_ok(),
         "failed to add_multi {:?}, {:?}",
-        &keys,
-        &add_response
+        keys,
+        add_response
     );
 
     let results = add_response.expect("expected Ok(HashMap<_>)");
@@ -357,6 +361,10 @@ async fn test_set_succeeds_with_max_length_key() {
     let set_result = client.set(&key, value, None, None).await;
 
     assert!(set_result.is_ok());
+    assert_eq!(
+        client.get(&key).await.unwrap().unwrap().data.as_deref(),
+        Some(value.as_bytes())
+    );
 }
 
 #[ignore = "Relies on a running memcached server"]
@@ -421,7 +429,15 @@ async fn test_get_multi() {
         keys,
         result
     );
-    assert_eq!(result.unwrap().len(), keys.len());
+    let result = result.unwrap();
+    assert_eq!(result.len(), keys.len());
+    for (key, expected) in keys.iter().zip(values.iter()) {
+        let value = result
+            .iter()
+            .find(|value| value.key == key.as_bytes())
+            .unwrap();
+        assert_eq!(value.data.as_deref(), Some(expected.as_bytes()));
+    }
 }
 
 #[ignore = "Relies on a running memcached server"]
@@ -484,7 +500,10 @@ async fn test_get_multi_skips_key_too_long() {
 
     let get_multi_results = client.get_multi(&keys).await;
 
-    let get_multi_results = get_multi_results.expect("Should have yielded Vec<Value>");
+    let get_multi_results = get_multi_results.expect("Expected Vec<Value>");
+    assert_eq!(get_multi_results.len(), 2);
+    assert_eq!(get_multi_results[0].data, Some(b"value1".to_vec()));
+    assert_eq!(get_multi_results[1].data, Some(b"value3".to_vec()));
 
     for item in get_multi_results {
         assert!(keys.contains(
@@ -561,6 +580,7 @@ async fn test_delete() {
     let result = client.delete(key).await;
 
     assert!(result.is_ok(), "failed to delete {}, {:?}", key, result);
+    assert_eq!(client.get(key).await.unwrap(), None);
 }
 
 #[ignore = "Relies on a running memcached server"]
@@ -608,6 +628,7 @@ async fn test_delete_no_reply() {
         key,
         delete_result
     );
+    assert_eq!(client.get(key).await.unwrap(), None);
 }
 
 #[ignore = "Relies on a running memcached server"]
@@ -619,7 +640,9 @@ async fn test_delete_multi_no_reply() {
     let kv: Vec<(&str, &str)> = keys.clone().into_iter().zip(values.into_iter()).collect();
 
     let mut client = setup_client(&keys).await;
-    let _ = client.set_multi(&kv, None, None).await;
+    let stored = client.set_multi(&kv, None, None).await.unwrap();
+    assert_eq!(stored.len(), keys.len());
+    assert!(stored.values().all(Result::is_ok));
 
     let result = client.delete_multi_no_reply(&keys).await;
 
@@ -629,6 +652,9 @@ async fn test_delete_multi_no_reply() {
         keys,
         result
     );
+    for key in keys {
+        assert_eq!(client.get(key).await.unwrap(), None);
+    }
 }
 
 #[ignore = "Relies on a running memcached server"]
@@ -642,7 +668,9 @@ async fn test_set_multi_with_string_values() {
 
     let mut client = setup_client(&keys).await;
 
-    let _ = client.set_multi(&kv, None, None).await;
+    let stored = client.set_multi(&kv, None, None).await.unwrap();
+    assert_eq!(stored.len(), keys.len());
+    assert!(stored.values().all(Result::is_ok));
 
     let result = client.get("smwsv-key2").await;
 
@@ -695,16 +723,9 @@ async fn test_set_multi_inserts_client_error_for_key_too_long() {
 async fn test_set_multi_with_string_values_that_exceed_max_size() {
     const NUM_PAIRS: usize = 100;
     const LARGE_VALUE_SIZE: usize = 2_048_576;
-    const NUM_LARGE_KEYS: usize = 5;
-
     let keys: Vec<String> = (0..NUM_PAIRS).map(|i| format!("multi-key{}", i)).collect();
     let mut values: Vec<String> = (0..NUM_PAIRS).map(|i| format!("value{}", i)).collect();
-
-    let mut rng = rand::rng();
-    let large_key_indices: Vec<usize> = (1..NUM_PAIRS)
-        .choose_multiple(&mut rng, NUM_LARGE_KEYS)
-        .into_iter()
-        .collect();
+    let large_key_indices = [1, 25, 50, 75, 99];
 
     let mut large_key_strs = Vec::new();
     for &index in &large_key_indices {
@@ -729,11 +750,9 @@ async fn test_set_multi_with_string_values_that_exceed_max_size() {
 
     let result_map = set_result.unwrap();
 
-    for (key, value) in &result_map {
-        println!("key: {}, value: {:?}", key, value);
-    }
+    assert_eq!(result_map.len(), NUM_PAIRS);
 
-    // The randomized large keys should have errors due to large values
+    // Oversized values fail without discarding the other pipeline results.
     for large_key in large_key_strs.clone() {
         assert!(
             result_map.contains_key(&large_key.as_str()),
@@ -817,11 +836,14 @@ async fn test_set_multi_with_large_string_values() {
 
     let mut client = setup_client(&keys).await;
 
-    let _ = client.set_multi(&kv, None, None).await;
+    let results = client.set_multi(&kv, None, None).await.unwrap();
+    assert_eq!(results.len(), keys.len());
+    assert!(results.values().all(Result::is_ok));
 
-    let get_result = client.get("key2").await;
-
-    assert!(get_result.is_ok());
+    for key in &keys {
+        let value = client.get(key).await.unwrap().unwrap();
+        assert_eq!(value.data.as_deref(), Some(large_string.as_bytes()));
+    }
 }
 
 #[ignore = "Relies on a running memcached server"]
@@ -849,7 +871,7 @@ async fn test_increments_existing_key() {
 
     let value: u64 = 1;
 
-    let _ = client.set(key, value, None, None).await;
+    client.set(key, value, None, None).await.unwrap();
 
     let amount = 1;
 
@@ -868,7 +890,7 @@ async fn test_increment_on_non_numeric_value() {
 
     let value: &str = "not-a-number";
 
-    let _ = client.set(key, value, None, None).await;
+    client.set(key, value, None, None).await.unwrap();
 
     let amount = 1;
 
@@ -892,7 +914,7 @@ async fn test_increment_can_overflow() {
 
     let value = u64::MAX;
 
-    let _ = client.set(key, value, None, None).await;
+    client.set(key, value, None, None).await.unwrap();
 
     let amount = 1;
 
@@ -917,7 +939,7 @@ async fn test_increments_existing_key_with_no_reply() {
 
     let value: u64 = 1;
 
-    let _ = client.set(key, value, None, None).await;
+    client.set(key, value, None, None).await.unwrap();
 
     let amount = 1;
 
@@ -959,7 +981,7 @@ async fn test_decrements_existing_key() {
 
     let value: u64 = 10;
 
-    let _ = client.set(key, value, None, None).await;
+    client.set(key, value, None, None).await.unwrap();
 
     let amount = 1;
 
@@ -978,7 +1000,7 @@ async fn test_decrement_does_not_reduce_value_below_zero() {
 
     let value: u64 = 0;
 
-    let _ = client.set(key, value, None, None).await;
+    client.set(key, value, None, None).await.unwrap();
 
     let amount = 1;
 
@@ -997,7 +1019,7 @@ async fn test_decrements_existing_key_with_no_reply() {
 
     let value: u64 = 1;
 
-    let _ = client.set(key, value, None, None).await;
+    client.set(key, value, None, None).await.unwrap();
 
     let amount = 1;
 
@@ -1023,9 +1045,9 @@ async fn test_flush_all() {
 
     let mut client = setup_client(&[key]).await;
 
-    let _ = client.set(key, value, None, None).await;
-    let result = client.get(key).await;
-    assert!(result.is_ok());
+    client.set(key, value, None, None).await.unwrap();
+    let result = client.get(key).await.unwrap().unwrap();
+    assert_eq!(result.data, Some(b"1".to_vec()));
 
     let result = client.flush_all().await;
     assert!(result.is_ok());

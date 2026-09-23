@@ -6,17 +6,32 @@ async-memcache is an async [memcached](https://memcached.org/) client implementa
 
 ## Testing
 
-The default test suite does not require `memcached` to be running. It will ignore tests that require `memcached` to be running.
+The default suite runs unit tests and scripted TCP tests. It does not require service executables.
+
+The complete suite also runs tests with memcached and Toxiproxy. The tests start their own service processes.
+
+[TESTING.md](TESTING.md) contains setup instructions and test options.
+
+### Default suite
+
+Run the default suite:
 
 ```bash
-cargo test
+cargo test --all-features
 ```
 
-For the full test suite, you need to have `memcached` installed and running.
+### Complete suite
+
+Install the test tools with fixed versions:
 
 ```bash
-memcached -p 11211 -t 10 -c 10000 -m 1024
-cargo test && cargo test -- --ignored
+./scripts/install-test-tools.sh
+```
+
+Run all unit and integration tests:
+
+```bash
+./scripts/test-integration.sh
 ```
 
 ## Benchmark

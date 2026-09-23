@@ -10,6 +10,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+
+- The suite includes 49 new integration tests. The Shopify/Dalli suite guided these tests.
+- The test harness starts isolated memcached and Toxiproxy processes.
+- The installer uses fixed versions of the test tools.
+- `TESTING.md` provides instructions for the integration tests.
+
+### Changed
+
+- Original integration tests now check values and per-key results.
+- Oversized batch failures now use fixed positions.
+- CI now discovers and runs every integration target. It also runs ignored tests.
+
 ## [0.8.0] - 2026-09-18
 
 ### Added
