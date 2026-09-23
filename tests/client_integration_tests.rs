@@ -543,6 +543,7 @@ fn empty_key_dump_finishes_and_leaves_the_connection_usable() {
         let mut dump = client.dump_keys().await.unwrap();
         assert_eq!(dump.next().await, None);
         assert_eq!(dump.next().await, None);
+        drop(dump);
         client.set("after-dump", "new", None, None).await.unwrap();
         assert_value(&mut client, "after-dump", b"new").await;
     });
