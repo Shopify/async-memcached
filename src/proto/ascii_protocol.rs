@@ -150,12 +150,18 @@ impl AsciiProtocol for Client {
     async fn get<K: AsRef<[u8]>>(&mut self, key: K) -> Result<Option<Value>, Error> {
         let kr = Self::validate_key(key.as_ref())?;
 
-        self.conn
+        let mut operation = self.start_operation()?;
+
+        operation
+            .conn
             .write_all(&[b"get ", kr, b"\r\n"].concat())
             .await?;
-        self.conn.flush().await?;
+        operation.conn.flush().await?;
 
-        match self.get_read_write_response().await? {
+        let response = operation.get_read_write_response().await?;
+        operation.complete();
+
+        match response {
             Response::Status(Status::NotFound) => Ok(None),
             Response::Status(s) => Err(s.into()),
             Response::Data(d) => d
@@ -176,20 +182,25 @@ impl AsciiProtocol for Client {
         I: IntoIterator<Item = K>,
         K: AsRef<[u8]>,
     {
-        self.conn.write_all(b"get").await?;
+        let mut operation = self.start_operation()?;
+
+        operation.conn.write_all(b"get").await?;
         for key in keys {
             // Skip invalid keys, as overlength ones always were: a space or CRLF inside a key
             // would otherwise split it or start a second command on the wire.
             if !Self::is_valid_key(key.as_ref()) {
                 continue;
             }
-            self.conn.write_all(b" ").await?;
-            self.conn.write_all(key.as_ref()).await?;
+            operation.conn.write_all(b" ").await?;
+            operation.conn.write_all(key.as_ref()).await?;
         }
-        self.conn.write_all(b"\r\n").await?;
-        self.conn.flush().await?;
+        operation.conn.write_all(b"\r\n").await?;
+        operation.conn.flush().await?;
 
-        match self.get_read_write_response().await? {
+        let response = operation.get_read_write_response().await?;
+        operation.complete();
+
+        match response {
             Response::Status(s) => Err(s.into()),
             Response::Data(d) => d.ok_or(Status::NotFound.into()),
             _ => Err(Status::Error(ErrorKind::Protocol(None)).into()),
@@ -218,28 +229,33 @@ impl AsciiProtocol for Client {
         let kr = Self::validate_key(key.as_ref())?;
         let vr = value.as_bytes();
 
-        self.conn.write_all(b"set ").await?;
-        self.conn.write_all(kr).await?;
+        let mut operation = self.start_operation()?;
+
+        operation.conn.write_all(b"set ").await?;
+        operation.conn.write_all(kr).await?;
 
         let flags = flags.unwrap_or(0).to_string();
-        self.conn.write_all(b" ").await?;
-        self.conn.write_all(flags.as_ref()).await?;
+        operation.conn.write_all(b" ").await?;
+        operation.conn.write_all(flags.as_ref()).await?;
 
         let ttl = ttl.unwrap_or(0).to_string();
-        self.conn.write_all(b" ").await?;
-        self.conn.write_all(ttl.as_ref()).await?;
+        operation.conn.write_all(b" ").await?;
+        operation.conn.write_all(ttl.as_ref()).await?;
 
         let vlen = vr.len().to_string();
-        self.conn.write_all(b" ").await?;
-        self.conn.write_all(vlen.as_ref()).await?;
-        self.conn.write_all(b"\r\n").await?;
+        operation.conn.write_all(b" ").await?;
+        operation.conn.write_all(vlen.as_ref()).await?;
+        operation.conn.write_all(b"\r\n").await?;
 
-        self.conn.write_all(vr.as_ref()).await?;
-        self.conn.write_all(b"\r\n").await?;
+        operation.conn.write_all(vr.as_ref()).await?;
+        operation.conn.write_all(b"\r\n").await?;
 
-        self.conn.flush().await?;
+        operation.conn.flush().await?;
 
-        match self.get_read_write_response().await? {
+        let response = operation.get_read_write_response().await?;
+        operation.complete();
+
+        match response {
             Response::Status(Status::Stored) => Ok(()),
             Response::Status(s) => Err(s.into()),
             _ => Err(Status::Error(ErrorKind::Protocol(None)).into()),
@@ -256,6 +272,8 @@ impl AsciiProtocol for Client {
         K: AsRef<[u8]> + Eq + std::hash::Hash + std::fmt::Debug,
         V: AsMemcachedValue,
     {
+        let mut operation = self.start_operation()?;
+
         for (key, value) in kv {
             let kr = key.as_ref();
             if Self::validate_key(kr).is_err() {
@@ -264,28 +282,29 @@ impl AsciiProtocol for Client {
 
             let vr = value.as_bytes();
 
-            self.conn.write_all(b"set ").await?;
-            self.conn.write_all(kr).await?;
+            operation.conn.write_all(b"set ").await?;
+            operation.conn.write_all(kr).await?;
 
             let flags = flags.unwrap_or(0).to_string();
-            self.conn.write_all(b" ").await?;
-            self.conn.write_all(flags.as_ref()).await?;
+            operation.conn.write_all(b" ").await?;
+            operation.conn.write_all(flags.as_ref()).await?;
 
             let ttl = ttl.unwrap_or(0).to_string();
-            self.conn.write_all(b" ").await?;
-            self.conn.write_all(ttl.as_ref()).await?;
+            operation.conn.write_all(b" ").await?;
+            operation.conn.write_all(ttl.as_ref()).await?;
 
             let vlen = vr.len().to_string();
-            self.conn.write_all(b" ").await?;
-            self.conn.write_all(vlen.as_ref()).await?;
-            self.conn.write_all(b"\r\n").await?;
+            operation.conn.write_all(b" ").await?;
+            operation.conn.write_all(vlen.as_ref()).await?;
+            operation.conn.write_all(b"\r\n").await?;
 
-            self.conn.write_all(vr.as_ref()).await?;
-            self.conn.write_all(b"\r\n").await?;
+            operation.conn.write_all(vr.as_ref()).await?;
+            operation.conn.write_all(b"\r\n").await?;
         }
-        self.conn.flush().await?;
+        operation.conn.flush().await?;
 
-        let results = self.map_set_multi_responses(kv).await?;
+        let results = operation.map_set_multi_responses(kv).await?;
+        operation.complete();
 
         Ok(results)
     }
@@ -304,28 +323,33 @@ impl AsciiProtocol for Client {
         let kr = Self::validate_key(key.as_ref())?;
         let vr = value.as_bytes();
 
-        self.conn.write_all(b"add ").await?;
-        self.conn.write_all(kr).await?;
+        let mut operation = self.start_operation()?;
+
+        operation.conn.write_all(b"add ").await?;
+        operation.conn.write_all(kr).await?;
 
         let flags = flags.unwrap_or(0).to_string();
-        self.conn.write_all(b" ").await?;
-        self.conn.write_all(flags.as_ref()).await?;
+        operation.conn.write_all(b" ").await?;
+        operation.conn.write_all(flags.as_ref()).await?;
 
         let ttl = ttl.unwrap_or(0).to_string();
-        self.conn.write_all(b" ").await?;
-        self.conn.write_all(ttl.as_ref()).await?;
+        operation.conn.write_all(b" ").await?;
+        operation.conn.write_all(ttl.as_ref()).await?;
 
         let vlen = vr.len().to_string();
-        self.conn.write_all(b" ").await?;
-        self.conn.write_all(vlen.as_ref()).await?;
-        self.conn.write_all(b"\r\n").await?;
+        operation.conn.write_all(b" ").await?;
+        operation.conn.write_all(vlen.as_ref()).await?;
+        operation.conn.write_all(b"\r\n").await?;
 
-        self.conn.write_all(vr.as_ref()).await?;
-        self.conn.write_all(b"\r\n").await?;
+        operation.conn.write_all(vr.as_ref()).await?;
+        operation.conn.write_all(b"\r\n").await?;
 
-        self.conn.flush().await?;
+        operation.conn.flush().await?;
 
-        match self.get_read_write_response().await? {
+        let response = operation.get_read_write_response().await?;
+        operation.complete();
+
+        match response {
             Response::Status(Status::Stored) => Ok(()),
             Response::Status(s) => Err(s.into()),
             _ => Err(Status::Error(ErrorKind::Protocol(None)).into()),
@@ -342,6 +366,8 @@ impl AsciiProtocol for Client {
         K: AsRef<[u8]> + Eq + std::hash::Hash + std::fmt::Debug,
         V: AsMemcachedValue,
     {
+        let mut operation = self.start_operation()?;
+
         for (key, value) in kv {
             let kr = key.as_ref();
             if Self::validate_key(kr).is_err() {
@@ -350,28 +376,29 @@ impl AsciiProtocol for Client {
 
             let vr = value.as_bytes();
 
-            self.conn.write_all(b"add ").await?;
-            self.conn.write_all(kr).await?;
+            operation.conn.write_all(b"add ").await?;
+            operation.conn.write_all(kr).await?;
 
             let flags = flags.unwrap_or(0).to_string();
-            self.conn.write_all(b" ").await?;
-            self.conn.write_all(flags.as_ref()).await?;
+            operation.conn.write_all(b" ").await?;
+            operation.conn.write_all(flags.as_ref()).await?;
 
             let ttl = ttl.unwrap_or(0).to_string();
-            self.conn.write_all(b" ").await?;
-            self.conn.write_all(ttl.as_ref()).await?;
+            operation.conn.write_all(b" ").await?;
+            operation.conn.write_all(ttl.as_ref()).await?;
 
             let vlen = vr.len().to_string();
-            self.conn.write_all(b" ").await?;
-            self.conn.write_all(vlen.as_ref()).await?;
-            self.conn.write_all(b"\r\n").await?;
+            operation.conn.write_all(b" ").await?;
+            operation.conn.write_all(vlen.as_ref()).await?;
+            operation.conn.write_all(b"\r\n").await?;
 
-            self.conn.write_all(vr.as_ref()).await?;
-            self.conn.write_all(b"\r\n").await?;
+            operation.conn.write_all(vr.as_ref()).await?;
+            operation.conn.write_all(b"\r\n").await?;
         }
-        self.conn.flush().await?;
+        operation.conn.flush().await?;
 
-        let results = self.map_set_multi_responses(kv).await?;
+        let results = operation.map_set_multi_responses(kv).await?;
+        operation.complete();
 
         Ok(results)
     }
@@ -383,10 +410,16 @@ impl AsciiProtocol for Client {
     {
         let kr = Self::validate_key(key.as_ref())?;
 
-        self.conn
+        let mut operation = self.start_operation()?;
+
+        operation
+            .conn
             .write_all(&[b"delete ", kr, b" noreply\r\n"].concat())
             .await?;
-        self.conn.flush().await?;
+        operation.conn.flush().await?;
+
+        // Nothing is read back, so the operation is complete once the request is on the wire.
+        operation.complete();
         Ok(())
     }
 
@@ -397,12 +430,18 @@ impl AsciiProtocol for Client {
     {
         let kr = Self::validate_key(key.as_ref())?;
 
-        self.conn
+        let mut operation = self.start_operation()?;
+
+        operation
+            .conn
             .write_all(&[b"delete ", kr, b"\r\n"].concat())
             .await?;
-        self.conn.flush().await?;
+        operation.conn.flush().await?;
 
-        match self.get_read_write_response().await? {
+        let response = operation.get_read_write_response().await?;
+        operation.complete();
+
+        match response {
             Response::Status(Status::Deleted) => Ok(()),
             Response::Status(s) => Err(s.into()),
             _ => Err(Status::Error(ErrorKind::Protocol(None)).into()),
@@ -413,18 +452,21 @@ impl AsciiProtocol for Client {
     where
         K: AsRef<[u8]>,
     {
+        let mut operation = self.start_operation()?;
+
         for key in keys {
             let kr = key.as_ref();
             if Self::validate_key(kr).is_err() {
                 continue;
             }
 
-            self.conn.write_all(b"delete ").await?;
-            self.conn.write_all(kr).await?;
-            self.conn.write_all(b" noreply\r\n").await?;
+            operation.conn.write_all(b"delete ").await?;
+            operation.conn.write_all(kr).await?;
+            operation.conn.write_all(b" noreply\r\n").await?;
         }
-        self.conn.flush().await?;
+        operation.conn.flush().await?;
 
+        operation.complete();
         Ok(())
     }
 
@@ -434,12 +476,18 @@ impl AsciiProtocol for Client {
     {
         let kr = Self::validate_key(key.as_ref())?;
 
-        self.conn
+        let mut operation = self.start_operation()?;
+
+        operation
+            .conn
             .write_all(&[b"incr ", kr, b" ", amount.to_string().as_bytes(), b"\r\n"].concat())
             .await?;
-        self.conn.flush().await?;
+        operation.conn.flush().await?;
 
-        match self.get_read_write_response().await? {
+        let response = operation.get_read_write_response().await?;
+        operation.complete();
+
+        match response {
             Response::Status(s) => Err(s.into()),
             Response::IncrDecr(amount) => Ok(amount),
             _ => Err(Status::Error(ErrorKind::Protocol(None)).into()),
@@ -452,7 +500,10 @@ impl AsciiProtocol for Client {
     {
         let kr = Self::validate_key(key.as_ref())?;
 
-        self.conn
+        let mut operation = self.start_operation()?;
+
+        operation
+            .conn
             .write_all(
                 &[
                     b"incr ",
@@ -464,8 +515,9 @@ impl AsciiProtocol for Client {
                 .concat(),
             )
             .await?;
-        self.conn.flush().await?;
+        operation.conn.flush().await?;
 
+        operation.complete();
         Ok(())
     }
 
@@ -475,12 +527,18 @@ impl AsciiProtocol for Client {
     {
         let kr = Self::validate_key(key.as_ref())?;
 
-        self.conn
+        let mut operation = self.start_operation()?;
+
+        operation
+            .conn
             .write_all(&[b"decr ", kr, b" ", amount.to_string().as_bytes(), b"\r\n"].concat())
             .await?;
-        self.conn.flush().await?;
+        operation.conn.flush().await?;
 
-        match self.get_read_write_response().await? {
+        let response = operation.get_read_write_response().await?;
+        operation.complete();
+
+        match response {
             Response::Status(s) => Err(s.into()),
             Response::IncrDecr(amount) => Ok(amount),
             _ => Err(Status::Error(ErrorKind::Protocol(None)).into()),
@@ -493,7 +551,10 @@ impl AsciiProtocol for Client {
     {
         let kr = Self::validate_key(key.as_ref())?;
 
-        self.conn
+        let mut operation = self.start_operation()?;
+
+        operation
+            .conn
             .write_all(
                 &[
                     b"decr ",
@@ -505,8 +566,9 @@ impl AsciiProtocol for Client {
                 .concat(),
             )
             .await?;
-        self.conn.flush().await?;
+        operation.conn.flush().await?;
 
+        operation.complete();
         Ok(())
     }
 }
