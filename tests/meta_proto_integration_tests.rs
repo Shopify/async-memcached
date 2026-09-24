@@ -1,18 +1,16 @@
+mod support;
+
 use async_memcached::{AsciiProtocol, Client, Error, ErrorKind, MetaProtocol, Status};
 use serial_test::parallel;
+use support::TestClient;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
-
-// NOTE: Each test should run with keys unique to that test to avoid async conflicts.  Because these tests run concurrently,
-// it's possible to delete/overwrite keys created by another test before they're read.
 
 const MAX_KEY_LENGTH: usize = 250; // 250 bytes, default memcached max key length
 const LARGE_PAYLOAD_SIZE: usize = 1024 * 1024 - 310; // Memcached's default maximum payload size ~1MB minus max key length + metadata
 
-async fn setup_client(keys: &[&str]) -> Client {
-    let mut client = Client::new("tcp://127.0.0.1:11211")
-        .await
-        .expect("Failed to connect to server");
+async fn setup_client(keys: &[&str]) -> TestClient {
+    let mut client = TestClient::new().await;
 
     for key in keys {
         if key.len() > MAX_KEY_LENGTH {
