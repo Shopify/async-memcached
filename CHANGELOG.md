@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `Client::is_closed` so callers can discard a connection closed by an incomplete meta operation.
 - The suite includes 49 new integration tests. The Shopify/Dalli suite guided these tests.
 - The test harness starts isolated memcached and Toxiproxy processes.
 - The installer uses fixed versions of the test tools.
@@ -19,9 +20,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** Added `Error::ConnectionClosed` for I/O attempted after an incomplete meta operation closes the client. Exhaustive matches on `Error` must handle the new variant.
 - Original integration tests now check values and per-key results.
 - Oversized batch failures now use fixed positions.
 - CI now discovers and runs every integration target. It also runs ignored tests.
+
+### Fixed
+
+- Close the connection when a meta operation is cancelled or fails before its response is complete, including early batch errors. Discard buffered writes and consume each parsed response once.
 
 ## [0.8.0] - 2026-09-18
 
