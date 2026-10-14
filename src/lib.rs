@@ -128,13 +128,8 @@ impl Client {
 
         for (key, _) in kv {
             let kr = key.as_ref();
-            if kr.len() > MAX_KEY_LENGTH {
-                results.insert(
-                    key,
-                    Err(Error::Protocol(Status::Error(ErrorKind::Client(
-                        "Key exceeds maximum length of 250 bytes".to_string(),
-                    )))),
-                );
+            if let Err(error) = Self::validate_key_length(kr) {
+                results.insert(key, Err(error));
                 continue;
             }
 
@@ -243,16 +238,41 @@ impl Client {
         }
     }
 
+    fn is_valid_token_byte(byte: u8) -> bool {
+        byte > 0x20 && byte != 0x7f
+    }
+
+    fn invalid_key_error() -> Error {
+        Error::Protocol(Status::Error(ErrorKind::Client(
+            "Key contains whitespace or control characters".to_string(),
+        )))
+    }
+
+    fn invalid_opaque_error() -> Error {
+        Error::Protocol(Status::Error(ErrorKind::Client(
+            "Opaque token contains whitespace or control characters".to_string(),
+        )))
+    }
+
+    fn invalid_meta_flag_error() -> Error {
+        Error::Protocol(Status::Error(ErrorKind::Client(
+            "Meta flag contains a line or string terminator".to_string(),
+        )))
+    }
+
     /// Whether `kr` is safe to write as one key in a text-protocol command line: at most
-    /// `MAX_KEY_LENGTH` bytes, all printable ASCII other than space (0x21..=0x7e), so it can
+    /// `MAX_KEY_LENGTH` bytes with no whitespace, control characters, or DEL byte, so it can
     /// neither split into two tokens nor end the line and start another command.
     fn is_valid_key(kr: &[u8]) -> bool {
-        kr.len() <= MAX_KEY_LENGTH && kr.iter().all(|&b| b > 0x20 && b < 0x7f)
+        kr.len() <= MAX_KEY_LENGTH && kr.iter().all(|&b| Self::is_valid_token_byte(b))
     }
 
     fn validate_key_length(kr: &[u8]) -> Result<&[u8], Error> {
         if kr.len() > MAX_KEY_LENGTH {
             return Err(Error::from(Status::Error(ErrorKind::KeyTooLong)));
+        }
+        if !kr.iter().all(|&b| Self::is_valid_token_byte(b)) {
+            return Err(Self::invalid_key_error());
         }
         Ok(kr)
     }
@@ -261,7 +281,25 @@ impl Client {
         if opaque.len() > 32 {
             return Err(Error::from(Status::Error(ErrorKind::OpaqueTooLong)));
         }
+        if !opaque.iter().all(|&b| Self::is_valid_token_byte(b)) {
+            return Err(Self::invalid_opaque_error());
+        }
         Ok(opaque)
+    }
+
+    fn validate_meta_flags(meta_flags: Option<&[&str]>) -> Result<(), Error> {
+        if let Some(meta_flags) = meta_flags {
+            for flag in meta_flags {
+                if flag
+                    .as_bytes()
+                    .iter()
+                    .any(|&b| matches!(b, b'\r' | b'\n' | b'\0'))
+                {
+                    return Err(Self::invalid_meta_flag_error());
+                }
+            }
+        }
+        Ok(())
     }
 
     async fn check_and_write_opaque(&mut self, opaque: Option<&[u8]>) -> Result<(), Error> {
@@ -277,6 +315,7 @@ impl Client {
         meta_flags: Option<&[&str]>,
         opaque: Option<&[u8]>,
     ) -> Result<(), Error> {
+        Self::validate_meta_flags(meta_flags)?;
         if let Some(meta_flags) = meta_flags {
             for flag in meta_flags {
                 // Ignore q flag and require use of param, prefer explicit opaque param over O meta flag

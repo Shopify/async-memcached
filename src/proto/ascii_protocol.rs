@@ -5,8 +5,6 @@ use fxhash::FxHashMap;
 use std::future::Future;
 use tokio::io::AsyncWriteExt;
 
-const MAX_KEY_LENGTH: usize = 250; // reference in memcached documentation: https://github.com/memcached/memcached/blob/5609673ed29db98a377749fab469fe80777de8fd/doc/protocol.txt#L46
-
 /// Trait defining ASCII protocol-specific methods for the Client.
 pub trait AsciiProtocol {
     /// Gets the given key.
@@ -260,7 +258,7 @@ impl AsciiProtocol for Client {
     {
         for (key, value) in kv {
             let kr = key.as_ref();
-            if kr.len() > MAX_KEY_LENGTH {
+            if Self::validate_key_length(kr).is_err() {
                 continue;
             }
 
@@ -346,7 +344,7 @@ impl AsciiProtocol for Client {
     {
         for (key, value) in kv {
             let kr = key.as_ref();
-            if kr.len() > MAX_KEY_LENGTH {
+            if Self::validate_key_length(kr).is_err() {
                 continue;
             }
 
@@ -417,7 +415,7 @@ impl AsciiProtocol for Client {
     {
         for key in keys {
             let kr = key.as_ref();
-            if kr.len() > MAX_KEY_LENGTH {
+            if Self::validate_key_length(kr).is_err() {
                 continue;
             }
 

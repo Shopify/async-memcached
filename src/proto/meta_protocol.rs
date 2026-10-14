@@ -229,6 +229,7 @@ async fn write_pipeline_meta_flags(
     client: &mut Client,
     meta_flags: Option<&[&str]>,
 ) -> Result<(), Error> {
+    Client::validate_meta_flags(meta_flags)?;
     if let Some(meta_flags) = meta_flags {
         for flag in meta_flags {
             if flag.starts_with('k') || flag.starts_with('q') {
@@ -275,6 +276,7 @@ impl MetaProtocol for Client {
         if let Some(opaque) = &opaque {
             Self::validate_opaque_length(opaque)?;
         }
+        Self::validate_meta_flags(meta_flags)?;
 
         self.conn.write_all(b"mg ").await?;
         self.conn.write_all(kr).await?;
@@ -322,6 +324,7 @@ impl MetaProtocol for Client {
         if let Some(opaque) = &opaque {
             Self::validate_opaque_length(opaque)?;
         }
+        Self::validate_meta_flags(meta_flags)?;
 
         let vr = value.as_bytes();
 
@@ -380,6 +383,7 @@ impl MetaProtocol for Client {
         if let Some(opaque) = &opaque {
             Self::validate_opaque_length(opaque)?;
         }
+        Self::validate_meta_flags(meta_flags)?;
 
         self.conn.write_all(b"md ").await?;
         self.conn.write_all(kr).await?;
@@ -424,6 +428,7 @@ impl MetaProtocol for Client {
         if let Some(opaque) = &opaque {
             Self::validate_opaque_length(opaque)?;
         }
+        Self::validate_meta_flags(meta_flags)?;
 
         self.conn.write_all(b"ma ").await?;
         self.conn.write_all(kr).await?;
@@ -490,6 +495,7 @@ impl MetaProtocol for Client {
         if let Some(opaque) = &opaque {
             Self::validate_opaque_length(opaque)?;
         }
+        Self::validate_meta_flags(meta_flags)?;
 
         self.conn.write_all(b"ma ").await?;
         self.conn.write_all(kr).await?;
@@ -555,6 +561,7 @@ impl MetaProtocol for Client {
         for key in keys {
             Self::validate_key_length(key.as_ref())?;
         }
+        Self::validate_meta_flags(meta_flags)?;
 
         for key in keys {
             self.conn.write_all(b"mg ").await?;
@@ -585,6 +592,7 @@ impl MetaProtocol for Client {
         for (key, _) in items {
             Self::validate_key_length(key.as_ref())?;
         }
+        Self::validate_meta_flags(meta_flags)?;
 
         for (key, value) in items {
             let vr = value.as_bytes();
