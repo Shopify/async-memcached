@@ -128,7 +128,7 @@ impl Client {
 
         for (key, _) in kv {
             let kr = key.as_ref();
-            if let Err(error) = Self::validate_key_length(kr) {
+            if let Err(error) = Self::validate_key(kr) {
                 results.insert(key, Err(error));
                 continue;
             }
@@ -239,6 +239,8 @@ impl Client {
     }
 
     fn is_valid_token_byte(byte: u8) -> bool {
+        // Text-protocol tokens must not contain whitespace, controls, or DEL. Keep bytes above
+        // ASCII for compatibility with existing writers; the server can reject unsupported bytes.
         byte > 0x20 && byte != 0x7f
     }
 
@@ -267,7 +269,7 @@ impl Client {
         kr.len() <= MAX_KEY_LENGTH && kr.iter().all(|&b| Self::is_valid_token_byte(b))
     }
 
-    fn validate_key_length(kr: &[u8]) -> Result<&[u8], Error> {
+    fn validate_key(kr: &[u8]) -> Result<&[u8], Error> {
         if kr.len() > MAX_KEY_LENGTH {
             return Err(Error::from(Status::Error(ErrorKind::KeyTooLong)));
         }
@@ -277,7 +279,7 @@ impl Client {
         Ok(kr)
     }
 
-    fn validate_opaque_length(opaque: &[u8]) -> Result<&[u8], Error> {
+    fn validate_opaque(opaque: &[u8]) -> Result<&[u8], Error> {
         if opaque.len() > 32 {
             return Err(Error::from(Status::Error(ErrorKind::OpaqueTooLong)));
         }

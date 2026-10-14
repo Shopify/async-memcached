@@ -148,7 +148,7 @@ pub trait AsciiProtocol {
 
 impl AsciiProtocol for Client {
     async fn get<K: AsRef<[u8]>>(&mut self, key: K) -> Result<Option<Value>, Error> {
-        let kr = Self::validate_key_length(key.as_ref())?;
+        let kr = Self::validate_key(key.as_ref())?;
 
         self.conn
             .write_all(&[b"get ", kr, b"\r\n"].concat())
@@ -215,7 +215,7 @@ impl AsciiProtocol for Client {
         K: AsRef<[u8]>,
         V: AsMemcachedValue,
     {
-        let kr = Self::validate_key_length(key.as_ref())?;
+        let kr = Self::validate_key(key.as_ref())?;
         let vr = value.as_bytes();
 
         self.conn.write_all(b"set ").await?;
@@ -258,7 +258,7 @@ impl AsciiProtocol for Client {
     {
         for (key, value) in kv {
             let kr = key.as_ref();
-            if Self::validate_key_length(kr).is_err() {
+            if Self::validate_key(kr).is_err() {
                 continue;
             }
 
@@ -301,7 +301,7 @@ impl AsciiProtocol for Client {
         K: AsRef<[u8]>,
         V: AsMemcachedValue,
     {
-        let kr = Self::validate_key_length(key.as_ref())?;
+        let kr = Self::validate_key(key.as_ref())?;
         let vr = value.as_bytes();
 
         self.conn.write_all(b"add ").await?;
@@ -344,7 +344,7 @@ impl AsciiProtocol for Client {
     {
         for (key, value) in kv {
             let kr = key.as_ref();
-            if Self::validate_key_length(kr).is_err() {
+            if Self::validate_key(kr).is_err() {
                 continue;
             }
 
@@ -381,7 +381,7 @@ impl AsciiProtocol for Client {
     where
         K: AsRef<[u8]>,
     {
-        let kr = Self::validate_key_length(key.as_ref())?;
+        let kr = Self::validate_key(key.as_ref())?;
 
         self.conn
             .write_all(&[b"delete ", kr, b" noreply\r\n"].concat())
@@ -395,7 +395,7 @@ impl AsciiProtocol for Client {
     where
         K: AsRef<[u8]>,
     {
-        let kr = Self::validate_key_length(key.as_ref())?;
+        let kr = Self::validate_key(key.as_ref())?;
 
         self.conn
             .write_all(&[b"delete ", kr, b"\r\n"].concat())
@@ -415,7 +415,7 @@ impl AsciiProtocol for Client {
     {
         for key in keys {
             let kr = key.as_ref();
-            if Self::validate_key_length(kr).is_err() {
+            if Self::validate_key(kr).is_err() {
                 continue;
             }
 
@@ -432,7 +432,7 @@ impl AsciiProtocol for Client {
     where
         K: AsRef<[u8]>,
     {
-        let kr = Self::validate_key_length(key.as_ref())?;
+        let kr = Self::validate_key(key.as_ref())?;
 
         self.conn
             .write_all(&[b"incr ", kr, b" ", amount.to_string().as_bytes(), b"\r\n"].concat())
@@ -450,7 +450,7 @@ impl AsciiProtocol for Client {
     where
         K: AsRef<[u8]>,
     {
-        let kr = Self::validate_key_length(key.as_ref())?;
+        let kr = Self::validate_key(key.as_ref())?;
 
         self.conn
             .write_all(
@@ -473,7 +473,7 @@ impl AsciiProtocol for Client {
     where
         K: AsRef<[u8]>,
     {
-        let kr = Self::validate_key_length(key.as_ref())?;
+        let kr = Self::validate_key(key.as_ref())?;
 
         self.conn
             .write_all(&[b"decr ", kr, b" ", amount.to_string().as_bytes(), b"\r\n"].concat())
@@ -491,7 +491,7 @@ impl AsciiProtocol for Client {
     where
         K: AsRef<[u8]>,
     {
-        let kr = Self::validate_key_length(key.as_ref())?;
+        let kr = Self::validate_key(key.as_ref())?;
 
         self.conn
             .write_all(

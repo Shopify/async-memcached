@@ -271,10 +271,10 @@ impl MetaProtocol for Client {
         opaque: Option<&[u8]>,
         meta_flags: Option<&[&str]>,
     ) -> Result<Option<MetaValue>, Error> {
-        let kr = Self::validate_key_length(key.as_ref())?;
+        let kr = Self::validate_key(key.as_ref())?;
 
         if let Some(opaque) = &opaque {
-            Self::validate_opaque_length(opaque)?;
+            Self::validate_opaque(opaque)?;
         }
         Self::validate_meta_flags(meta_flags)?;
 
@@ -319,10 +319,10 @@ impl MetaProtocol for Client {
         K: AsRef<[u8]>,
         V: AsMemcachedValue,
     {
-        let kr = Self::validate_key_length(key.as_ref())?;
+        let kr = Self::validate_key(key.as_ref())?;
 
         if let Some(opaque) = &opaque {
-            Self::validate_opaque_length(opaque)?;
+            Self::validate_opaque(opaque)?;
         }
         Self::validate_meta_flags(meta_flags)?;
 
@@ -378,10 +378,10 @@ impl MetaProtocol for Client {
         opaque: Option<&[u8]>,
         meta_flags: Option<&[&str]>,
     ) -> Result<Option<MetaValue>, Error> {
-        let kr = Self::validate_key_length(key.as_ref())?;
+        let kr = Self::validate_key(key.as_ref())?;
 
         if let Some(opaque) = &opaque {
-            Self::validate_opaque_length(opaque)?;
+            Self::validate_opaque(opaque)?;
         }
         Self::validate_meta_flags(meta_flags)?;
 
@@ -423,10 +423,10 @@ impl MetaProtocol for Client {
         delta: Option<u64>,
         meta_flags: Option<&[&str]>,
     ) -> Result<Option<MetaValue>, Error> {
-        let kr = Self::validate_key_length(key.as_ref())?;
+        let kr = Self::validate_key(key.as_ref())?;
 
         if let Some(opaque) = &opaque {
-            Self::validate_opaque_length(opaque)?;
+            Self::validate_opaque(opaque)?;
         }
         Self::validate_meta_flags(meta_flags)?;
 
@@ -490,10 +490,10 @@ impl MetaProtocol for Client {
         delta: Option<u64>,
         meta_flags: Option<&[&str]>,
     ) -> Result<Option<MetaValue>, Error> {
-        let kr = Self::validate_key_length(key.as_ref())?;
+        let kr = Self::validate_key(key.as_ref())?;
 
         if let Some(opaque) = &opaque {
-            Self::validate_opaque_length(opaque)?;
+            Self::validate_opaque(opaque)?;
         }
         Self::validate_meta_flags(meta_flags)?;
 
@@ -559,7 +559,7 @@ impl MetaProtocol for Client {
         }
 
         for key in keys {
-            Self::validate_key_length(key.as_ref())?;
+            Self::validate_key(key.as_ref())?;
         }
         Self::validate_meta_flags(meta_flags)?;
 
@@ -590,7 +590,7 @@ impl MetaProtocol for Client {
         }
 
         for (key, _) in items {
-            Self::validate_key_length(key.as_ref())?;
+            Self::validate_key(key.as_ref())?;
         }
         Self::validate_meta_flags(meta_flags)?;
 
