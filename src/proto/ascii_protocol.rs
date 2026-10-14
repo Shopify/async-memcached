@@ -180,7 +180,9 @@ impl AsciiProtocol for Client {
     {
         self.conn.write_all(b"get").await?;
         for key in keys {
-            if key.as_ref().len() > MAX_KEY_LENGTH {
+            // Skip invalid keys, as overlength ones always were: a space or CRLF inside a key
+            // would otherwise split it or start a second command on the wire.
+            if !Self::is_valid_key(key.as_ref()) {
                 continue;
             }
             self.conn.write_all(b" ").await?;

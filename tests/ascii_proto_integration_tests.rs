@@ -2,7 +2,7 @@ mod support;
 
 use async_memcached::{AsciiProtocol, Error, ErrorKind, Status};
 use serial_test::{parallel, serial};
-use support::TestClient;
+use support::{Memcached, TestClient};
 
 const MAX_KEY_LENGTH: usize = 250; // 250 bytes, default memcached max key length
 const LARGE_PAYLOAD_SIZE: usize = 1024 * 1024 - 310; // Memcached's default maximum payload size ~1MB minus max key length + metadata
@@ -512,6 +512,35 @@ async fn test_get_multi_skips_key_too_long() {
                 .as_str()
         ));
     }
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
+async fn test_get_multi_skips_keys_that_would_inject_commands() {
+    let server = Memcached::tcp();
+    let mut client = server.client().await;
+    client
+        .set("victim", "still-here", None, None)
+        .await
+        .expect("failed to set the victim key");
+
+    let keys: [&[u8]; 2] = [b"victim", b"profile:missing\r\nflush_all\r\n"];
+    let results = client.get_multi(keys).await.expect("Expected Vec<Value>");
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].key, b"victim");
+
+    // Read back on a second connection to the same server, so a stray reply left on the first
+    // connection by an injected command cannot mask the result.
+    let mut verifier = server.client().await;
+    let value = verifier
+        .get("victim")
+        .await
+        .expect("failed to read the victim key");
+    assert_eq!(
+        value.and_then(|value| value.data),
+        Some(b"still-here".to_vec())
+    );
 }
 
 #[ignore = "Relies on a running memcached server"]

@@ -243,6 +243,13 @@ impl Client {
         }
     }
 
+    /// Whether `kr` is safe to write as one key in a text-protocol command line: at most
+    /// `MAX_KEY_LENGTH` bytes, all printable ASCII other than space (0x21..=0x7e), so it can
+    /// neither split into two tokens nor end the line and start another command.
+    fn is_valid_key(kr: &[u8]) -> bool {
+        kr.len() <= MAX_KEY_LENGTH && kr.iter().all(|&b| b > 0x20 && b < 0x7f)
+    }
+
     fn validate_key_length(kr: &[u8]) -> Result<&[u8], Error> {
         if kr.len() > MAX_KEY_LENGTH {
             return Err(Error::from(Status::Error(ErrorKind::KeyTooLong)));

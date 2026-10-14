@@ -294,3 +294,43 @@ fn abort_of_a_task_that_owns_the_client_closes_its_socket() {
         server.await.unwrap();
     });
 }
+
+#[test]
+fn get_multi_never_writes_an_invalid_key_element_to_the_wire() {
+    run(async {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut received = Vec::new();
+            while !received.ends_with(b"\r\n") {
+                let mut byte = [0; 1];
+                socket.read_exact(&mut byte).await.unwrap();
+                received.push(byte[0]);
+            }
+            socket.write_all(b"END\r\n").await.unwrap();
+            // Anything still in flight after the first line was injected by a key element.
+            socket.read_to_end(&mut received).await.unwrap();
+            received
+        });
+        let mut client = Client::new(format!("tcp://{address}")).await.unwrap();
+        let keys: [&[u8]; 7] = [
+            b"safe",
+            b"profile:missing\r\nflush_all\r\n",
+            b"with space",
+            b"with\ttab",
+            b"nul\0",
+            b"del\x7f",
+            b"high\xff",
+        ];
+        assert_eq!(
+            client.get_multi(keys).await,
+            Err(Error::Protocol(Status::NotFound))
+        );
+        drop(client);
+        assert_eq!(
+            server.await.unwrap().escape_ascii().to_string(),
+            r"get safe\r\n"
+        );
+    });
+}
