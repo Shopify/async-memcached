@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+## [0.8.1] - 2026-10-15
+
 ### Added
 
 - The suite includes 49 new integration tests. The Shopify/Dalli suite guided these tests.
@@ -22,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Original integration tests now check values and per-key results.
 - Oversized batch failures now use fixed positions.
 - CI now discovers and runs every integration target. It also runs ignored tests.
+
+### Fixed
+
+- Validated keys, opaque tokens, and meta flags before writing line-oriented memcached text-protocol commands, preventing command injection through token or line delimiters.
 
 ## [0.8.0] - 2026-09-18
 

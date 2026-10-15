@@ -1,6 +1,8 @@
 mod support;
 
 use async_memcached::{AsciiProtocol, Client, Error, ErrorKind, MetaProtocol, Status};
+use std::future::Future;
+use std::pin::Pin;
 use std::time::Duration;
 use support::run;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -75,6 +77,33 @@ async fn expect_request(socket: &mut TcpStream, expected: &[u8]) {
     let mut bytes = vec![0; expected.len()];
     socket.read_exact(&mut bytes).await.unwrap();
     assert_eq!(bytes, expected);
+}
+
+fn assert_client_error(error: Error) {
+    assert!(
+        matches!(error, Error::Protocol(Status::Error(ErrorKind::Client(_)))),
+        "{:?}",
+        error
+    );
+}
+
+async fn assert_rejected_without_writes<F>(call: F)
+where
+    F: for<'a> FnOnce(&'a mut Client) -> Pin<Box<dyn Future<Output = Result<(), Error>> + 'a>>,
+{
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut received = Vec::new();
+        socket.read_to_end(&mut received).await.unwrap();
+        received
+    });
+    let mut client = Client::new(format!("tcp://{address}")).await.unwrap();
+    let error = call(&mut client).await.unwrap_err();
+    assert_client_error(error);
+    drop(client);
+    assert_eq!(server.await.unwrap(), b"");
 }
 
 async fn reply_once(
@@ -292,5 +321,272 @@ fn abort_of_a_task_that_owns_the_client_closes_its_socket() {
             b"fresh"
         );
         server.await.unwrap();
+    });
+}
+
+#[test]
+fn single_key_methods_reject_invalid_keys_before_writing() {
+    run(async {
+        let invalid_key = b"profile:missing\r\nflush_all\r\n" as &[u8];
+
+        assert_rejected_without_writes(|client| {
+            Box::pin(async move { client.get(invalid_key).await.map(|_| ()) })
+        })
+        .await;
+        assert_rejected_without_writes(|client| {
+            Box::pin(async move { client.set(invalid_key, "value", None, None).await })
+        })
+        .await;
+        assert_rejected_without_writes(|client| {
+            Box::pin(async move { client.add(invalid_key, "value", None, None).await })
+        })
+        .await;
+        assert_rejected_without_writes(|client| {
+            Box::pin(async move { client.delete(invalid_key).await })
+        })
+        .await;
+        assert_rejected_without_writes(|client| {
+            Box::pin(async move { client.delete_no_reply(invalid_key).await })
+        })
+        .await;
+        assert_rejected_without_writes(|client| {
+            Box::pin(async move { client.increment(invalid_key, 1).await.map(|_| ()) })
+        })
+        .await;
+        assert_rejected_without_writes(|client| {
+            Box::pin(async move { client.increment_no_reply(invalid_key, 1).await })
+        })
+        .await;
+        assert_rejected_without_writes(|client| {
+            Box::pin(async move { client.decrement(invalid_key, 1).await.map(|_| ()) })
+        })
+        .await;
+        assert_rejected_without_writes(|client| {
+            Box::pin(async move { client.decrement_no_reply(invalid_key, 1).await })
+        })
+        .await;
+        assert_rejected_without_writes(|client| {
+            Box::pin(async move {
+                client
+                    .meta_get(invalid_key, false, None, None)
+                    .await
+                    .map(|_| ())
+            })
+        })
+        .await;
+        assert_rejected_without_writes(|client| {
+            Box::pin(async move {
+                client
+                    .meta_set(invalid_key, "value", false, None, None)
+                    .await
+                    .map(|_| ())
+            })
+        })
+        .await;
+        assert_rejected_without_writes(|client| {
+            Box::pin(async move {
+                client
+                    .meta_delete(invalid_key, false, None, None)
+                    .await
+                    .map(|_| ())
+            })
+        })
+        .await;
+        assert_rejected_without_writes(|client| {
+            Box::pin(async move {
+                client
+                    .meta_increment(invalid_key, false, None, None, None)
+                    .await
+                    .map(|_| ())
+            })
+        })
+        .await;
+        assert_rejected_without_writes(|client| {
+            Box::pin(async move {
+                client
+                    .meta_decrement(invalid_key, false, None, None, None)
+                    .await
+                    .map(|_| ())
+            })
+        })
+        .await;
+        assert_rejected_without_writes(|client| {
+            Box::pin(async move {
+                client
+                    .meta_get_multi(&[invalid_key], None)
+                    .await
+                    .map(|_| ())
+            })
+        })
+        .await;
+        assert_rejected_without_writes(|client| {
+            Box::pin(async move {
+                client
+                    .meta_set_multi(&[(invalid_key, "value")], None)
+                    .await
+                    .map(|_| ())
+            })
+        })
+        .await;
+    });
+}
+
+#[test]
+fn meta_opaque_and_flags_reject_line_injection_before_writing() {
+    run(async {
+        let invalid_opaque = b"opaque\r\nflush_all" as &[u8];
+        let invalid_flags = ["v\r\nflush_all"];
+
+        assert_rejected_without_writes(|client| {
+            Box::pin(async move {
+                client
+                    .meta_get("key", false, Some(invalid_opaque), None)
+                    .await
+                    .map(|_| ())
+            })
+        })
+        .await;
+        assert_rejected_without_writes(|client| {
+            Box::pin(async move {
+                client
+                    .meta_set("key", "value", false, Some(invalid_opaque), None)
+                    .await
+                    .map(|_| ())
+            })
+        })
+        .await;
+        assert_rejected_without_writes(|client| {
+            Box::pin(async move {
+                client
+                    .meta_delete("key", false, Some(invalid_opaque), None)
+                    .await
+                    .map(|_| ())
+            })
+        })
+        .await;
+        assert_rejected_without_writes(|client| {
+            Box::pin(async move {
+                client
+                    .meta_increment("key", false, Some(invalid_opaque), None, None)
+                    .await
+                    .map(|_| ())
+            })
+        })
+        .await;
+        assert_rejected_without_writes(|client| {
+            Box::pin(async move {
+                client
+                    .meta_decrement("key", false, Some(invalid_opaque), None, None)
+                    .await
+                    .map(|_| ())
+            })
+        })
+        .await;
+        assert_rejected_without_writes(|client| {
+            Box::pin(async move {
+                client
+                    .meta_get("key", false, None, Some(&invalid_flags))
+                    .await
+                    .map(|_| ())
+            })
+        })
+        .await;
+        assert_rejected_without_writes(|client| {
+            Box::pin(async move {
+                client
+                    .meta_get_multi(&["key"], Some(&invalid_flags))
+                    .await
+                    .map(|_| ())
+            })
+        })
+        .await;
+    });
+}
+
+#[test]
+fn get_multi_never_writes_an_invalid_key_element_to_the_wire() {
+    run(async {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut received = Vec::new();
+            while !received.ends_with(b"\r\n") {
+                let mut byte = [0; 1];
+                socket.read_exact(&mut byte).await.unwrap();
+                received.push(byte[0]);
+            }
+            socket.write_all(b"END\r\n").await.unwrap();
+            // Anything still in flight after the first line was injected by a key element.
+            socket.read_to_end(&mut received).await.unwrap();
+            received
+        });
+        let mut client = Client::new(format!("tcp://{address}")).await.unwrap();
+        let keys: [&[u8]; 7] = [
+            b"safe",
+            b"profile:missing\r\nflush_all\r\n",
+            b"with space",
+            b"with\ttab",
+            b"nul\0",
+            b"del\x7f",
+            b"high\xff",
+        ];
+        assert_eq!(
+            client.get_multi(keys).await,
+            Err(Error::Protocol(Status::NotFound))
+        );
+        drop(client);
+        assert_eq!(
+            server.await.unwrap().escape_ascii().to_string(),
+            r"get safe high\xff\r\n"
+        );
+    });
+}
+
+#[test]
+fn storage_multi_filters_invalid_keys_without_response_misalignment() {
+    run(async {
+        for verb in ["set", "add"] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let expected = format!("{verb} valid1 0 0 3\r\none\r\n{verb} valid2 0 0 3\r\ntwo\r\n");
+            let server = tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                expect_request(&mut socket, expected.as_bytes()).await;
+                socket.write_all(b"STORED\r\nSTORED\r\n").await.unwrap();
+            });
+            let mut client = Client::new(format!("tcp://{address}")).await.unwrap();
+            let too_long = vec![b'x'; 251];
+            let kv = vec![
+                (b"valid1".to_vec(), "one"),
+                (b"bad\r\nflush_all".to_vec(), "bad"),
+                (too_long, "long"),
+                (b"valid2".to_vec(), "two"),
+            ];
+            let results = if verb == "set" {
+                client.set_multi(&kv, None, None).await.unwrap()
+            } else {
+                client.add_multi(&kv, None, None).await.unwrap()
+            };
+            assert!(results
+                .iter()
+                .any(|(key, result)| key.as_slice() == b"valid1" && result.is_ok()));
+            assert!(results
+                .iter()
+                .any(|(key, result)| key.as_slice() == b"valid2" && result.is_ok()));
+            assert!(results
+                .iter()
+                .any(|(key, result)| key.as_slice() == b"bad\r\nflush_all"
+                    && matches!(
+                        result,
+                        Err(Error::Protocol(Status::Error(ErrorKind::Client(_))))
+                    )));
+            assert!(results.iter().any(|(key, result)| key.len() == 251
+                && matches!(
+                    result,
+                    Err(Error::Protocol(Status::Error(ErrorKind::KeyTooLong)))
+                )));
+            server.await.unwrap();
+        }
     });
 }
