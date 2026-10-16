@@ -178,8 +178,7 @@ pub trait MetaProtocol {
     /// whole call without leaving a partial pipeline on the connection.
     ///
     /// An error line (`CLIENT_ERROR`, `SERVER_ERROR`, `ERROR`) for any key fails the call and
-    /// leaves later responses of the same pipeline unread; the connection should be discarded
-    /// rather than reused.
+    /// closes the connection because later responses of the same pipeline can remain unread.
     //
     // Command format:
     // mg <key> <meta_flags>* k q\r\n  (once per key)
@@ -204,8 +203,7 @@ pub trait MetaProtocol {
     /// whole call without leaving a partial pipeline on the connection.
     ///
     /// An error line (`CLIENT_ERROR`, `SERVER_ERROR`, `ERROR`) for any item fails the call and
-    /// leaves later responses of the same pipeline unread; the connection should be discarded
-    /// rather than reused.
+    /// closes the connection because later responses of the same pipeline can remain unread.
     //
     // Command format:
     // ms <key> <datalen> <meta_flags>* k q\r\n<data_block>\r\n  (once per item)
@@ -278,21 +276,25 @@ impl MetaProtocol for Client {
         }
         Self::validate_meta_flags(meta_flags)?;
 
-        self.conn.write_all(b"mg ").await?;
-        self.conn.write_all(kr).await?;
+        let mut operation = self.start_operation()?;
 
-        Self::check_and_write_opaque(self, opaque).await?;
+        operation.conn.write_all(b"mg ").await?;
+        operation.conn.write_all(kr).await?;
 
-        Self::check_and_write_meta_flags(self, meta_flags, opaque).await?;
+        Self::check_and_write_opaque(&mut operation, opaque).await?;
 
-        Self::check_and_write_quiet_mode(self, is_quiet).await?;
+        Self::check_and_write_meta_flags(&mut operation, meta_flags, opaque).await?;
 
-        self.conn.flush().await?;
+        Self::check_and_write_quiet_mode(&mut operation, is_quiet).await?;
 
-        let response = self.drive_receive(parse_meta_get_response).await?;
+        operation.conn.flush().await?;
+
+        let response = operation.drive_receive(parse_meta_get_response).await?;
         if is_quiet && !matches!(response, MetaResponse::Status(Status::NoOp)) {
-            drain_quiet_noop_response(self, parse_meta_get_response).await?;
+            drain_quiet_noop_response(&mut operation, parse_meta_get_response).await?;
         }
+
+        operation.complete();
 
         match response {
             MetaResponse::Status(Status::NotFound) => Ok(None),
@@ -328,35 +330,39 @@ impl MetaProtocol for Client {
 
         let vr = value.as_bytes();
 
-        self.conn.write_all(b"ms ").await?;
-        self.conn.write_all(kr).await?;
+        let mut operation = self.start_operation()?;
+
+        operation.conn.write_all(b"ms ").await?;
+        operation.conn.write_all(kr).await?;
 
         let vlen = vr.len().to_string();
-        self.conn.write_all(b" ").await?;
-        self.conn.write_all(vlen.as_ref()).await?;
+        operation.conn.write_all(b" ").await?;
+        operation.conn.write_all(vlen.as_ref()).await?;
 
-        Self::check_and_write_opaque(self, opaque).await?;
+        Self::check_and_write_opaque(&mut operation, opaque).await?;
 
-        Self::check_and_write_meta_flags(self, meta_flags, opaque).await?;
-
-        if is_quiet {
-            self.conn.write_all(b" q").await?;
-        }
-
-        self.conn.write_all(b"\r\n").await?;
-        self.conn.write_all(vr.as_ref()).await?;
-        self.conn.write_all(b"\r\n").await?;
+        Self::check_and_write_meta_flags(&mut operation, meta_flags, opaque).await?;
 
         if is_quiet {
-            self.conn.write_all(b"mn\r\n").await?;
+            operation.conn.write_all(b" q").await?;
         }
 
-        self.conn.flush().await?;
+        operation.conn.write_all(b"\r\n").await?;
+        operation.conn.write_all(vr.as_ref()).await?;
+        operation.conn.write_all(b"\r\n").await?;
 
-        let response = self.drive_receive(parse_meta_set_response).await?;
+        if is_quiet {
+            operation.conn.write_all(b"mn\r\n").await?;
+        }
+
+        operation.conn.flush().await?;
+
+        let response = operation.drive_receive(parse_meta_set_response).await?;
         if is_quiet && !matches!(response, MetaResponse::Status(Status::NoOp)) {
-            drain_quiet_noop_response(self, parse_meta_set_response).await?;
+            drain_quiet_noop_response(&mut operation, parse_meta_set_response).await?;
         }
+
+        operation.complete();
 
         match response {
             MetaResponse::Status(Status::Stored) => Ok(None),
@@ -385,21 +391,25 @@ impl MetaProtocol for Client {
         }
         Self::validate_meta_flags(meta_flags)?;
 
-        self.conn.write_all(b"md ").await?;
-        self.conn.write_all(kr).await?;
+        let mut operation = self.start_operation()?;
 
-        Self::check_and_write_opaque(self, opaque).await?;
+        operation.conn.write_all(b"md ").await?;
+        operation.conn.write_all(kr).await?;
 
-        Self::check_and_write_meta_flags(self, meta_flags, opaque).await?;
+        Self::check_and_write_opaque(&mut operation, opaque).await?;
 
-        Self::check_and_write_quiet_mode(self, is_quiet).await?;
+        Self::check_and_write_meta_flags(&mut operation, meta_flags, opaque).await?;
 
-        self.conn.flush().await?;
+        Self::check_and_write_quiet_mode(&mut operation, is_quiet).await?;
 
-        let response = self.drive_receive(parse_meta_delete_response).await?;
+        operation.conn.flush().await?;
+
+        let response = operation.drive_receive(parse_meta_delete_response).await?;
         if is_quiet && !matches!(response, MetaResponse::Status(Status::NoOp)) {
-            drain_quiet_noop_response(self, parse_meta_delete_response).await?;
+            drain_quiet_noop_response(&mut operation, parse_meta_delete_response).await?;
         }
+
+        operation.complete();
 
         match response {
             MetaResponse::Status(Status::Deleted) => Ok(None),
@@ -430,16 +440,21 @@ impl MetaProtocol for Client {
         }
         Self::validate_meta_flags(meta_flags)?;
 
-        self.conn.write_all(b"ma ").await?;
-        self.conn.write_all(kr).await?;
+        let mut operation = self.start_operation()?;
 
-        Self::check_and_write_opaque(self, opaque).await?;
+        operation.conn.write_all(b"ma ").await?;
+        operation.conn.write_all(kr).await?;
+
+        Self::check_and_write_opaque(&mut operation, opaque).await?;
 
         // skip writing "MI" because it's default behaviour and we can save the bytes.
         if let Some(delta) = delta {
             if delta != 1 {
-                self.conn.write_all(b" D").await?;
-                self.conn.write_all(delta.to_string().as_bytes()).await?;
+                operation.conn.write_all(b" D").await?;
+                operation
+                    .conn
+                    .write_all(delta.to_string().as_bytes())
+                    .await?;
             }
         }
 
@@ -454,20 +469,24 @@ impl MetaProtocol for Client {
                 {
                     continue;
                 } else {
-                    self.conn.write_all(b" ").await?;
-                    self.conn.write_all(flag.as_bytes()).await?;
+                    operation.conn.write_all(b" ").await?;
+                    operation.conn.write_all(flag.as_bytes()).await?;
                 }
             }
         }
 
-        Self::check_and_write_quiet_mode(self, is_quiet).await?;
+        Self::check_and_write_quiet_mode(&mut operation, is_quiet).await?;
 
-        self.conn.flush().await?;
+        operation.conn.flush().await?;
 
-        let response = self.drive_receive(parse_meta_arithmetic_response).await?;
+        let response = operation
+            .drive_receive(parse_meta_arithmetic_response)
+            .await?;
         if is_quiet && !matches!(response, MetaResponse::Status(Status::NoOp)) {
-            drain_quiet_noop_response(self, parse_meta_arithmetic_response).await?;
+            drain_quiet_noop_response(&mut operation, parse_meta_arithmetic_response).await?;
         }
+
+        operation.complete();
 
         match response {
             MetaResponse::Status(Status::Stored) => Ok(None),
@@ -497,16 +516,21 @@ impl MetaProtocol for Client {
         }
         Self::validate_meta_flags(meta_flags)?;
 
-        self.conn.write_all(b"ma ").await?;
-        self.conn.write_all(kr).await?;
-        self.conn.write_all(b" MD").await?;
+        let mut operation = self.start_operation()?;
 
-        Self::check_and_write_opaque(self, opaque).await?;
+        operation.conn.write_all(b"ma ").await?;
+        operation.conn.write_all(kr).await?;
+        operation.conn.write_all(b" MD").await?;
+
+        Self::check_and_write_opaque(&mut operation, opaque).await?;
 
         if let Some(delta) = delta {
             if delta != 1 {
-                self.conn.write_all(b" D").await?;
-                self.conn.write_all(delta.to_string().as_bytes()).await?;
+                operation.conn.write_all(b" D").await?;
+                operation
+                    .conn
+                    .write_all(delta.to_string().as_bytes())
+                    .await?;
             }
         }
 
@@ -521,20 +545,24 @@ impl MetaProtocol for Client {
                 {
                     continue;
                 } else {
-                    self.conn.write_all(b" ").await?;
-                    self.conn.write_all(flag.as_bytes()).await?;
+                    operation.conn.write_all(b" ").await?;
+                    operation.conn.write_all(flag.as_bytes()).await?;
                 }
             }
         }
 
-        Self::check_and_write_quiet_mode(self, is_quiet).await?;
+        Self::check_and_write_quiet_mode(&mut operation, is_quiet).await?;
 
-        self.conn.flush().await?;
+        operation.conn.flush().await?;
 
-        let response = self.drive_receive(parse_meta_arithmetic_response).await?;
+        let response = operation
+            .drive_receive(parse_meta_arithmetic_response)
+            .await?;
         if is_quiet && !matches!(response, MetaResponse::Status(Status::NoOp)) {
-            drain_quiet_noop_response(self, parse_meta_arithmetic_response).await?;
+            drain_quiet_noop_response(&mut operation, parse_meta_arithmetic_response).await?;
         }
+
+        operation.complete();
 
         match response {
             MetaResponse::Status(Status::Stored) => Ok(None),
@@ -563,17 +591,21 @@ impl MetaProtocol for Client {
         }
         Self::validate_meta_flags(meta_flags)?;
 
+        let mut operation = self.start_operation()?;
+
         for key in keys {
-            self.conn.write_all(b"mg ").await?;
-            self.conn.write_all(key.as_ref()).await?;
-            write_pipeline_meta_flags(self, meta_flags).await?;
-            self.conn.write_all(b" k q\r\n").await?;
+            operation.conn.write_all(b"mg ").await?;
+            operation.conn.write_all(key.as_ref()).await?;
+            write_pipeline_meta_flags(&mut operation, meta_flags).await?;
+            operation.conn.write_all(b" k q\r\n").await?;
         }
 
-        self.conn.write_all(b"mn\r\n").await?;
-        self.conn.flush().await?;
+        operation.conn.write_all(b"mn\r\n").await?;
+        operation.conn.flush().await?;
 
-        collect_pipeline_responses(self, parse_meta_get_response).await
+        let values = collect_pipeline_responses(&mut operation, parse_meta_get_response).await?;
+        operation.complete();
+        Ok(values)
     }
 
     async fn meta_set_multi<K, V>(
@@ -594,22 +626,70 @@ impl MetaProtocol for Client {
         }
         Self::validate_meta_flags(meta_flags)?;
 
+        let mut operation = self.start_operation()?;
+
         for (key, value) in items {
             let vr = value.as_bytes();
 
-            self.conn.write_all(b"ms ").await?;
-            self.conn.write_all(key.as_ref()).await?;
-            self.conn.write_all(b" ").await?;
-            self.conn.write_all(vr.len().to_string().as_bytes()).await?;
-            write_pipeline_meta_flags(self, meta_flags).await?;
-            self.conn.write_all(b" k q\r\n").await?;
-            self.conn.write_all(vr.as_ref()).await?;
-            self.conn.write_all(b"\r\n").await?;
+            operation.conn.write_all(b"ms ").await?;
+            operation.conn.write_all(key.as_ref()).await?;
+            operation.conn.write_all(b" ").await?;
+            operation
+                .conn
+                .write_all(vr.len().to_string().as_bytes())
+                .await?;
+            write_pipeline_meta_flags(&mut operation, meta_flags).await?;
+            operation.conn.write_all(b" k q\r\n").await?;
+            operation.conn.write_all(vr.as_ref()).await?;
+            operation.conn.write_all(b"\r\n").await?;
         }
 
-        self.conn.write_all(b"mn\r\n").await?;
-        self.conn.flush().await?;
+        operation.conn.write_all(b"mn\r\n").await?;
+        operation.conn.flush().await?;
 
-        collect_pipeline_responses(self, parse_meta_set_response).await
+        let values = collect_pipeline_responses(&mut operation, parse_meta_set_response).await?;
+        operation.complete();
+        Ok(values)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::connection::Connection;
+    use crate::Client;
+    use bytes::BytesMut;
+    use std::time::Duration;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
+    use tokio::net::UnixStream;
+
+    #[tokio::test]
+    async fn cancellation_discards_buffered_request_bytes() {
+        let (stream, mut peer) = UnixStream::pair().unwrap();
+        let mut client = Client {
+            buf: BytesMut::new(),
+            conn: Connection::Unix(BufReader::new(BufWriter::new(stream))),
+        };
+
+        {
+            let operation = async {
+                let mut operation = client.start_operation().unwrap();
+                operation.conn.write_all(b"ms key 5\r\npar").await.unwrap();
+                std::future::pending::<()>().await;
+                operation.complete();
+            };
+            tokio::pin!(operation);
+            assert!(futures::poll!(operation).is_pending());
+        }
+
+        assert!(client.is_closed());
+        let mut bytes = Vec::new();
+        tokio::time::timeout(Duration::from_secs(5), peer.read_to_end(&mut bytes))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            bytes.is_empty(),
+            "cancellation flushed buffered request bytes"
+        );
     }
 }
