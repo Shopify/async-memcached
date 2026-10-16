@@ -7,7 +7,7 @@ pub enum Error {
     /// Connect error.
     /// Useful for distinguishing between transitive I/O errors and connection errors.
     Connect(io::Error),
-    /// The connection was closed after an incomplete meta operation and cannot be reused.
+    /// The connection was closed after an incomplete operation and cannot be reused.
     /// Create a new [`Client`](crate::Client) before sending more commands.
     ConnectionClosed,
     /// I/O-related error.
