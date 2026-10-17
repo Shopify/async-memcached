@@ -42,6 +42,9 @@ pub(crate) const MAX_KEY_LENGTH: usize = 250; // reference in memcached document
 pub struct Client {
     buf: BytesMut,
     conn: Connection,
+    /// Set while an operation holds the connection. Still set when the next operation starts
+    /// means the previous guard was leaked (e.g. `mem::forget`) and its reply may be unread.
+    in_flight: bool,
 }
 
 impl Client {
@@ -56,25 +59,43 @@ impl Client {
         Ok(Client {
             buf: BytesMut::new(),
             conn: connection,
+            in_flight: false,
         })
     }
 
-    /// Returns whether an incomplete operation closed this client's connection.
+    /// Returns whether this client's connection is closed or will be closed by the next call.
+    ///
+    /// That is the case after an incomplete operation closed it, and also when an earlier
+    /// operation or [`MetadumpIter`] was leaked (e.g. with `mem::forget`) before it completed:
+    /// its reply may still be unread, so the next call closes the connection and returns
+    /// [`Error::ConnectionClosed`].
     ///
     /// This checks local state only; it does not check whether the server is reachable.
     pub fn is_closed(&self) -> bool {
-        matches!(self.conn, Connection::Closed)
+        self.in_flight || matches!(self.conn, Connection::Closed)
     }
 
     fn start_operation(&mut self) -> Result<OperationGuard<'_>, Error> {
+        if self.in_flight {
+            // The previous operation was leaked, so its guard never ran.
+            self.close();
+        }
         if self.is_closed() {
             return Err(Error::ConnectionClosed);
         }
 
+        self.in_flight = true;
         Ok(OperationGuard {
             client: self,
             completed: false,
         })
+    }
+
+    fn close(&mut self) {
+        // Dropping the transport discards buffered writes without flushing them.
+        self.conn = Connection::Closed;
+        self.buf = BytesMut::new();
+        self.in_flight = false;
     }
 
     pub(crate) async fn drive_receive<R, F>(&mut self, op: F) -> Result<R, Error>
@@ -192,6 +213,9 @@ impl Client {
     /// The dump occupies the connection until the iterator yields `None`. Dropping the iterator
     /// before then closes the connection, since the remaining entries would otherwise be read as
     /// the next operation's response.
+    ///
+    /// The iterator mutably borrows the client until it is dropped, even after it yields `None`.
+    /// Drop it, or let it go out of scope, before sending more commands on the client.
     ///
     /// Available as of memcached 1.4.31.
     pub async fn dump_keys(&mut self) -> Result<MetadumpIter<'_>, Error> {
@@ -378,6 +402,7 @@ struct OperationGuard<'a> {
 impl OperationGuard<'_> {
     fn complete(mut self) {
         self.completed = true;
+        self.client.in_flight = false;
     }
 }
 
@@ -398,9 +423,7 @@ impl DerefMut for OperationGuard<'_> {
 impl Drop for OperationGuard<'_> {
     fn drop(&mut self) {
         if !self.completed {
-            // Dropping the transport discards buffered writes without flushing them.
-            self.client.conn = Connection::Closed;
-            self.client.buf = BytesMut::new();
+            self.client.close();
         }
     }
 }

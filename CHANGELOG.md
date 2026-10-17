@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Breaking:** Added `Error::ConnectionClosed` for I/O attempted after an incomplete operation closes the client. Exhaustive matches on `Error` must handle the new variant.
+- **Breaking:** `MetadumpIter` keeps the `Client` mutably borrowed until it is dropped, even after `next()` returns `None`, because dropping it early closes the connection. Drop it or end its scope before reusing the client.
 - `MetadumpIter::next` now ends the iterator after a `BUSY` refusal, matching `BADCLASS` and `END`. It previously kept returning `Some(Err(..))` and re-reading the connection on every call.
 
 ### Fixed
@@ -24,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Close the connection when any operation is cancelled or fails before its response is complete, including early batch errors. Discard buffered writes and consume each parsed response once. This now covers every entry point: the ASCII commands (`get`, `get_multi`, `set`, `set_multi`, `add`, `add_multi`, `delete`, `increment`, `decrement` and their `_no_reply` variants), the meta commands, and `version`, `stats`, `flush_all` and `dump_keys`. Previously only the meta commands were guarded, so cancelling an ASCII `get` mid-read left the stale `VALUE` block to be returned as the answer to the next request on that connection.
 - Dropping a `MetadumpIter` before it yields `None` closes the connection instead of leaving the unread dump to be parsed as the next response. Cancelling an individual `next()` call remains safe.
 - `version` and `flush_all` report a server that closes the connection mid-reply as `Error::Io(UnexpectedEof)` and close the client, like every other entry point. They previously returned a protocol error and left `is_closed()` false, so the next request was wasted on the dead socket.
+- A leaked operation or `MetadumpIter` (`mem::forget`, `Box::leak`) no longer lets its unread reply answer the next request. `is_closed()` reports it, and the next call closes the connection and returns `Error::ConnectionClosed`.
 
 ## [0.8.1] - 2026-10-15
 

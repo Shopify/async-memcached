@@ -1032,11 +1032,59 @@ async fn dump_keys_iterator_dropped_before_end_closes_connection() {
         // `bar` and `END` are still unread when the iterator is dropped.
     }
     assert!(client.is_closed());
+    // The drop itself closes the socket; no later call is needed to notice it.
+    expect_closed(&mut peer).await;
     let _ = peer.write_all(b"END\r\n").await;
     expect_connection_closed(
         timeout(TEST_TIMEOUT, client.version())
             .await
             .expect("closed client attempted I/O"),
+    );
+}
+
+#[tokio::test]
+async fn leaked_metadump_iterator_closes_connection_on_next_call() {
+    let (mut client, mut peer) = pair().await;
+    let mut keys = client.dump_keys().await.unwrap();
+    expect_request(&mut peer, b"lru_crawler metadump all\r\n").await;
+    peer.write_all(b"key=foo exp=-1 la=1 cas=2 fetch=yes cls=1 size=3\n")
+        .await
+        .unwrap();
+    let first = timeout(TEST_TIMEOUT, keys.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_eq!(first.key, b"foo");
+    // `END` is still unread, and the guard's destructor never runs.
+    std::mem::forget(keys);
+    peer.write_all(b"END\r\n").await.unwrap();
+
+    assert!(client.is_closed());
+    expect_connection_closed(
+        timeout(TEST_TIMEOUT, client.get("user:42"))
+            .await
+            .expect("leaked client attempted I/O"),
+    );
+    expect_closed(&mut peer).await;
+}
+
+#[tokio::test]
+async fn leaked_in_flight_operation_closes_connection_on_next_call() {
+    let (mut client, mut peer) = pair().await;
+    let mut operation = Box::pin(client.get("user:42"));
+    assert!(futures::poll!(operation.as_mut()).is_pending());
+    std::mem::forget(operation);
+    expect_request(&mut peer, b"get user:42\r\n").await;
+    peer.write_all(b"VALUE user:42 0 5\r\nalice\r\nEND\r\n")
+        .await
+        .unwrap();
+
+    assert!(client.is_closed());
+    expect_connection_closed(
+        timeout(TEST_TIMEOUT, client.get("user:43"))
+            .await
+            .expect("leaked client attempted I/O"),
     );
     expect_closed(&mut peer).await;
 }
