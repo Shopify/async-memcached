@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Breaking:** Added `Error::ConnectionClosed` for I/O attempted after an incomplete operation closes the client. Exhaustive matches on `Error` must handle the new variant.
+  - A closed client never recovers: every later call returns `ConnectionClosed` without touching the network. Discard the client and connect a new one.
+  - Treat `ConnectionClosed` like `Error::Io` wherever you decide to reconnect, retry, or report an error. Checks such as `matches!(e, Error::Io(_))` compile unchanged but no longer catch this case.
+  - Check `Client::is_closed()` before reusing a client: in a pool's `recycle` or `has_broken`, and when reusing a cached client slot. Otherwise the first request after a cancellation fails on the closed client.
 - **Breaking:** `MetadumpIter` keeps the `Client` mutably borrowed until it is dropped, even after `next()` returns `None`, because dropping it early closes the connection. Drop it or end its scope before reusing the client.
 - `MetadumpIter::next` now ends the iterator after every `Some(Err(..))`: a `BUSY` or `BADCLASS` refusal, or a network or protocol error, which also closes the connection. It previously kept returning `Some(Err(..))` and re-reading the connection on every call. `None` after an error means the dump was cut short; use `is_complete()` to tell.
 
