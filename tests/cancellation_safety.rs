@@ -956,6 +956,37 @@ async fn ascii_truncated_or_malformed_response_closes_connection() {
 }
 
 #[tokio::test]
+async fn version_and_flush_all_close_connection_on_eof() {
+    for (request, partial) in [
+        (&b"version\r\n"[..], &b""[..]),
+        (&b"version\r\n"[..], &b"VERSION 1.6"[..]),
+        (&b"flush_all\r\n"[..], &b""[..]),
+        (&b"flush_all\r\n"[..], &b"O"[..]),
+    ] {
+        let (mut client, mut peer) = pair().await;
+        let (result, ()) = timeout(TEST_TIMEOUT, async {
+            let operation = async {
+                if request.starts_with(b"version") {
+                    client.version().await.map(|_| ())
+                } else {
+                    client.flush_all().await
+                }
+            };
+            tokio::join!(operation, async {
+                expect_request(&mut peer, request).await;
+                peer.write_all(partial).await.unwrap();
+                peer.shutdown().await.unwrap();
+            })
+        })
+        .await
+        .unwrap();
+        assert_eq!(result, Err(Error::Io(io::ErrorKind::UnexpectedEof.into())));
+        assert!(client.is_closed());
+        expect_connection_closed(client.version().await);
+    }
+}
+
+#[tokio::test]
 async fn stats_cancelled_mid_stream_closes_connection() {
     let (mut client, mut peer) = pair().await;
     {

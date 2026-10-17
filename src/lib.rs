@@ -165,11 +165,12 @@ impl Client {
         operation.conn.flush().await?;
 
         let mut version = String::new();
-        let bytes = operation.conn.read_line(&mut version).await?;
+        operation.conn.read_line(&mut version).await?;
+        Self::expect_complete_line(&version)?;
         operation.complete();
 
         // Peel off the leading "VERSION " header.
-        if bytes >= 8 && version.is_char_boundary(8) {
+        if version.len() >= 8 && version.is_char_boundary(8) {
             Ok(version.split_off(8))
         } else {
             Err(Error::from(Status::Error(ErrorKind::Protocol(Some(
@@ -241,6 +242,7 @@ impl Client {
 
         let mut response = String::new();
         operation.conn.read_line(&mut response).await?;
+        Self::expect_complete_line(&response)?;
         operation.complete();
 
         // check if response is ok
@@ -250,6 +252,17 @@ impl Client {
             Err(Error::from(Status::Error(ErrorKind::Protocol(Some(
                 format!("Invalid response for `flush_all` command: `{response}`"),
             )))))
+        }
+    }
+
+    /// `read_line` stops early only at EOF, so a line without `\n` means the server closed the
+    /// connection mid-response. Report it like `drive_receive` does, before completing the
+    /// operation, so the guard closes the client.
+    fn expect_complete_line(line: &str) -> Result<(), Error> {
+        if line.ends_with('\n') {
+            Ok(())
+        } else {
+            Err(Error::Io(std::io::ErrorKind::UnexpectedEof.into()))
         }
     }
 
