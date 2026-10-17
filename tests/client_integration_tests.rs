@@ -551,6 +551,35 @@ fn empty_key_dump_finishes_and_leaves_the_connection_usable() {
 
 #[test]
 #[ignore = "Requires the memcached executable"]
+fn populated_key_dump_reads_every_entry_and_leaves_the_connection_usable() {
+    run(async {
+        let server = Memcached::tcp();
+        let mut client = server.client().await;
+        client.set("dump-a", "v", None, None).await.unwrap();
+        // Non-zero client flags put a non-zero `flags=` field on the wire.
+        client.set("dump-b", "v", None, Some(7)).await.unwrap();
+        client.set("dump-c", "value", None, None).await.unwrap();
+
+        let mut dump = client.dump_keys().await.unwrap();
+        let mut keys = Vec::new();
+        while let Some(entry) = dump.next().await {
+            keys.push(entry.expect("metadump entry failed").key);
+        }
+        assert!(dump.is_complete());
+        drop(dump);
+        keys.sort();
+        assert_eq!(
+            keys,
+            [b"dump-a".to_vec(), b"dump-b".to_vec(), b"dump-c".to_vec()]
+        );
+
+        client.set("after-dump", "new", None, None).await.unwrap();
+        assert_value(&mut client, "after-dump", b"new").await;
+    });
+}
+
+#[test]
+#[ignore = "Requires the memcached executable"]
 fn maximum_key_and_value_sizes_work_in_both_protocols() {
     run(async {
         let server = Memcached::tcp();

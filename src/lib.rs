@@ -229,6 +229,7 @@ impl Client {
 
         Ok(MetadumpIter {
             operation: Some(operation),
+            saw_end: false,
         })
     }
 
@@ -435,6 +436,8 @@ impl Drop for OperationGuard<'_> {
 pub struct MetadumpIter<'a> {
     /// `None` once the dump has ended, whether by `END`, a refusal, or an error.
     operation: Option<OperationGuard<'a>>,
+    /// Set only when `END` was read.
+    saw_end: bool,
 }
 
 impl MetadumpIter<'_> {
@@ -447,15 +450,19 @@ impl MetadumpIter<'_> {
     /// Otherwise, `None` will be returned and signals the end of the iterator.  Subsequent calls
     /// will return `None`.
     ///
-    /// A `BUSY` or `BADCLASS` refusal ends the iterator after the error is returned and leaves the
-    /// connection usable, since the whole refusal line has been read. A network or protocol error
-    /// also ends the iterator but closes the connection. Cancelling a call to `next` is safe: any
-    /// partially read entry stays buffered and the following call resumes from it.
+    /// Every `Some(Err(_))` is terminal: the next call returns `None`. A `BUSY` or `BADCLASS`
+    /// refusal leaves the connection usable, since the whole refusal line has been read. A
+    /// network or protocol error closes the connection. The dump is complete only if `None`
+    /// arrives without a preceding `Some(Err(_))`; `None` after an error means the dump was cut
+    /// short, not that the server has no more keys. Use [`is_complete`](Self::is_complete) to
+    /// tell the two apart. Cancelling a call to `next` is safe: any partially read entry stays
+    /// buffered and the following call resumes from it.
     pub async fn next(&mut self) -> Option<Result<KeyMetadata, Error>> {
         let operation = self.operation.as_mut()?;
 
         match operation.get_metadump_response().await {
             Ok(MetadumpResponse::End) => {
+                self.saw_end = true;
                 self.finish();
                 None
             }
@@ -474,6 +481,13 @@ impl MetadumpIter<'_> {
                 Some(Err(e))
             }
         }
+    }
+
+    /// Returns whether the dump finished: `true` only after [`next`](Self::next) has read the
+    /// server's `END` line. Before that, and after a `BUSY` or `BADCLASS` refusal or an error,
+    /// it returns `false`.
+    pub fn is_complete(&self) -> bool {
+        self.saw_end
     }
 
     /// Marks the dump as fully read so the connection stays open.

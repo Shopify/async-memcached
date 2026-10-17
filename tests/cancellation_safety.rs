@@ -1029,6 +1029,7 @@ async fn dump_keys_iterator_dropped_before_end_closes_connection() {
             .unwrap()
             .unwrap();
         assert_eq!(first.key, b"foo");
+        assert!(!keys.is_complete());
         // `bar` and `END` are still unread when the iterator is dropped.
     }
     assert!(client.is_closed());
@@ -1040,6 +1041,29 @@ async fn dump_keys_iterator_dropped_before_end_closes_connection() {
             .await
             .expect("closed client attempted I/O"),
     );
+}
+
+#[tokio::test]
+async fn dump_keys_error_partway_ends_incomplete_and_closes_connection() {
+    let (mut client, mut peer) = pair().await;
+    {
+        let mut keys = client.dump_keys().await.unwrap();
+        expect_request(&mut peer, b"lru_crawler metadump all\r\n").await;
+        peer.write_all(b"key=foo exp=-1 la=1 cas=2 fetch=yes cls=1 size=3\n")
+            .await
+            .unwrap();
+        peer.shutdown().await.unwrap();
+        let first = timeout(TEST_TIMEOUT, keys.next()).await.unwrap();
+        assert_eq!(first.unwrap().unwrap().key, b"foo");
+        let second = timeout(TEST_TIMEOUT, keys.next()).await.unwrap();
+        assert_eq!(
+            second.unwrap().map(|_| ()),
+            Err(Error::Io(io::ErrorKind::UnexpectedEof.into()))
+        );
+        assert!(timeout(TEST_TIMEOUT, keys.next()).await.unwrap().is_none());
+        assert!(!keys.is_complete());
+    }
+    assert!(client.is_closed());
 }
 
 #[tokio::test]
@@ -1123,6 +1147,7 @@ async fn dump_keys_terminal_responses_preserve_connection() {
             assert_eq!(saw_entry, expect_entry);
             assert_eq!(saw_error, expect_error);
             assert!(timeout(TEST_TIMEOUT, keys.next()).await.unwrap().is_none());
+            assert_eq!(keys.is_complete(), !expect_error);
         }
         assert!(
             !client.is_closed(),
@@ -1167,6 +1192,7 @@ async fn cancelled_metadump_next_keeps_iterator_usable() {
             .unwrap();
         assert_eq!(first.key, b"foo");
         assert!(timeout(TEST_TIMEOUT, keys.next()).await.unwrap().is_none());
+        assert!(keys.is_complete());
     }
     assert!(!client.is_closed());
     assert_eq!(

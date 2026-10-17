@@ -13,12 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Added `Client::is_closed` so callers (for example a connection pool's `has_broken` check) can discard a connection closed by an incomplete operation.
+- `MetadumpIter::is_complete()` reports whether the dump reached `END`.
 
 ### Changed
 
 - **Breaking:** Added `Error::ConnectionClosed` for I/O attempted after an incomplete operation closes the client. Exhaustive matches on `Error` must handle the new variant.
 - **Breaking:** `MetadumpIter` keeps the `Client` mutably borrowed until it is dropped, even after `next()` returns `None`, because dropping it early closes the connection. Drop it or end its scope before reusing the client.
-- `MetadumpIter::next` now ends the iterator after a `BUSY` refusal, matching `BADCLASS` and `END`. It previously kept returning `Some(Err(..))` and re-reading the connection on every call.
+- `MetadumpIter::next` now ends the iterator after every `Some(Err(..))`: a `BUSY` or `BADCLASS` refusal, or a network or protocol error, which also closes the connection. It previously kept returning `Some(Err(..))` and re-reading the connection on every call. `None` after an error means the dump was cut short; use `is_complete()` to tell.
 
 ### Fixed
 
@@ -26,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dropping a `MetadumpIter` before it yields `None` closes the connection instead of leaving the unread dump to be parsed as the next response. Cancelling an individual `next()` call remains safe.
 - `version` and `flush_all` report a server that closes the connection mid-reply as `Error::Io(UnexpectedEof)` and close the client, like every other entry point. They previously returned a protocol error and left `is_closed()` false, so the next request was wasted on the dead socket.
 - A leaked operation or `MetadumpIter` (`mem::forget`, `Box::leak`) no longer lets its unread reply answer the next request. `is_closed()` reports it, and the next call closes the connection and returns `Error::ConnectionClosed`.
+- `dump_keys` parses metadump entries from current memcached 1.6 releases, which append `flags=` and a trailing space after `size`. Entries from those servers previously failed to parse, so a non-empty cache could not be dumped.
 
 ## [0.8.1] - 2026-10-15
 
