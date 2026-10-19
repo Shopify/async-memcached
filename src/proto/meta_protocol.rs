@@ -109,20 +109,20 @@ pub trait MetaProtocol {
     /// If data is requested back via meta flags then a `MetaValue` is returned, otherwise `None`.
     ///
     /// Command format:
-    ///   ma <key> <meta_flags>*\r\n
+    ///   `ma <key> <meta_flags>*\r\n`
     ///
-    /// - <key> is the key string, with a maximum length of 250 bytes.
+    /// - `<key>` is the key string, with a maximum length of 250 bytes.
     ///
-    /// - <opaque> is an optional slice of string references with a maximum length of 32 bytes.
+    /// - `<opaque>` is an optional slice of string references with a maximum length of 32 bytes.
     ///
-    /// - <delta> is an optional u64 value for the decrement delta.
-    ///   The default behaviour is to decrement with a delta of 1.
+    /// - `<delta>` is an optional u64 value for the increment delta.
+    ///   The default behaviour is to increment with a delta of 1.
     ///
-    /// - <is_quiet> is a boolean value indicating whether to use quiet mode.
+    /// - `<is_quiet>` is a boolean value indicating whether to use quiet mode.
     ///   quiet mode will append a no-op command to the request ("mn\r\n") so that the client
     ///   can proceed properly in the event of a cache miss.
     ///
-    /// - <meta_flags> is an optional slice of string references for additional meta flags.
+    /// - `<meta_flags>` is an optional slice of string references for additional meta flags.
     ///   Meta flags may have associated tokens after the initial character, e.g "N123"
     ///   Do not include "M", "D", "O" or "q" flags as additional meta flags, they will be ignored.
     ///   Instead, use the specified parameters.
@@ -141,20 +141,20 @@ pub trait MetaProtocol {
     /// If data is requested back via meta flags then a `MetaValue` is returned, otherwise `None`.
     ///
     /// Command format:
-    ///   ma <key> MD <meta_flags>*\r\n
+    ///   `ma <key> MD <meta_flags>*\r\n`
     ///
-    /// - <key> is the key string, with a maximum length of 250 bytes.
+    /// - `<key>` is the key string, with a maximum length of 250 bytes.
     ///
-    /// - <opaque> is an optional slice of string references with a maximum length of 32 bytes.
+    /// - `<opaque>` is an optional slice of string references with a maximum length of 32 bytes.
     ///
-    /// - <delta> is an optional u64 value for the decrement delta.
+    /// - `<delta>` is an optional u64 value for the decrement delta.
     ///   The default behaviour is to decrement with a delta of 1.
     ///
-    /// - <is_quiet> is a boolean value indicating whether to use quiet mode.
+    /// - `<is_quiet>` is a boolean value indicating whether to use quiet mode.
     ///   quiet mode will append a no-op command to the request ("mn\r\n") so that the client
     ///   can proceed properly in the event of a cache miss.
     ///
-    /// - <meta_flags> is an optional slice of string references for additional meta flags.
+    /// - `<meta_flags>` is an optional slice of string references for additional meta flags.
     ///   Meta flags may have associated tokens after the initial character, e.g "N123"
     ///   Do not include "M", "D", "O" or "q" flags as additional meta flags, they will be ignored.
     ///   Instead, use the specified parameters.
