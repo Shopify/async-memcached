@@ -25,6 +25,8 @@ jobs:
         run: cargo fmt --check
       - name: Run clippy on all targets
         run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Build docs with rustdoc warnings denied
+        run: RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features
   test:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
