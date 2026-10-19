@@ -1,6 +1,6 @@
 use nom::{
     branch::alt,
-    bytes::streaming::{tag, take, take_until, take_while1},
+    bytes::streaming::{tag, take, take_till, take_until, take_while1},
     character::streaming::{crlf, newline},
     combinator::{map, map_res, opt, value},
     multi::fold_many0,
@@ -132,8 +132,11 @@ fn parse_lru_crawler_errors(buf: &[u8]) -> IResult<&[u8], MetadumpResponse> {
 
 fn parse_lru_crawler_metadata(buf: &[u8]) -> IResult<&[u8], MetadumpResponse> {
     // key=boo exp=-1 la=1597801411 cas=157043 fetch=yes cls=1 size=75
-    // key=foo exp=-1 la=1597801394 cas=63208 fetch=yes cls=1 size=73
-    let (buf, (_, _, key, _, exp, _, la, _, cas, _, fetch, _, cls, _, size, _)) = (
+    // key=foo exp=-1 la=1597801394 cas=63208 fetch=yes cls=1 size=73 flags=0 \n
+    //
+    // Newer servers append fields after `size` (1.6.x adds `flags=`, and a trailing space), so
+    // skip whatever follows `size` up to the newline.
+    let (buf, (_, _, key, _, exp, _, la, _, cas, _, fetch, _, cls, _, size, _, _)) = (
         opt(newline),
         tag("key="),
         take_while1(is_key_char),
@@ -149,6 +152,7 @@ fn parse_lru_crawler_metadata(buf: &[u8]) -> IResult<&[u8], MetadumpResponse> {
         parse_u32,
         tag(" size="),
         parse_u32,
+        take_till(|b| b == b'\n'),
         newline,
     )
         .parse(buf)?;
@@ -298,6 +302,16 @@ mod tests {
                     last_accessed: 1597801411,
                     cas: 157043,
                     fetched: true,
+                    class_id: 1,
+                    size: 75,
+                })),
+                // memcached 1.6.42 format: extra fields and a trailing space after `size`.
+                (b"key=foo exp=-1 la=1597801411 cas=157043 fetch=no cls=1 size=75 flags=5 \n", 72, MetadumpResponse::Entry(KeyMetadata {
+                    key: FOO_KEY.to_vec(),
+                    expiration: -1,
+                    last_accessed: 1597801411,
+                    cas: 157043,
+                    fetched: false,
                     class_id: 1,
                     size: 75,
                 })),

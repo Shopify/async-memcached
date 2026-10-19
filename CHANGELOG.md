@@ -12,15 +12,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added `Client::is_closed` so callers can discard a connection closed by an incomplete meta operation.
+- Added `Client::is_closed` so callers (for example a connection pool's `has_broken` check) can discard a connection closed by an incomplete operation.
+- `MetadumpIter::is_complete()` reports whether the dump reached `END`.
 
 ### Changed
 
-- **Breaking:** Added `Error::ConnectionClosed` for I/O attempted after an incomplete meta operation closes the client. Exhaustive matches on `Error` must handle the new variant.
+- **Breaking:** Added `Error::ConnectionClosed` for I/O attempted after an incomplete operation closes the client. Exhaustive matches on `Error` must handle the new variant.
+  - A closed client never recovers: every later call returns `ConnectionClosed` without touching the network. Discard the client and connect a new one.
+  - Treat `ConnectionClosed` like `Error::Io` wherever you decide to reconnect, retry, or report an error. Checks such as `matches!(e, Error::Io(_))` compile unchanged but no longer catch this case.
+  - Check `Client::is_closed()` before reusing a client: in a pool's `recycle` or `has_broken`, and when reusing a cached client slot. Otherwise the first request after a cancellation fails on the closed client.
+- **Breaking:** `MetadumpIter` keeps the `Client` mutably borrowed until it is dropped, even after `next()` returns `None`, because dropping it early closes the connection. Drop it or end its scope before reusing the client.
+- `MetadumpIter::next` now ends the iterator after every `Some(Err(..))`: a `BUSY` or `BADCLASS` refusal, or a network or protocol error, which also closes the connection. It previously kept returning `Some(Err(..))` and re-reading the connection on every call. `None` after an error means the dump was cut short; use `is_complete()` to tell.
 
 ### Fixed
 
-- Close the connection when a meta operation is cancelled or fails before its response is complete, including early batch errors. Discard buffered writes and consume each parsed response once.
+- Close the connection when any operation is cancelled or fails before its response is complete, including early batch errors. Discard buffered writes and consume each parsed response once. This now covers every entry point: the ASCII commands (`get`, `get_multi`, `set`, `set_multi`, `add`, `add_multi`, `delete`, `increment`, `decrement` and their `_no_reply` variants), the meta commands, and `version`, `stats`, `flush_all` and `dump_keys`. Previously only the meta commands were guarded, so cancelling an ASCII `get` mid-read left the stale `VALUE` block to be returned as the answer to the next request on that connection.
+- Dropping a `MetadumpIter` before it yields `None` closes the connection instead of leaving the unread dump to be parsed as the next response. Cancelling an individual `next()` call remains safe.
+- `version` and `flush_all` report a server that closes the connection mid-reply as `Error::Io(UnexpectedEof)` and close the client, like every other entry point. They previously returned a protocol error and left `is_closed()` false, so the next request was wasted on the dead socket.
+- A leaked operation or `MetadumpIter` (`mem::forget`, `Box::leak`) no longer lets its unread reply answer the next request. `is_closed()` reports it, and the next call closes the connection and returns `Error::ConnectionClosed`.
+- `dump_keys` parses metadump entries from current memcached 1.6 releases, which append `flags=` and a trailing space after `size`. Entries from those servers previously failed to parse, so a non-empty cache could not be dumped.
 
 ## [0.8.1] - 2026-10-15
 

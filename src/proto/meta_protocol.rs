@@ -668,6 +668,7 @@ mod tests {
         let mut client = Client {
             buf: BytesMut::new(),
             conn: Connection::Unix(BufReader::new(BufWriter::new(stream))),
+            in_flight: false,
         };
 
         {
