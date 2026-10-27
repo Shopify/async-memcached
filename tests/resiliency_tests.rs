@@ -95,7 +95,7 @@ fn test_set_multi_errors_on_upstream_with_toxic_client_via_limit_data() {
     let byte_limit = command.len() - 10;
     fixture
         .proxy
-        .with_limit_data("upstream".into(), byte_limit as u32, 1.0)
+        .with_limit_data("upstream", byte_limit as u32, 1.0)
         .apply(|| {
             rt.block_on(within(async {
                 assert_disconnect(client.set_multi(&pairs, None, None).await);
@@ -127,7 +127,7 @@ fn test_set_multi_errors_on_downstream_with_toxic_client_via_limit_data() {
     ];
     fixture
         .proxy
-        .with_limit_data("downstream".into(), (b"STORED\r\n".len() + 1) as u32, 1.0)
+        .with_limit_data("downstream", (b"STORED\r\n".len() + 1) as u32, 1.0)
         .apply(|| {
             rt.block_on(within(async {
                 assert_disconnect(client.set_multi(&pairs, None, None).await);
@@ -235,7 +235,7 @@ fn truncated_read_bodies_never_return_partial_values() {
         let mut client = rt.block_on(within(Client::new(fixture.dsn()))).unwrap();
         fixture
             .proxy
-            .with_limit_data("downstream".into(), 128, 1.0)
+            .with_limit_data("downstream", 128, 1.0)
             .apply(|| {
                 rt.block_on(within(async {
                     assert_disconnect(operation.read(&mut client).await);
@@ -256,10 +256,10 @@ fn fragmented_requests_and_responses_preserve_payloads() {
     let fixture = ToxicMemcached::new();
     let rt = runtime();
     let value: Vec<u8> = (0..=255).cycle().take(1024).collect();
-    fixture.proxy.with_slicer("upstream".into(), 7, 0, 100, 1.0);
+    fixture.proxy.with_slicer("upstream", 7, 0, 100, 1.0);
     fixture
         .proxy
-        .with_slicer("downstream".into(), 7, 0, 100, 1.0)
+        .with_slicer("downstream", 7, 0, 100, 1.0)
         .apply(|| {
             rt.block_on(within(async {
                 let mut client = Client::new(fixture.dsn()).await.unwrap();
@@ -296,7 +296,7 @@ fn caller_timeouts_allow_recovery_with_a_new_connection() {
         }));
         fixture
             .proxy
-            .with_timeout("downstream".into(), 0, 1.0)
+            .with_timeout("downstream", 0, 1.0)
             .apply(|| {
                 rt.block_on(within(async {
                     let result = tokio::time::timeout(

@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+### Changed
+
+- **Breaking:** Replaced the unmaintained `fxhash` crate ([RUSTSEC-2025-0057](https://rustsec.org/advisories/RUSTSEC-2025-0057)) with `rustc-hash`. `set_multi`, `add_multi` and `stats` now return `rustc_hash::FxHashMap` instead of `fxhash::FxHashMap`. Both are `std::collections::HashMap` with a different hasher type, so code that only calls map methods compiles unchanged. Code that names the `fxhash` type must switch to `rustc_hash::FxHashMap` or use type inference.
+- Replaced the `toxiproxy_rust` dev-dependency with a small Toxiproxy HTTP client in the test support code. `toxiproxy_rust` pulled in `reqwest` 0.11, which depends on the vulnerable `h2` 0.3 ([RUSTSEC-2026-0258](https://rustsec.org/advisories/RUSTSEC-2026-0258)) and the unmaintained `rustls-pemfile` ([RUSTSEC-2025-0134](https://rustsec.org/advisories/RUSTSEC-2025-0134)). `cargo audit` now reports no findings.
+
 ## [0.9.0] - 2026-10-19
 
 ### Added

@@ -2,7 +2,7 @@
 #![deny(warnings, missing_docs)]
 
 use bytes::BytesMut;
-use fxhash::FxHashMap;
+use rustc_hash::FxHashMap;
 use std::ops::{Deref, DerefMut};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 
