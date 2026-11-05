@@ -1,7 +1,7 @@
 use crate::{AsMemcachedValue, ErrorKind};
 use crate::{Client, Error, Response, Status, Value};
 
-use fxhash::FxHashMap;
+use rustc_hash::FxHashMap;
 use std::future::Future;
 use tokio::io::AsyncWriteExt;
 
