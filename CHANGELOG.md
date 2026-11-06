@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+## [0.10.0] - 2026-11-06
+
 ### Changed
 
 - **Breaking:** Replaced the unmaintained `fxhash` crate ([RUSTSEC-2025-0057](https://rustsec.org/advisories/RUSTSEC-2025-0057)) with `rustc-hash`. `set_multi`, `add_multi` and `stats` now return `rustc_hash::FxHashMap` instead of `fxhash::FxHashMap`. Both are `std::collections::HashMap` with a different hasher type, so code that only calls map methods compiles unchanged. Code that names the `fxhash` type must switch to `rustc_hash::FxHashMap` from `rustc-hash` 2.x or use type inference.
