@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+### Fixed
+
+- `scripts/install-test-tools.sh` builds memcached on macOS 27. That SDK does not declare `kSBXProfileNoInternet`, which memcached's macOS sandbox code uses, so the build failed. The installer now skips that sandbox on macOS; the test fixture does not need it.
+
 ## [0.10.0] - 2026-11-06
 
 ### Changed
