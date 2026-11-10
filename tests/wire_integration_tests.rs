@@ -432,6 +432,48 @@ fn single_key_methods_reject_invalid_keys_before_writing() {
 }
 
 #[test]
+fn empty_keys_are_rejected_before_writing() {
+    run(async {
+        let empty_key = b"" as &[u8];
+
+        assert_rejected_without_writes(|client| {
+            Box::pin(async move { client.get(empty_key).await.map(|_| ()) })
+        })
+        .await;
+        assert_rejected_without_writes(|client| {
+            Box::pin(async move { client.set(empty_key, "flush_all", None, None).await })
+        })
+        .await;
+        assert_rejected_without_writes(|client| {
+            Box::pin(async move { client.add(empty_key, "flush_all", None, None).await })
+        })
+        .await;
+        assert_rejected_without_writes(|client| {
+            Box::pin(async move { client.delete(empty_key).await })
+        })
+        .await;
+        assert_rejected_without_writes(|client| {
+            Box::pin(async move {
+                client
+                    .meta_set(empty_key, "flush_all", false, None, None)
+                    .await
+                    .map(|_| ())
+            })
+        })
+        .await;
+        assert_rejected_without_writes(|client| {
+            Box::pin(async move {
+                client
+                    .meta_set_multi(&[(empty_key, "flush_all")], None)
+                    .await
+                    .map(|_| ())
+            })
+        })
+        .await;
+    });
+}
+
+#[test]
 fn meta_opaque_and_flags_reject_line_injection_before_writing() {
     run(async {
         let invalid_opaque = b"opaque\r\nflush_all" as &[u8];
@@ -522,8 +564,9 @@ fn get_multi_never_writes_an_invalid_key_element_to_the_wire() {
             received
         });
         let mut client = Client::new(format!("tcp://{address}")).await.unwrap();
-        let keys: [&[u8]; 7] = [
+        let keys: [&[u8]; 8] = [
             b"safe",
+            b"",
             b"profile:missing\r\nflush_all\r\n",
             b"with space",
             b"with\ttab",
@@ -560,6 +603,7 @@ fn storage_multi_filters_invalid_keys_without_response_misalignment() {
             let kv = vec![
                 (b"valid1".to_vec(), "one"),
                 (b"bad\r\nflush_all".to_vec(), "bad"),
+                (Vec::new(), "flush_all"),
                 (too_long, "long"),
                 (b"valid2".to_vec(), "two"),
             ];
@@ -581,6 +625,11 @@ fn storage_multi_filters_invalid_keys_without_response_misalignment() {
                         result,
                         Err(Error::Protocol(Status::Error(ErrorKind::Client(_))))
                     )));
+            assert!(results.iter().any(|(key, result)| key.is_empty()
+                && matches!(
+                    result,
+                    Err(Error::Protocol(Status::Error(ErrorKind::Client(_))))
+                )));
             assert!(results.iter().any(|(key, result)| key.len() == 251
                 && matches!(
                     result,

@@ -315,14 +315,21 @@ impl Client {
         )))
     }
 
-    /// Whether `kr` is safe to write as one key in a text-protocol command line: at most
-    /// `MAX_KEY_LENGTH` bytes with no whitespace, control characters, or DEL byte, so it can
+    /// Whether `kr` is safe to write as one key in a text-protocol command line: at least one
+    /// byte and at most `MAX_KEY_LENGTH` bytes with no whitespace, control characters, or DEL byte, so it can
     /// neither split into two tokens nor end the line and start another command.
     fn is_valid_key(kr: &[u8]) -> bool {
-        kr.len() <= MAX_KEY_LENGTH && kr.iter().all(|&b| Self::is_valid_token_byte(b))
+        !kr.is_empty()
+            && kr.len() <= MAX_KEY_LENGTH
+            && kr.iter().all(|&b| Self::is_valid_token_byte(b))
     }
 
     fn validate_key(kr: &[u8]) -> Result<&[u8], Error> {
+        // An empty key leaves two spaces in the command line, which memcached rejects before it
+        // reads the payload, so it would run the value as a separate command.
+        if kr.is_empty() {
+            return Err(Self::invalid_key_error());
+        }
         if kr.len() > MAX_KEY_LENGTH {
             return Err(Error::from(Status::Error(ErrorKind::KeyTooLong)));
         }

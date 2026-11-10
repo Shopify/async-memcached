@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Storage methods reject empty keys. `validate_key` and `is_valid_key` accepted a zero-length key, so `set`, `add`, `meta_set` and their multi-key variants wrote a malformed header such as `set  0 0 9\r\n`. memcached rejects that header before it reads the payload, so it ran the value as a separate command (for example `flush_all`). An empty key now returns the same invalid-key error as other bad keys, before any bytes are written.
 - `scripts/install-test-tools.sh` builds memcached on macOS 27. That SDK does not declare `kSBXProfileNoInternet`, which memcached's macOS sandbox code uses, so the build failed. The installer now skips that sandbox on macOS; the test fixture does not need it.
 
 ## [0.10.0] - 2026-11-06
