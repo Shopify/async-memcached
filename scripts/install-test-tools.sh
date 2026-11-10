@@ -56,6 +56,11 @@ jobs="${TEST_BUILD_JOBS:-4}"
   cd "$prefix/build"
   tar -xzf "$prefix/downloads/memcached-1.6.41.tar.gz"
   cd memcached-1.6.41
+  if [[ "$(uname -s)" == Darwin ]]; then
+    # The macOS 27 SDK does not declare kSBXProfileNoInternet, which memcached's macOS
+    # sandbox code uses. The test fixture does not need that sandbox, so skip it.
+    export ac_cv_func_sandbox_init=no
+  fi
   ./configure --prefix="$prefix" --with-libevent="$prefix"
   make -j "$jobs" memcached
   install -m 755 memcached "$prefix/bin/memcached"
