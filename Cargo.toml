@@ -27,6 +27,7 @@ rustc-hash = "2.1"
 lazy_static = "1.4"
 tokio = { version = "1.26", features = ["full"] }
 rand = "0.9"
+proptest = { version = "1.12", default-features = false, features = ["std"] }
 criterion = { version = "0.8", features = ["async_tokio"] }
 serial_test = "3.1"
 serde_json = "1.0"

@@ -150,6 +150,16 @@ Run unit tests and scripted TCP tests:
 cargo test --all-features
 ```
 
+### Run more property test cases
+
+The parser property tests in `src/parser/proptests.rs` and the `key_validation_properties` target use proptest.
+Each property runs 256 generated cases.
+Set `PROPTEST_CASES` to run more cases:
+
+```bash
+PROPTEST_CASES=10000 cargo test --all-features --lib parser::proptests
+```
+
 ## Test targets
 
 | Target | Coverage |
@@ -160,6 +170,9 @@ cargo test --all-features
 | `pipeline_integration_tests` | The target checks batch contents and per-key outcomes. |
 | `resiliency_tests` | The target checks transport failures and explicit reconnection. |
 | `wire_integration_tests` | The target checks protocol frames and task cancellation with an owned client. |
+| `cancellation_safety` | The target checks that cancelled, failed and leaked operations close the client, and that completed operations keep it usable. |
+| `cancel_at_every_poll` | The target drops each operation after each of its polls while the reply arrives one byte at a time. The client must then be closed, or the next request must receive its own reply. |
+| `key_validation_properties` | The target checks generated keys at every entry point that takes a key. |
 
 ## Harness settings
 
@@ -187,6 +200,8 @@ Neither replaces the tests that use memcached.
 
 A fixture prints its server logs when a test panics.
 Errors for absent executables and startup failures include a reference to this document.
+A failing property test prints the smallest failing input that proptest finds.
+Proptest saves that input in a `proptest-regressions` directory and tests it first in later runs.
 
 ## Diagnostic procedures
 
