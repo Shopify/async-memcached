@@ -204,9 +204,10 @@ A failing property test prints the smallest failing input that proptest finds.
 Proptest saves a seed for that input and tests it first in later runs.
 Properties in `src/` save it under `proptest-regressions/`, for example `proptest-regressions/parser/proptests.txt`.
 Properties in `tests/` save it next to the test file, for example `tests/key_validation_properties.proptest-regressions`.
-A CI run does not keep the file.
-After a CI failure, copy the `cc` line from the job log into the file in your checkout.
-Commit that file with the fix for the failure, so that every later run, including CI, tests the case again.
+Git ignores both paths, so a seed stays on the machine that found it.
+To replay a CI failure, copy the `cc` line from the job log into that file in your checkout.
+When a property finds a bug, add a test with the input from the `# shrinks to` comment.
+After a generator changes, a seed can produce a different input; a written test cannot.
 
 ## Diagnostic procedures
 
