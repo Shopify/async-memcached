@@ -147,7 +147,7 @@ impl Connection {
 
 #[cfg(test)]
 mod tests {
-    use super::{Addr, Error};
+    use super::{Addr, Connection, Error};
 
     #[tokio::test]
     async fn test_unknown_scheme() {
@@ -179,5 +179,23 @@ mod tests {
             Addr::parse("tcp://").unwrap_err(),
             Error::Connect(_)
         ));
+    }
+
+    #[tokio::test]
+    async fn io_on_a_closed_connection_fails_with_connection_closed() {
+        use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
+
+        let mut connection = Connection::Closed;
+        let mut buf = [0; 8];
+        let errors = [
+            connection.read(&mut buf).await.unwrap_err(),
+            connection.fill_buf().await.unwrap_err(),
+            connection.write(b"get key\r\n").await.unwrap_err(),
+            connection.flush().await.unwrap_err(),
+            connection.shutdown().await.unwrap_err(),
+        ];
+        for error in errors {
+            assert_eq!(Error::from(error), Error::ConnectionClosed);
+        }
     }
 }

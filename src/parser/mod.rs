@@ -241,3 +241,6 @@ pub(crate) fn is_signed_digit(chr: u8) -> bool {
 pub(crate) fn parse_u32(buf: &[u8]) -> IResult<&[u8], u32> {
     map_res(take_while_m_n(1, 10, |c: u8| c.is_dec_digit()), btou).parse(buf)
 }
+
+#[cfg(test)]
+mod proptests;

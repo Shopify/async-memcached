@@ -5,3 +5,5 @@
 Cargo.lock
 *.sock
 profile.json
+/proptest-regressions
+*.proptest-regressions

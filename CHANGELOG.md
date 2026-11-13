@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+
+- Property tests that use `proptest`, a new dev-dependency. They cover the response parsers and key validation at every entry point that takes a key.
+- The `cancel_at_every_poll` test target. It drops each operation after each of its polls while the reply arrives one byte at a time. Then the client must be closed, or the next request must receive its own reply.
+
 ### Fixed
 
 - `scripts/install-test-tools.sh` builds memcached on macOS 27. That SDK does not declare `kSBXProfileNoInternet`, which memcached's macOS sandbox code uses, so the build failed. The installer now skips that sandbox on macOS; the test fixture does not need it.
