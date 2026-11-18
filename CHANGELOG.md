@@ -10,6 +10,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+## [0.11.0] - 2026-11-18
+
+### Upgrade notes
+
+0.11.0 has no public type or signature changes, so code that compiles against 0.10 compiles unchanged. These calls behave differently:
+
+- Pass each meta flag as its own element: `["v", "T60"]`, not `["v T60"]`. A flag that is empty or contains whitespace or control characters fails with an `ErrorKind::Client` error, and so does an empty opaque.
+- `set`, `add`, `set_multi`, `add_multi` and `meta_set` close the connection when memcached answers `ERROR` or `CLIENT_ERROR`, and later calls on that client return `Error::ConnectionClosed`. A caller whose meta flags memcached rejects now loses the connection on every such call, so a pool opens a new one each time. Watch for connection churn after upgrading.
+- `set_multi` and `add_multi` return `Err` for the whole call on those replies, instead of an error for one key.
+- `version` closes the connection on any reply that does not start with `VERSION `, so later calls on that client return `Error::ConnectionClosed`. Behind a proxy that answers `version` with `ERROR`, such as Twemproxy, `version` already returned an error; now it also closes the connection.
+- These inputs fail before anything is written: an empty key, an opaque longer than 31 bytes, and an `ms` command with more than 16 meta flags (at most 14 caller flags for `meta_set_multi`). A 32-byte opaque returns `ErrorKind::OpaqueTooLong` instead of an `ErrorKind::Client` error from memcached.
+- Changed error messages: `Meta flag contains a line or string terminator` is now `Meta flag is empty or contains whitespace or control characters`, `Opaque token contains whitespace or control characters` is now `Opaque token is empty or contains whitespace or control characters`, and `ErrorKind::OpaqueTooLong` says 31 characters instead of 32.
+
 ### Added
 
 - Property tests that use `proptest`, a new dev-dependency. They cover the response parsers and key validation at every entry point that takes a key.
@@ -17,6 +30,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Every entry point that takes a key rejects an empty key before it writes anything ([GHSA-76fx-vq52-f53f](https://github.com/Shopify/async-memcached/security/advisories/GHSA-76fx-vq52-f53f), [GHSA-f9wj-cj54-79vv](https://github.com/Shopify/async-memcached/security/advisories/GHSA-f9wj-cj54-79vv)). An empty key left the key token out of the command line. For a storage command such as `set`, memcached rejected the line with an error and then ran the value as a command, and the reply to that command answered a later request on the same connection. Other commands read their next argument as the key: `delete_no_reply("")` deleted the key `noreply`, and `increment_no_reply` and `decrement_no_reply` sent a malformed command. The single-key calls, `meta_get_multi` and `meta_set_multi` now return an `ErrorKind::Client` error. `get_multi` and `delete_multi_no_reply` leave an empty key out of the request, and `set_multi` and `add_multi` leave it out and report that error for it.
+- `set`, `add`, `set_multi`, `add_multi` and `meta_set` close the connection when memcached answers `ERROR` or `CLIENT_ERROR` ([GHSA-76fx-vq52-f53f](https://github.com/Shopify/async-memcached/security/advisories/GHSA-76fx-vq52-f53f)). Such a reply can mean that memcached rejected the command line before it read the length of the value, and then read the value as commands. Closing the connection keeps the replies to those commands from answering later requests. `set_multi` and `add_multi` now return that error for the whole call instead of for one key. A `SERVER_ERROR` reply still leaves the connection open.
+- `meta_set` and `meta_set_multi` refuse an `ms` command with more than 16 meta flags before they write anything, counting the `q`, `k` and `O` flags that the client adds ([GHSA-76fx-vq52-f53f](https://github.com/Shopify/async-memcached/security/advisories/GHSA-76fx-vq52-f53f)). memcached 1.6.39 and older reject such a line before they read the length of the value, and then run the value as commands, which closing the connection cannot undo. `meta_set_multi` adds `k` and `q` to every line, so it takes at most 14 other flags.
+- `version` requires the `VERSION ` prefix in its reply ([GHSA-76fx-vq52-f53f](https://github.com/Shopify/async-memcached/security/advisories/GHSA-76fx-vq52-f53f)). It previously returned the tail of any line of 8 bytes or more, so the reply to another command could pass as a version. Any other line now closes the connection and returns an error, and so do unread bytes of an earlier reply in the client's buffer, so a connection pool that checks connections with `version` discards a connection that is out of sync. Behind a proxy that answers `version` with `ERROR`, such as Twemproxy, each check now also closes the connection.
+- Meta flags that are empty or contain whitespace, control characters or the DEL byte are rejected with an `ErrorKind::Client` error before anything is written, and so is an empty opaque ([GHSA-f9wj-cj54-79vv](https://github.com/Shopify/async-memcached/security/advisories/GHSA-f9wj-cj54-79vv)). Previously only `\r`, `\n` and `\0` were rejected, so a flag with a space in it added tokens to the command, and an empty flag or opaque wrote an empty or bare `O` token. Pass each flag as its own element of `meta_flags`.
+- An opaque longer than 31 bytes fails with `ErrorKind::OpaqueTooLong` before anything is written. memcached limits the `O<opaque>` token to 32 bytes, so it answered a 32-byte opaque with `CLIENT_ERROR`, and after `meta_set` that reply would now also close the connection.
 - `scripts/install-test-tools.sh` builds memcached on macOS 27. That SDK does not declare `kSBXProfileNoInternet`, which memcached's macOS sandbox code uses, so the build failed. The installer now skips that sandbox on macOS; the test fixture does not need it.
 
 ## [0.10.0] - 2026-11-06

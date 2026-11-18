@@ -546,6 +546,42 @@ async fn test_get_multi_skips_keys_that_would_inject_commands() {
 #[ignore = "Relies on a running memcached server"]
 #[tokio::test]
 #[parallel]
+async fn test_set_with_empty_key_does_not_send_its_value_as_a_command() {
+    let server = Memcached::tcp();
+    let mut client = server.client().await;
+    client
+        .set("victimkey", "SECRETVAL", None, None)
+        .await
+        .expect("failed to set the victim key");
+
+    // Without its key token, the `set` line is malformed. The server rejects that line and then
+    // reads the value, a complete `get` command, as the next command on the connection.
+    let result = client.set("", "get victimkey", None, None).await;
+    assert!(
+        matches!(
+            result,
+            Err(Error::Protocol(Status::Error(ErrorKind::Client(_))))
+        ),
+        "{:?}",
+        result
+    );
+    assert!(!client.is_closed());
+
+    // The next request on the connection must receive its own reply.
+    let other = client
+        .get("otherkey")
+        .await
+        .expect("failed to get otherkey");
+    assert_eq!(
+        other.map(|value| String::from_utf8_lossy(&value.key).into_owned()),
+        None,
+        "a later request received the reply to a value sent as a command"
+    );
+}
+
+#[ignore = "Relies on a running memcached server"]
+#[tokio::test]
+#[parallel]
 async fn test_get_many_aliases_get_multi_properly() {
     let keys = vec!["get-many-key1", "get-many-key2", "get-many-key3"];
     let values = ["value1", "value2", "value3"];

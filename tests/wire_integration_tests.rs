@@ -590,3 +590,92 @@ fn storage_multi_filters_invalid_keys_without_response_misalignment() {
         }
     });
 }
+
+/// A line without the `VERSION ` prefix most likely answers an earlier request, so the real reply
+/// to `version` can still be on its way. The client closes instead of reading it as the next reply.
+#[test]
+fn version_without_the_version_prefix_closes_the_client() {
+    run(async {
+        let replies: [&[u8]; 6] = [
+            b"VERSION\r\n",
+            b"VERSIONS 1.6.41\r\n",
+            b"ERROR\r\n",
+            b"SERVER_ERROR out of memory\r\n",
+            b"END\r\nVERSION 1.6.41\r\n",
+            b"VALUE victimkey 0 9\r\n",
+        ];
+        for reply in replies {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                expect_request(&mut socket, b"version\r\n").await;
+                socket.write_all(reply).await.unwrap();
+                let mut rest = Vec::new();
+                socket.read_to_end(&mut rest).await.unwrap();
+                rest
+            });
+            let mut client = Client::new(format!("tcp://{address}")).await.unwrap();
+            let result = client.version().await;
+            assert!(
+                matches!(
+                    result,
+                    Err(Error::Protocol(Status::Error(ErrorKind::Protocol(_))))
+                ),
+                "{} returned {:?}",
+                reply.escape_ascii(),
+                result
+            );
+            assert!(
+                client.is_closed(),
+                "{} left the client open",
+                reply.escape_ascii()
+            );
+            assert_eq!(client.version().await, Err(Error::ConnectionClosed));
+            drop(client);
+            assert_eq!(server.await.unwrap().escape_ascii().to_string(), "");
+        }
+    });
+}
+
+#[test]
+fn version_with_unread_reply_bytes_closes_the_client_without_writing() {
+    run(async {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let mut client = Client::new(format!("tcp://{address}")).await.unwrap();
+        let (mut peer, _) = listener.accept().await.unwrap();
+        // One write carries the reply to `get key` and a reply that no request asked for, so the
+        // client reads both into its buffer.
+        let (value, ()) = tokio::join!(client.get("key"), async {
+            expect_request(&mut peer, b"get key\r\n").await;
+            peer.write_all(b"END\r\nVALUE victimkey 0 9\r\nSECRETVAL\r\nEND\r\n")
+                .await
+                .unwrap();
+        });
+        assert_eq!(value, Ok(None));
+
+        let mut request = [0; 64];
+        let result = tokio::select! {
+            biased;
+            result = client.version() => result,
+            read = peer.read(&mut request) => panic!(
+                "version wrote {} while reply bytes were unread",
+                request[..read.unwrap()].escape_ascii()
+            ),
+        };
+        assert!(
+            matches!(
+                result,
+                Err(Error::Protocol(Status::Error(ErrorKind::Protocol(_))))
+            ),
+            "{:?}",
+            result
+        );
+        assert!(client.is_closed());
+        drop(client);
+        let mut written = Vec::new();
+        peer.read_to_end(&mut written).await.unwrap();
+        assert_eq!(written.escape_ascii().to_string(), "");
+    });
+}

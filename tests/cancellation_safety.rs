@@ -69,6 +69,23 @@ async fn cancel_after_request<T>(
     }
 }
 
+/// Runs a call that must fail before it writes anything. Panics as soon as the peer reads a byte,
+/// because the call would then wait for a reply that never comes.
+async fn without_writes<T>(
+    peer: &mut TcpStream,
+    call: impl Future<Output = Result<T, Error>>,
+) -> Result<T, Error> {
+    let mut byte = [0];
+    tokio::select! {
+        biased;
+        result = call => result,
+        read = peer.read(&mut byte) => panic!(
+            "the call wrote {:?} before it failed",
+            read.map(|_| byte.escape_ascii().to_string())
+        ),
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 enum MetaOperation {
     Get,
@@ -213,6 +230,126 @@ async fn validation_failure_sends_nothing_and_preserves_connection() {
         .await
         .unwrap()
         .is_empty());
+    assert!(!client.is_closed());
+    assert_eq!(
+        exchange(
+            &mut peer,
+            b"mg next v\r\n",
+            b"EN\r\n",
+            client.meta_get("next", false, None, Some(&["v"])),
+        )
+        .await
+        .unwrap(),
+        None
+    );
+}
+
+#[tokio::test]
+async fn empty_meta_flags_or_flags_with_whitespace_or_control_bytes_send_nothing() {
+    // A flag with a space in it would put more than one token on the command line, and an empty
+    // flag would put an empty token on it.
+    for flag in ["", "T60 T60", "v\tk", " ", "v\x0b", "\x0c", "\x1f", "v\x7f"] {
+        let (mut client, mut peer) = pair().await;
+        let flag = [flag];
+        let flags = Some(flag.as_slice());
+        let results = [
+            without_writes(&mut peer, client.meta_get("key", false, None, flags))
+                .await
+                .map(|_| ()),
+            without_writes(
+                &mut peer,
+                client.meta_set("key", "value", false, None, flags),
+            )
+            .await
+            .map(|_| ()),
+            without_writes(&mut peer, client.meta_delete("key", false, None, flags))
+                .await
+                .map(|_| ()),
+            without_writes(
+                &mut peer,
+                client.meta_increment("key", false, None, None, flags),
+            )
+            .await
+            .map(|_| ()),
+            without_writes(
+                &mut peer,
+                client.meta_decrement("key", false, None, None, flags),
+            )
+            .await
+            .map(|_| ()),
+            without_writes(&mut peer, client.meta_get_multi(&["key"], flags))
+                .await
+                .map(|_| ()),
+            without_writes(&mut peer, client.meta_set_multi(&[("key", "value")], flags))
+                .await
+                .map(|_| ()),
+        ];
+        for result in results {
+            assert!(
+                matches!(
+                    result,
+                    Err(Error::Protocol(Status::Error(ErrorKind::Client(_))))
+                ),
+                "{:?}: {:?}",
+                flag,
+                result
+            );
+        }
+        assert!(!client.is_closed());
+        assert_eq!(
+            exchange(
+                &mut peer,
+                b"mg next v\r\n",
+                b"EN\r\n",
+                client.meta_get("next", false, None, Some(&["v"])),
+            )
+            .await
+            .unwrap(),
+            None
+        );
+    }
+}
+
+#[tokio::test]
+async fn empty_opaque_sends_nothing_and_preserves_connection() {
+    let (mut client, mut peer) = pair().await;
+    let opaque = Some(&b""[..]);
+    let results = [
+        without_writes(&mut peer, client.meta_get("key", false, opaque, None))
+            .await
+            .map(|_| ()),
+        without_writes(
+            &mut peer,
+            client.meta_set("key", "value", false, opaque, None),
+        )
+        .await
+        .map(|_| ()),
+        without_writes(&mut peer, client.meta_delete("key", false, opaque, None))
+            .await
+            .map(|_| ()),
+        without_writes(
+            &mut peer,
+            client.meta_increment("key", false, opaque, None, None),
+        )
+        .await
+        .map(|_| ()),
+        without_writes(
+            &mut peer,
+            client.meta_decrement("key", false, opaque, None, None),
+        )
+        .await
+        .map(|_| ()),
+    ];
+    for result in results {
+        assert!(
+            matches!(
+                result,
+                Err(Error::Protocol(Status::Error(ErrorKind::Client(_))))
+            ),
+            "{:?}",
+            result
+        );
+    }
     assert!(!client.is_closed());
     assert_eq!(
         exchange(
@@ -878,11 +1015,7 @@ async fn fully_read_ascii_status_lines_preserve_connection() {
     assert!(results[&"key"].is_err());
     assert_eq!(results[&"other"], Ok(()));
 
-    // A complete but unexpected line is fully read by the admin commands too.
-    assert!(matches!(
-        exchange(&mut peer, b"version\r\n", b"ERROR\r\n", client.version()).await,
-        Err(Error::Protocol(_))
-    ));
+    // A complete but unexpected line is fully read by `flush_all` too.
     assert!(matches!(
         exchange(
             &mut peer,
@@ -905,6 +1038,227 @@ async fn fully_read_ascii_status_lines_preserve_connection() {
     .unwrap()
     .unwrap();
     assert_eq!(value.data.as_deref(), Some(&b"value"[..]));
+}
+
+/// After a server rejects the line of a command that carries a value, it can read that value as
+/// commands, and their replies would answer later requests. So `ERROR` and `CLIENT_ERROR` close the
+/// client after every command that sends a value.
+#[tokio::test]
+async fn rejected_storage_command_closes_connection() {
+    let rejections = [
+        (
+            &b"CLIENT_ERROR bad command line format\r\n"[..],
+            ErrorKind::Client("bad command line format".into()),
+        ),
+        (&b"ERROR\r\n"[..], ErrorKind::NonexistentCommand),
+    ];
+    for (rejection, kind) in rejections {
+        for operation in [
+            AsciiOperation::Set,
+            AsciiOperation::Add,
+            AsciiOperation::SetMulti,
+            AsciiOperation::AddMulti,
+        ] {
+            // A batch also gets a reply for its second item, which only a closed client ignores.
+            let response = match operation {
+                AsciiOperation::SetMulti | AsciiOperation::AddMulti => {
+                    [rejection, b"STORED\r\n"].concat()
+                }
+                _ => rejection.to_vec(),
+            };
+            let (mut client, mut peer) = pair().await;
+            let result = exchange(
+                &mut peer,
+                operation.request(),
+                &response,
+                operation.run(&mut client),
+            )
+            .await;
+            assert_eq!(
+                result,
+                Err(Error::Protocol(Status::Error(kind.clone()))),
+                "{:?}",
+                operation
+            );
+            assert!(client.is_closed(), "{:?} left the client open", operation);
+            expect_connection_closed(client.get("next").await);
+            expect_closed(&mut peer).await;
+        }
+        for quiet in [false, true] {
+            let (request, response): (&[u8], Vec<u8>) = if quiet {
+                (
+                    b"ms key 5 q\r\nvalue\r\nmn\r\n",
+                    [rejection, b"MN\r\n"].concat(),
+                )
+            } else {
+                (b"ms key 5\r\nvalue\r\n", rejection.to_vec())
+            };
+            let (mut client, mut peer) = pair().await;
+            let result = exchange(
+                &mut peer,
+                request,
+                &response,
+                client.meta_set("key", "value", quiet, None, None),
+            )
+            .await;
+            assert_eq!(
+                result.map(|_| ()),
+                Err(Error::Protocol(Status::Error(kind.clone()))),
+                "meta_set, quiet: {quiet}"
+            );
+            assert!(
+                client.is_closed(),
+                "meta_set, quiet: {}, left the client open",
+                quiet
+            );
+            expect_connection_closed(client.meta_get("next", false, None, Some(&["v"])).await);
+            expect_closed(&mut peer).await;
+        }
+    }
+}
+
+/// memcached discards the value of a storage command that it fails with `SERVER_ERROR`, so the
+/// connection stays in step.
+#[tokio::test]
+async fn server_error_to_storage_command_preserves_connection() {
+    let error = || {
+        Err(Error::Protocol(Status::Error(ErrorKind::Server(
+            "out of memory".into(),
+        ))))
+    };
+    let (mut client, mut peer) = pair().await;
+    for operation in [AsciiOperation::Set, AsciiOperation::Add] {
+        let result = exchange(
+            &mut peer,
+            operation.request(),
+            b"SERVER_ERROR out of memory\r\n",
+            operation.run(&mut client),
+        )
+        .await;
+        assert_eq!(result, error(), "{:?}", operation);
+    }
+    let result = exchange(
+        &mut peer,
+        b"ms key 5\r\nvalue\r\n",
+        b"SERVER_ERROR out of memory\r\n",
+        client.meta_set("key", "value", false, None, None),
+    )
+    .await;
+    assert_eq!(result.map(|_| ()), error());
+    assert!(!client.is_closed());
+    assert_eq!(
+        exchange(&mut peer, b"get key\r\n", b"END\r\n", client.get("key"))
+            .await
+            .unwrap(),
+        None
+    );
+}
+
+/// memcached 1.6.39 and older reject an `ms` line with more than 16 flags before they read the
+/// length of the value, and then run the value as commands. Closing the connection afterwards
+/// cannot undo those commands, so the client refuses such a line before it writes anything. The
+/// `q`, `k` and `O` flags that the client adds count toward the 16.
+#[tokio::test]
+async fn meta_set_lines_with_more_than_16_flags_send_nothing_and_preserve_connection() {
+    let (mut client, mut peer) = pair().await;
+    let flags = ["T60"; 17];
+    let op = Some(&b"op"[..]);
+    // Each case puts 17 flags on the line: (quiet, opaque, caller flags).
+    for (quiet, opaque, count) in [
+        (false, None, 17),
+        (true, None, 16),
+        (false, op, 16),
+        (true, op, 15),
+    ] {
+        let result = without_writes(
+            &mut peer,
+            client.meta_set("k", "get victimkey", quiet, opaque, Some(&flags[..count])),
+        )
+        .await;
+        assert!(
+            matches!(
+                result,
+                Err(Error::Protocol(Status::Error(ErrorKind::Client(_))))
+            ),
+            "quiet: {}, opaque: {:?}, {} caller flags: {:?}",
+            quiet,
+            opaque,
+            count,
+            result
+        );
+    }
+    // `meta_set_multi` adds `k` and `q` to every line.
+    let result = without_writes(
+        &mut peer,
+        client.meta_set_multi(&[("k", "get victimkey")], Some(&flags[..15])),
+    )
+    .await;
+    assert!(
+        matches!(
+            result,
+            Err(Error::Protocol(Status::Error(ErrorKind::Client(_))))
+        ),
+        "{:?}",
+        result
+    );
+    assert!(!client.is_closed());
+    assert_eq!(
+        exchange(&mut peer, b"get key\r\n", b"END\r\n", client.get("key"))
+            .await
+            .unwrap(),
+        None
+    );
+}
+
+/// An `ms` line with 16 flags is written. Flags that the client drops do not count. A real server
+/// rejects the repeated `T60` flags; the scripted replies only let each call finish, because the
+/// test checks the line that the client writes.
+#[tokio::test]
+async fn meta_set_lines_with_16_flags_are_written() {
+    let (mut client, mut peer) = pair().await;
+    let t60 = |count| " T60".repeat(count);
+    let with = |count, extra| {
+        let mut flags = vec!["T60"; count];
+        flags.push(extra);
+        flags
+    };
+
+    // The client drops a `q` flag, because quiet mode comes from `is_quiet`.
+    let flags = with(16, "q");
+    let request = format!("ms k 5{}\r\nvalue\r\n", t60(16));
+    let result = exchange(
+        &mut peer,
+        request.as_bytes(),
+        b"HD\r\n",
+        client.meta_set("k", "value", false, None, Some(&flags)),
+    )
+    .await;
+    assert_eq!(result, Ok(None));
+
+    // The `opaque` parameter replaces an `O` flag.
+    let flags = with(14, "O1");
+    let request = format!("ms k 5 Oop{} q\r\nvalue\r\nmn\r\n", t60(14));
+    let result = exchange(
+        &mut peer,
+        request.as_bytes(),
+        b"MN\r\n",
+        client.meta_set("k", "value", true, Some(&b"op"[..]), Some(&flags)),
+    )
+    .await;
+    assert_eq!(result, Ok(None));
+
+    // `meta_set_multi` drops a caller's `k` and adds its own `k` and `q`.
+    let flags = with(14, "k");
+    let request = format!("ms k 5{} k q\r\nvalue\r\nmn\r\n", t60(14));
+    let result = exchange(
+        &mut peer,
+        request.as_bytes(),
+        b"MN\r\n",
+        client.meta_set_multi(&[("k", "value")], Some(&flags)),
+    )
+    .await;
+    assert_eq!(result, Ok(vec![]));
+    assert!(!client.is_closed());
 }
 
 #[tokio::test]

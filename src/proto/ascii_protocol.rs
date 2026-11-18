@@ -253,6 +253,9 @@ impl AsciiProtocol for Client {
         operation.conn.flush().await?;
 
         let response = operation.get_read_write_response().await?;
+        if let Response::Status(status) = &response {
+            Self::fail_on_rejected_line(status)?;
+        }
         operation.complete();
 
         match response {
@@ -347,6 +350,9 @@ impl AsciiProtocol for Client {
         operation.conn.flush().await?;
 
         let response = operation.get_read_write_response().await?;
+        if let Response::Status(status) = &response {
+            Self::fail_on_rejected_line(status)?;
+        }
         operation.complete();
 
         match response {

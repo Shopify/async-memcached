@@ -172,7 +172,7 @@ PROPTEST_CASES=10000 cargo test --all-features --lib parser::proptests
 | `wire_integration_tests` | The target checks protocol frames and task cancellation with an owned client. |
 | `cancellation_safety` | The target checks that cancelled, failed and leaked operations close the client, and that completed operations keep it usable. |
 | `cancel_at_every_poll` | The target drops each operation after each of its polls while the reply arrives one byte at a time. The client must then be closed, or the next request must receive its own reply. |
-| `key_validation_properties` | The target checks generated keys at every entry point that takes a key. |
+| `key_validation_properties` | The target checks generated keys at every entry point that takes a key. One test per entry point checks the empty key. |
 
 ## Harness settings
 

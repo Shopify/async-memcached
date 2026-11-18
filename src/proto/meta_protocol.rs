@@ -30,6 +30,11 @@ async fn drain_quiet_noop_response(
 }
 
 /// Trait defining Meta protocol-specific methods for the Client.
+///
+/// Every meta flag is written as one token. An empty flag, or a flag that contains whitespace,
+/// control characters, or the DEL byte, is rejected before anything is written. So is an empty
+/// opaque or one longer than 31 bytes, and an `ms` command with more than 16 meta flags, counting
+/// the `q`, `k` and `O` flags that the client adds.
 pub trait MetaProtocol {
     /// Gets the given key with additional metadata.
     ///
@@ -57,6 +62,8 @@ pub trait MetaProtocol {
     /// Sets the given key with additional metadata.
     ///
     /// If the value is set successfully, `Some(MetaValue)` is returned, otherwise [`Error`] is returned.
+    /// An `ms` command carries at most 16 meta flags, counting the `q` and `O` flags that
+    /// `is_quiet` and `opaque` add, so a call with more fails before anything is written.
     /// NOTE: That the data in this MetaValue is sparsely populated, containing only requested data by meta_flags
     /// The meta set command is a generic command for storing data to memcached. Based on the flags supplied,
     /// it can replace all storage commands (see token M) as well as adds new options.
@@ -113,7 +120,7 @@ pub trait MetaProtocol {
     ///
     /// - `<key>` is the key string, with a maximum length of 250 bytes.
     ///
-    /// - `<opaque>` is an optional slice of string references with a maximum length of 32 bytes.
+    /// - `<opaque>` is an optional slice of string references with a maximum length of 31 bytes.
     ///
     /// - `<delta>` is an optional u64 value for the increment delta.
     ///   The default behaviour is to increment with a delta of 1.
@@ -145,7 +152,7 @@ pub trait MetaProtocol {
     ///
     /// - `<key>` is the key string, with a maximum length of 250 bytes.
     ///
-    /// - `<opaque>` is an optional slice of string references with a maximum length of 32 bytes.
+    /// - `<opaque>` is an optional slice of string references with a maximum length of 31 bytes.
     ///
     /// - `<delta>` is an optional u64 value for the decrement delta.
     ///   The default behaviour is to decrement with a delta of 1.
@@ -200,7 +207,9 @@ pub trait MetaProtocol {
     /// populated.
     ///
     /// Every key is validated before anything is written, so a key that is too long fails the
-    /// whole call without leaving a partial pipeline on the connection.
+    /// whole call without leaving a partial pipeline on the connection. Every line also carries
+    /// `k` and `q`, so `meta_flags` can hold at most 14 of the 16 meta flags that an `ms` command
+    /// carries.
     ///
     /// An error line (`CLIENT_ERROR`, `SERVER_ERROR`, `ERROR`) for any item fails the call and
     /// closes the connection because later responses of the same pipeline can remain unread.
@@ -221,6 +230,27 @@ pub trait MetaProtocol {
         V: AsMemcachedValue;
 }
 
+/// The most meta flags that one `ms` command can carry, counting the `q`, `k` and `O` flags that
+/// the client adds. memcached 1.6.39 and older reject an `ms` line with more before they read the
+/// length of the value, and then read the value as commands.
+const MAX_META_SET_FLAGS: usize = 16;
+
+/// Fails, before anything is written, when an `ms` line would carry more than
+/// `MAX_META_SET_FLAGS` meta flags.
+fn check_meta_set_flag_count(flags: usize) -> Result<(), Error> {
+    if flags > MAX_META_SET_FLAGS {
+        return Err(Error::Protocol(Status::Error(ErrorKind::Client(format!(
+            "An ms command can carry at most {MAX_META_SET_FLAGS} meta flags, counting q, k and O"
+        )))));
+    }
+    Ok(())
+}
+
+/// Whether `write_pipeline_meta_flags` writes `flag`: the pipeline adds `k` and `q` itself.
+fn writes_pipeline_meta_flag(flag: &str) -> bool {
+    !(flag.starts_with('k') || flag.starts_with('q'))
+}
+
 /// Writes the caller's meta flags for a pipelined command, skipping the flags the pipeline
 /// itself owns (`k` and `q`).
 async fn write_pipeline_meta_flags(
@@ -230,7 +260,7 @@ async fn write_pipeline_meta_flags(
     Client::validate_meta_flags(meta_flags)?;
     if let Some(meta_flags) = meta_flags {
         for flag in meta_flags {
-            if flag.starts_with('k') || flag.starts_with('q') {
+            if !writes_pipeline_meta_flag(flag) {
                 continue;
             }
             client.conn.write_all(b" ").await?;
@@ -327,6 +357,15 @@ impl MetaProtocol for Client {
             Self::validate_opaque(opaque)?;
         }
         Self::validate_meta_flags(meta_flags)?;
+        let caller_flags = meta_flags.map_or(0, |flags| {
+            flags
+                .iter()
+                .filter(|flag| Self::writes_meta_flag(flag, opaque))
+                .count()
+        });
+        check_meta_set_flag_count(
+            caller_flags + usize::from(opaque.is_some()) + usize::from(is_quiet),
+        )?;
 
         let vr = value.as_bytes();
 
@@ -358,6 +397,9 @@ impl MetaProtocol for Client {
         operation.conn.flush().await?;
 
         let response = operation.drive_receive(parse_meta_set_response).await?;
+        if let MetaResponse::Status(status) = &response {
+            Self::fail_on_rejected_line(status)?;
+        }
         if is_quiet && !matches!(response, MetaResponse::Status(Status::NoOp)) {
             drain_quiet_noop_response(&mut operation, parse_meta_set_response).await?;
         }
@@ -625,6 +667,14 @@ impl MetaProtocol for Client {
             Self::validate_key(key.as_ref())?;
         }
         Self::validate_meta_flags(meta_flags)?;
+        let caller_flags = meta_flags.map_or(0, |flags| {
+            flags
+                .iter()
+                .filter(|flag| writes_pipeline_meta_flag(flag))
+                .count()
+        });
+        // Every line also carries `k` and `q`.
+        check_meta_set_flag_count(caller_flags + 2)?;
 
         let mut operation = self.start_operation()?;
 

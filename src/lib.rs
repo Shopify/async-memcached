@@ -37,8 +37,10 @@ pub(crate) const MAX_KEY_LENGTH: usize = 250; // reference in memcached document
 /// Cancelling an operation or failing before its response is complete closes the connection,
 /// because the unread bytes would otherwise be mistaken for the next operation's response.
 /// This applies to every ASCII, meta, and administrative command, and to dropping a
-/// [`MetadumpIter`] before it has been drained. Later I/O returns
-/// [`Error::ConnectionClosed`]; operations are not retried.
+/// [`MetadumpIter`] before it has been drained. An `ERROR` or `CLIENT_ERROR` reply to a command
+/// that sends a value (`set`, `add`, `set_multi`, `add_multi`, `meta_set`, `meta_set_multi`) also
+/// closes it: the server may have rejected the command line and then read the value as commands.
+/// Later I/O returns [`Error::ConnectionClosed`]; operations are not retried.
 pub struct Client {
     buf: BytesMut,
     conn: Connection,
@@ -153,7 +155,10 @@ impl Client {
 
             let result = match self.drive_receive(parse_ascii_response).await {
                 Ok(Response::Status(Status::Stored)) => Ok(()),
-                Ok(Response::Status(s)) => Err(s.into()),
+                Ok(Response::Status(s)) => {
+                    Self::fail_on_rejected_line(&s)?;
+                    Err(s.into())
+                }
                 Ok(_) => Err(Status::Error(ErrorKind::Protocol(None)).into()),
                 Err(e) => return Err(e),
             };
@@ -177,10 +182,21 @@ impl Client {
     /// If the version is retrieved successfully, `String` is returned containing the version
     /// component e.g. `1.6.7`, otherwise [`Error`] is returned.
     ///
+    /// The reply must start with `VERSION `. Any other line closes the connection and returns an
+    /// error, because it most likely answers an earlier request, so the reply to `version` would
+    /// answer the next one. If the client still holds unread bytes of an earlier reply, `version`
+    /// closes the connection and returns an error without sending the command.
+    ///
     /// For some setups, such as those using Twemproxy, this will return an error as those
     /// intermediate proxies do not support the version command.
     pub async fn version(&mut self) -> Result<String, Error> {
         let mut operation = self.start_operation()?;
+        if !operation.buf.is_empty() {
+            // Returning before `complete` makes the guard close the connection.
+            return Err(Error::from(Status::Error(ErrorKind::Protocol(Some(
+                "Unread bytes of an earlier reply before the `version` command".to_string(),
+            )))));
+        }
 
         operation.conn.write_all(b"version\r\n").await?;
         operation.conn.flush().await?;
@@ -188,12 +204,13 @@ impl Client {
         let mut version = String::new();
         operation.conn.read_line(&mut version).await?;
         Self::expect_complete_line(&version)?;
-        operation.complete();
 
         // Peel off the leading "VERSION " header.
-        if version.len() >= 8 && version.is_char_boundary(8) {
+        if version.starts_with("VERSION ") {
+            operation.complete();
             Ok(version.split_off(8))
         } else {
+            // Returning before `complete` makes the guard close the connection.
             Err(Error::from(Status::Error(ErrorKind::Protocol(Some(
                 format!("Invalid response for `version` command: `{version}`"),
             )))))
@@ -291,10 +308,27 @@ impl Client {
         }
     }
 
+    /// Fails with `status` when it says the server rejected the command line (`ERROR` or
+    /// `CLIENT_ERROR`). Call it for every command that sends a value, and return its error before
+    /// completing the operation: the guard then closes the connection, because the server may
+    /// have read the value as commands whose replies would answer later requests.
+    fn fail_on_rejected_line(status: &Status) -> Result<(), Error> {
+        match status {
+            Status::Error(ErrorKind::Client(_) | ErrorKind::NonexistentCommand) => {
+                Err(status.clone().into())
+            }
+            _ => Ok(()),
+        }
+    }
+
     fn is_valid_token_byte(byte: u8) -> bool {
         // Text-protocol tokens must not contain whitespace, controls, or DEL. Keep bytes above
         // ASCII for compatibility with existing writers; the server can reject unsupported bytes.
         byte > 0x20 && byte != 0x7f
+    }
+
+    fn empty_key_error() -> Error {
+        Error::Protocol(Status::Error(ErrorKind::Client("Key is empty".to_string())))
     }
 
     fn invalid_key_error() -> Error {
@@ -305,24 +339,31 @@ impl Client {
 
     fn invalid_opaque_error() -> Error {
         Error::Protocol(Status::Error(ErrorKind::Client(
-            "Opaque token contains whitespace or control characters".to_string(),
+            "Opaque token is empty or contains whitespace or control characters".to_string(),
         )))
     }
 
     fn invalid_meta_flag_error() -> Error {
         Error::Protocol(Status::Error(ErrorKind::Client(
-            "Meta flag contains a line or string terminator".to_string(),
+            "Meta flag is empty or contains whitespace or control characters".to_string(),
         )))
     }
 
-    /// Whether `kr` is safe to write as one key in a text-protocol command line: at most
-    /// `MAX_KEY_LENGTH` bytes with no whitespace, control characters, or DEL byte, so it can
-    /// neither split into two tokens nor end the line and start another command.
+    /// Whether `kr` is safe to write as one key in a text-protocol command line: 1 to
+    /// `MAX_KEY_LENGTH` bytes with no whitespace, control characters, or DEL byte. An empty key
+    /// would leave the key token out of the line, so the server would read the next argument in
+    /// its place. Other bytes could split the key into two tokens or end the line and start
+    /// another command.
     fn is_valid_key(kr: &[u8]) -> bool {
-        kr.len() <= MAX_KEY_LENGTH && kr.iter().all(|&b| Self::is_valid_token_byte(b))
+        !kr.is_empty()
+            && kr.len() <= MAX_KEY_LENGTH
+            && kr.iter().all(|&b| Self::is_valid_token_byte(b))
     }
 
     fn validate_key(kr: &[u8]) -> Result<&[u8], Error> {
+        if kr.is_empty() {
+            return Err(Self::empty_key_error());
+        }
         if kr.len() > MAX_KEY_LENGTH {
             return Err(Error::from(Status::Error(ErrorKind::KeyTooLong)));
         }
@@ -332,24 +373,26 @@ impl Client {
         Ok(kr)
     }
 
+    /// The opaque is written as one `O<opaque>` token. memcached limits that token, `O` included,
+    /// to 32 bytes, so the opaque must be 1 to 31 bytes with no whitespace, control characters,
+    /// or DEL byte.
     fn validate_opaque(opaque: &[u8]) -> Result<&[u8], Error> {
-        if opaque.len() > 32 {
+        if opaque.len() > 31 {
             return Err(Error::from(Status::Error(ErrorKind::OpaqueTooLong)));
         }
-        if !opaque.iter().all(|&b| Self::is_valid_token_byte(b)) {
+        if opaque.is_empty() || !opaque.iter().all(|&b| Self::is_valid_token_byte(b)) {
             return Err(Self::invalid_opaque_error());
         }
         Ok(opaque)
     }
 
+    /// Each meta flag is written as one token, so it must not be empty or contain whitespace,
+    /// control characters, or the DEL byte. Otherwise it could add an empty token or more tokens
+    /// to the command, or end the line.
     fn validate_meta_flags(meta_flags: Option<&[&str]>) -> Result<(), Error> {
         if let Some(meta_flags) = meta_flags {
             for flag in meta_flags {
-                if flag
-                    .as_bytes()
-                    .iter()
-                    .any(|&b| matches!(b, b'\r' | b'\n' | b'\0'))
-                {
+                if flag.is_empty() || !flag.bytes().all(Self::is_valid_token_byte) {
                     return Err(Self::invalid_meta_flag_error());
                 }
             }
@@ -365,6 +408,12 @@ impl Client {
         Ok(())
     }
 
+    /// Whether `check_and_write_meta_flags` writes `flag`. It drops a `q` flag, because quiet mode
+    /// comes from the `is_quiet` parameter, and an `O` flag when an `opaque` is given.
+    fn writes_meta_flag(flag: &str, opaque: Option<&[u8]>) -> bool {
+        !(flag.starts_with('q') || (flag.starts_with('O') && opaque.is_some()))
+    }
+
     async fn check_and_write_meta_flags(
         &mut self,
         meta_flags: Option<&[&str]>,
@@ -374,7 +423,7 @@ impl Client {
         if let Some(meta_flags) = meta_flags {
             for flag in meta_flags {
                 // Ignore q flag and require use of param, prefer explicit opaque param over O meta flag
-                if flag.starts_with('q') || (flag.starts_with('O') && opaque.is_some()) {
+                if !Self::writes_meta_flag(flag, opaque) {
                     continue;
                 } else {
                     self.conn.write_all(b" ").await?;

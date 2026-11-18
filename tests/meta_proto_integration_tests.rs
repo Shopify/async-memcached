@@ -51,7 +51,6 @@ enum QuietMetaOperation {
     GetData,
     GetNoop,
     SetStored,
-    SetError,
     DeleteDeleted,
     DeleteError,
     IncrementValue,
@@ -98,17 +97,6 @@ impl QuietMetaOperation {
                     .await
                     .unwrap();
                 assert_eq!(result, None);
-            }
-            Self::SetError => {
-                let result = client
-                    .meta_set("quiet-set-error", "value", true, None, None)
-                    .await;
-                assert_eq!(
-                    result,
-                    Err(Error::Protocol(Status::Error(ErrorKind::Client(
-                        "bad set".to_string()
-                    ))))
-                );
             }
             Self::DeleteDeleted => {
                 let result = client
@@ -216,12 +204,6 @@ async fn test_quiet_meta_operations_drain_internal_noop_before_next_response() {
             operation: QuietMetaOperation::SetStored,
             expected_command: b"ms quiet-set 5 q\r\nvalue\r\nmn\r\n",
             response: b"HD\r\nMN\r\n",
-        },
-        QuietMetaCase {
-            name: "meta_set error",
-            operation: QuietMetaOperation::SetError,
-            expected_command: b"ms quiet-set-error 5 q\r\nvalue\r\nmn\r\n",
-            response: b"CLIENT_ERROR bad set\r\nMN\r\n",
         },
         QuietMetaCase {
             name: "meta_delete deleted",

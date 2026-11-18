@@ -650,7 +650,9 @@ fn opaque_length_validation_leaves_all_meta_operations_usable() {
     run(async {
         let server = Memcached::tcp();
         let mut client = server.client().await;
-        let opaque = [b'o'; 33];
+        // memcached limits the `O<opaque>` token to 32 bytes, so a 32-byte opaque is the
+        // shortest that it rejects.
+        let opaque = [b'o'; 32];
         let error = || Error::Protocol(Status::Error(ErrorKind::OpaqueTooLong));
         client.set("key", "123", None, None).await.unwrap();
         for quiet in [false, true] {
@@ -682,6 +684,12 @@ fn opaque_length_validation_leaves_all_meta_operations_usable() {
             );
             assert_value(&mut client, "key", b"123").await;
         }
+        // The error states the longest opaque that the client sends.
+        let rejected = client.meta_get("key", false, Some(&opaque), None).await;
+        assert_eq!(
+            rejected.unwrap_err().to_string(),
+            "protocol: error: Opaque exceeds maximum allowed length of 31 characters"
+        );
     });
 }
 
@@ -728,14 +736,6 @@ fn server_supported_opaque_tokens_echo_on_hits_and_misses() {
             .unwrap();
         assert_eq!(miss.status, Some(Status::NotFound));
         assert_eq!(miss.opaque_token.as_deref(), Some(opaque.as_slice()));
-        let rejected = client
-            .meta_get("key", false, Some(&[b'o'; 32]), Some(&["v"]))
-            .await;
-        assert!(matches!(
-            rejected,
-            Err(Error::Protocol(Status::Error(ErrorKind::Client(_))))
-        ));
-        assert_eq!(client.get("key").await.unwrap(), None);
     });
 }
 

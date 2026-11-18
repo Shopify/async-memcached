@@ -1,9 +1,10 @@
 //! Property tests for key validation at every entry point that takes a key.
 //!
-//! A key goes on the wire only as one token of at most 250 bytes, with no whitespace, control
-//! character or DEL byte. Otherwise it could split a command or start a second one. A scripted
-//! peer reads exactly the request that each accepted key produces, and the peer must read
-//! nothing for a rejected key.
+//! A key goes on the wire only as one token of 1 to 250 bytes, with no whitespace, control
+//! character or DEL byte. Otherwise it could drop a token from a command, split a command or start
+//! a second one. A scripted peer reads exactly the request that each accepted key produces, and
+//! the peer must read nothing for a rejected key. One regression test per entry point checks the
+//! empty key.
 
 mod support;
 
@@ -22,13 +23,16 @@ const PEER_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Rejection {
+    Empty,
     TooLong,
     Unsafe,
 }
 
 /// The rejection that the client must return for `key`, if any.
 fn rejection(key: &[u8]) -> Option<Rejection> {
-    if key.len() > MAX_KEY_LENGTH {
+    if key.is_empty() {
+        Some(Rejection::Empty)
+    } else if key.len() > MAX_KEY_LENGTH {
         Some(Rejection::TooLong)
     } else if key.iter().any(|&byte| byte <= b' ' || byte == 0x7f) {
         Some(Rejection::Unsafe)
@@ -43,7 +47,7 @@ fn rejects<T>(result: &Result<T, Error>, rejection: Rejection) -> bool {
             result,
             Err(Error::Protocol(Status::Error(ErrorKind::KeyTooLong)))
         ),
-        Rejection::Unsafe => matches!(
+        Rejection::Empty | Rejection::Unsafe => matches!(
             result,
             Err(Error::Protocol(Status::Error(ErrorKind::Client(_))))
         ),
@@ -58,8 +62,8 @@ fn unsafe_byte() -> impl Strategy<Value = u8> {
     select(&b" \t\r\n\0\x0b\x0c\x1f\x7f"[..])
 }
 
-/// Keys of 1 to 300 bytes, half of them with one whitespace, control or DEL byte. Some keys are
-/// padded to a length next to the limit.
+/// Keys of 0 to 300 bytes. One key in ten is empty. Half of the others have one whitespace,
+/// control or DEL byte, and some are padded to a length next to the limit.
 fn key() -> impl Strategy<Value = Vec<u8>> {
     let safe = prop_oneof![
         3 => vec(safe_byte(), 1..=16),
@@ -67,7 +71,7 @@ fn key() -> impl Strategy<Value = Vec<u8>> {
     ];
     let padding = prop::option::weighted(0.2, MAX_KEY_LENGTH - 1..=MAX_KEY_LENGTH + 2);
     let replacement = prop::option::weighted(0.5, (any::<Index>(), unsafe_byte()));
-    (safe, padding, replacement).prop_map(|(mut key, padding, replacement)| {
+    let non_empty = (safe, padding, replacement).prop_map(|(mut key, padding, replacement)| {
         if let Some(length) = padding {
             key.resize(length, b'x');
         }
@@ -76,7 +80,8 @@ fn key() -> impl Strategy<Value = Vec<u8>> {
             key[position] = byte;
         }
         key
-    })
+    });
+    prop_oneof![1 => Just(Vec::new()), 9 => non_empty]
 }
 
 /// Batches with at least one accepted key, so that every batch request names a key.
@@ -348,4 +353,183 @@ proptest! {
             assert_no_further_writes(client, &mut peer).await
         }))?;
     }
+}
+
+/// Calls `call` with an empty key. The call must fail before it writes anything and leave the
+/// client open.
+fn empty_key_is_rejected_before_writing(call: KeyCall) -> Result<(), TestCaseError> {
+    runtime().block_on(within(async {
+        let (mut client, mut peer) = pair().await;
+        let result = without_writes(&mut peer, call.call(&mut client, b"")).await?;
+        prop_assert!(
+            rejects(&result, Rejection::Empty),
+            "{:?}: {:?}",
+            call,
+            result
+        );
+        prop_assert!(!client.is_closed(), "{:?} closed the client", call);
+        assert_no_further_writes(client, &mut peer).await
+    }))
+}
+
+#[test]
+fn get_rejects_an_empty_key_before_writing() -> Result<(), TestCaseError> {
+    empty_key_is_rejected_before_writing(KeyCall::Get)
+}
+
+#[test]
+fn set_rejects_an_empty_key_before_writing() -> Result<(), TestCaseError> {
+    empty_key_is_rejected_before_writing(KeyCall::Set)
+}
+
+#[test]
+fn add_rejects_an_empty_key_before_writing() -> Result<(), TestCaseError> {
+    empty_key_is_rejected_before_writing(KeyCall::Add)
+}
+
+#[test]
+fn delete_rejects_an_empty_key_before_writing() -> Result<(), TestCaseError> {
+    empty_key_is_rejected_before_writing(KeyCall::Delete)
+}
+
+#[test]
+fn delete_no_reply_rejects_an_empty_key_before_writing() -> Result<(), TestCaseError> {
+    empty_key_is_rejected_before_writing(KeyCall::DeleteNoReply)
+}
+
+#[test]
+fn increment_rejects_an_empty_key_before_writing() -> Result<(), TestCaseError> {
+    empty_key_is_rejected_before_writing(KeyCall::Increment)
+}
+
+#[test]
+fn increment_no_reply_rejects_an_empty_key_before_writing() -> Result<(), TestCaseError> {
+    empty_key_is_rejected_before_writing(KeyCall::IncrementNoReply)
+}
+
+#[test]
+fn decrement_rejects_an_empty_key_before_writing() -> Result<(), TestCaseError> {
+    empty_key_is_rejected_before_writing(KeyCall::Decrement)
+}
+
+#[test]
+fn decrement_no_reply_rejects_an_empty_key_before_writing() -> Result<(), TestCaseError> {
+    empty_key_is_rejected_before_writing(KeyCall::DecrementNoReply)
+}
+
+#[test]
+fn meta_get_rejects_an_empty_key_before_writing() -> Result<(), TestCaseError> {
+    empty_key_is_rejected_before_writing(KeyCall::MetaGet)
+}
+
+#[test]
+fn meta_set_rejects_an_empty_key_before_writing() -> Result<(), TestCaseError> {
+    empty_key_is_rejected_before_writing(KeyCall::MetaSet)
+}
+
+#[test]
+fn meta_delete_rejects_an_empty_key_before_writing() -> Result<(), TestCaseError> {
+    empty_key_is_rejected_before_writing(KeyCall::MetaDelete)
+}
+
+#[test]
+fn meta_increment_rejects_an_empty_key_before_writing() -> Result<(), TestCaseError> {
+    empty_key_is_rejected_before_writing(KeyCall::MetaIncrement)
+}
+
+#[test]
+fn meta_decrement_rejects_an_empty_key_before_writing() -> Result<(), TestCaseError> {
+    empty_key_is_rejected_before_writing(KeyCall::MetaDecrement)
+}
+
+#[test]
+fn get_multi_leaves_out_an_empty_key() -> Result<(), TestCaseError> {
+    runtime().block_on(within(async {
+        let (mut client, mut peer) = pair().await;
+        let keys: [&[u8]; 3] = [b"", b"key", b""];
+        let reply = b"VALUE key 0 1\r\nv\r\nEND\r\n";
+        let values = exchange(&mut peer, b"get key\r\n", reply, client.get_multi(keys)).await?;
+        let returned: Vec<Vec<u8>> = values.unwrap().into_iter().map(|value| value.key).collect();
+        prop_assert_eq!(returned, vec![b"key".to_vec()]);
+        prop_assert!(!client.is_closed());
+        assert_no_further_writes(client, &mut peer).await
+    }))
+}
+
+/// `set_multi` and `add_multi` must leave out an empty key, report it, and store the other item.
+fn storage_multi_leaves_out_and_reports_an_empty_key(verb: &str) -> Result<(), TestCaseError> {
+    runtime().block_on(within(async {
+        let (mut client, mut peer) = pair().await;
+        let items: [(&[u8], &str); 2] = [(b"", "v"), (b"key", "v")];
+        let request = format!("{verb} key 0 0 1\r\nv\r\n");
+        let call = async {
+            if verb == "set" {
+                client.set_multi(&items, None, None).await
+            } else {
+                client.add_multi(&items, None, None).await
+            }
+        };
+        // A call that also wrote the empty key would wait for a second reply.
+        let call = tokio::time::timeout(PEER_TIMEOUT, call);
+        let results = exchange(&mut peer, request.as_bytes(), b"STORED\r\n", call).await?;
+        let results = results
+            .expect("the call waited for a reply to a request that it must not send")
+            .unwrap();
+        prop_assert_eq!(results.len(), 2);
+        prop_assert!(
+            rejects(&results[&items[0].0], Rejection::Empty),
+            "{:?}",
+            results
+        );
+        prop_assert_eq!(&results[&items[1].0], &Ok(()));
+        prop_assert!(!client.is_closed());
+        assert_no_further_writes(client, &mut peer).await
+    }))
+}
+
+#[test]
+fn set_multi_leaves_out_and_reports_an_empty_key() -> Result<(), TestCaseError> {
+    storage_multi_leaves_out_and_reports_an_empty_key("set")
+}
+
+#[test]
+fn add_multi_leaves_out_and_reports_an_empty_key() -> Result<(), TestCaseError> {
+    storage_multi_leaves_out_and_reports_an_empty_key("add")
+}
+
+#[test]
+fn delete_multi_no_reply_leaves_out_an_empty_key() -> Result<(), TestCaseError> {
+    runtime().block_on(within(async {
+        let (mut client, mut peer) = pair().await;
+        let keys: [&[u8]; 3] = [b"", b"key", b""];
+        let call = client.delete_multi_no_reply(&keys);
+        let result = exchange(&mut peer, b"delete key noreply\r\n", b"", call).await?;
+        prop_assert_eq!(result, Ok(()));
+        prop_assert!(!client.is_closed());
+        assert_no_further_writes(client, &mut peer).await
+    }))
+}
+
+#[test]
+fn meta_get_multi_rejects_an_empty_key_before_writing() -> Result<(), TestCaseError> {
+    runtime().block_on(within(async {
+        let (mut client, mut peer) = pair().await;
+        let keys: [&[u8]; 2] = [b"key", b""];
+        let result = without_writes(&mut peer, client.meta_get_multi(&keys, None)).await?;
+        prop_assert!(rejects(&result, Rejection::Empty), "{:?}", result);
+        prop_assert!(!client.is_closed());
+        assert_no_further_writes(client, &mut peer).await
+    }))
+}
+
+#[test]
+fn meta_set_multi_rejects_an_empty_key_before_writing() -> Result<(), TestCaseError> {
+    runtime().block_on(within(async {
+        let (mut client, mut peer) = pair().await;
+        let items: [(&[u8], &str); 2] = [(b"key", "v"), (b"", "v")];
+        let result = without_writes(&mut peer, client.meta_set_multi(&items, None)).await?;
+        prop_assert!(rejects(&result, Rejection::Empty), "{:?}", result);
+        prop_assert!(!client.is_closed());
+        assert_no_further_writes(client, &mut peer).await
+    }))
 }

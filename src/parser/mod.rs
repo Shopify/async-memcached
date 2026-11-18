@@ -99,9 +99,11 @@ pub enum ErrorKind {
     Client(String),
     /// An error from memcached related to SERVER_ERROR.
     Server(String),
-    /// An error from memcached related to a key that exceeds maximum allowed length (250 bytes).
+    /// The key is longer than the maximum allowed length (250 bytes). The client returns this
+    /// before it sends anything.
     KeyTooLong,
-    /// An error from memcached related to a key that exceeds maximum allowed length (32 bytes).
+    /// The opaque is longer than the maximum allowed length (31 bytes). The client returns this
+    /// before it sends anything.
     OpaqueTooLong,
 }
 
@@ -195,7 +197,7 @@ impl fmt::Display for ErrorKind {
             Self::Server(s) => write!(f, "server: {}", s),
             Self::KeyTooLong => write!(f, "Key exceeds maximum allowed length of 250 characters"),
             Self::OpaqueTooLong => {
-                write!(f, "Opaque exceeds maximum allowed length of 32 characters")
+                write!(f, "Opaque exceeds maximum allowed length of 31 characters")
             }
         }
     }
