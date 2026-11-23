@@ -1,0 +1,12 @@
+# Context for the model: .security/deepsec/<project>.md.
+projects:
+  async-memcached:
+    ignore:
+      [
+        "tests/**",
+        "benches/**",
+        "examples/**",
+        "scripts/**",
+        "src/parser/proptests.rs",
+      ]
+    matchers: [deepsec/matchers-async-memcached.json]

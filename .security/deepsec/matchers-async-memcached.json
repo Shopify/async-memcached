@@ -1,0 +1,174 @@
+[
+  {
+    "version": 1,
+    "slug": "async-memcached-command-writes",
+    "description": "Memcached text-protocol command assembly: caller-supplied keys, opaque tokens, meta flags and deltas written to the socket as plain text tokens.",
+    "noiseTier": "normal",
+    "filePatterns": ["src/lib.rs", "src/proto/*.rs"],
+    "patterns": [
+      {
+        "source": "\\.write_all\\(&\\[b\"",
+        "flags": "m",
+        "label": "command line built by concat"
+      },
+      {
+        "source": "^\\s+b\"(?:incr|decr) \",$",
+        "flags": "m",
+        "label": "multi-line concat command head"
+      },
+      {
+        "source": "\\.write_all\\((?:key\\.as_ref\\(\\)|kr|vr\\.as_ref\\(\\)|flag\\.as_bytes\\(\\)|opaque\\.as_ref\\(\\)|flags\\.as_ref\\(\\)|ttl\\.as_ref\\(\\)|vlen\\.as_ref\\(\\)|vr\\.len\\(\\)\\.to_string\\(\\)\\.as_bytes\\(\\)|delta\\.to_string\\(\\)\\.as_bytes\\(\\))",
+        "flags": "m",
+        "label": "caller token written to wire"
+      }
+    ],
+    "examples": [
+      "            .write_all(&[b\"get \", kr, b\"\\r\\n\"].concat())",
+      "                     b\"incr \",",
+      "        operation.conn.write_all(kr).await?;",
+      "            operation.conn.write_all(key.as_ref()).await?;",
+      "            client.conn.write_all(flag.as_bytes()).await?;",
+      "            self.conn.write_all(opaque.as_ref()).await?;"
+    ],
+    "closesSurfaceIds": ["text-protocol-command-writes"]
+  },
+  {
+    "version": 1,
+    "slug": "async-memcached-input-validation",
+    "description": "Pre-write validation boundary for memcached text tokens: key/opaque/meta-flag validators, protocol limits and their call sites.",
+    "noiseTier": "normal",
+    "filePatterns": ["src/lib.rs", "src/proto/*.rs"],
+    "patterns": [
+      {
+        "source": "fn (?:is_valid_key|validate_key|validate_opaque|validate_meta_flags|is_valid_token_byte)\\b",
+        "flags": "m",
+        "label": "token validation helper"
+      },
+      {
+        "source": "MAX_KEY_LENGTH|MAX_META_SET_FLAGS|fn check_meta_set_flag_count",
+        "flags": "m",
+        "label": "protocol limits"
+      },
+      {
+        "source": "Self::(?:validate_key|is_valid_key|validate_opaque|validate_meta_flags)\\(",
+        "flags": "m",
+        "label": "validation call site"
+      }
+    ],
+    "examples": [
+      "    fn is_valid_token_byte(byte: u8) -> bool {",
+      "    fn is_valid_key(kr: &[u8]) -> bool {",
+      "    fn validate_key(kr: &[u8]) -> Result<&[u8], Error> {",
+      "const MAX_META_SET_FLAGS: usize = 16;",
+      "fn check_meta_set_flag_count(flags: usize) -> Result<(), Error> {",
+      "        let kr = Self::validate_key(key.as_ref())?;",
+      "            if !Self::is_valid_key(key.as_ref()) {"
+    ],
+    "closesSurfaceIds": ["input-validation-boundary"]
+  },
+  {
+    "version": 1,
+    "slug": "async-memcached-parser-length-trust",
+    "description": "Response parsers that trust a server-declared byte count (VALUE len, meta VA size), the shared numeric parsers that read those counts, the size cast and incomplete-needed math.",
+    "noiseTier": "normal",
+    "filePatterns": ["src/parser/*.rs"],
+    "patterns": [
+      {
+        "source": "take\\(len\\)",
+        "flags": "m",
+        "label": "server-declared value length"
+      },
+      {
+        "source": "take_until_size\\(|parse_u32\\(input\\)\\?",
+        "flags": "m",
+        "label": "meta value size handling"
+      },
+      {
+        "source": "Needed::Size|NonZero::new\\(|byte_size as usize",
+        "flags": "m",
+        "label": "size cast and incomplete-needed math"
+      },
+      {
+        "source": "fn parse_(?:u32|u64|i64)\\(",
+        "flags": "m",
+        "label": "shared numeric parser for server-sent lengths, cas and TTLs"
+      }
+    ],
+    "examples": [
+      "    let (buf, data) = terminated(take(len), crlf).parse(buf)?;",
+      "            let (input, data) = take_until_size(input, size)?; // parses the data from the input",
+      "            let (input, size) = parse_u32(input)?; // parses the size of the data from the input",
+      "        return Err(nom::Err::Incomplete(nom::Needed::Size(",
+      "            NonZero::new(size).unwrap(),",
+      "    let size = byte_size as usize;",
+      "pub(crate) fn parse_u32(buf: &[u8]) -> IResult<&[u8], u32> {"
+    ],
+    "closesSurfaceIds": ["parser-declared-length-trust"]
+  },
+  {
+    "version": 1,
+    "slug": "async-memcached-operation-guard",
+    "description": "Per-connection operation lifecycle: start_operation/complete, close state, unbounded reply buffering and unchecked parser output indexing.",
+    "noiseTier": "normal",
+    "filePatterns": ["src/lib.rs", "src/proto/*.rs"],
+    "patterns": [
+      {
+        "source": "start_operation\\(\\)|operation\\.complete\\(\\)",
+        "flags": "m",
+        "label": "operation start/complete"
+      },
+      {
+        "source": "fn close\\(|self\\.conn = Connection::Closed|in_flight",
+        "flags": "m",
+        "label": "connection close state"
+      },
+      {
+        "source": "read_buf\\(&mut self\\.buf\\)|self\\.buf\\.reserve\\(|fail_on_rejected_line",
+        "flags": "m",
+        "label": "reply buffering and rejected-line handling"
+      },
+      {
+        "source": "items\\.remove\\(0\\)",
+        "flags": "m",
+        "label": "unchecked parser output index"
+      }
+    ],
+    "examples": [
+      "        let mut operation = self.start_operation()?;",
+      "        operation.complete();",
+      "    fn close(&mut self) {",
+      "        self.conn = Connection::Closed;",
+      "                let n = self.conn.read_buf(&mut self.buf).await?;",
+      "            Self::fail_on_rejected_line(status)?;",
+      "                    let item = items.remove(0);"
+    ],
+    "closesSurfaceIds": ["operation-guard-desync"]
+  },
+  {
+    "version": 1,
+    "slug": "async-memcached-dsn-connect",
+    "description": "DSN parsing and outbound connection target selection in Connection::new (scheme dispatch, unix socket path, unresolved host lookup).",
+    "noiseTier": "normal",
+    "filePatterns": ["src/connection.rs"],
+    "patterns": [
+      {
+        "source": "url::Url::parse|Addr::parse\\(",
+        "flags": "m",
+        "label": "DSN scheme dispatch"
+      },
+      {
+        "source": "Addr::Unknown\\(|UnixStream::connect\\(|lookup_host\\(|socket\\.connect\\(",
+        "flags": "m",
+        "label": "connection target sink"
+      }
+    ],
+    "examples": [
+      "        let url = url::Url::parse(dsn).map_err(|e| {",
+      "            _ => Ok(Addr::Unknown(dsn.to_string())),",
+      "        match Addr::parse(dsn.as_ref())? {",
+      "            Addr::Unix(path) => UnixStream::connect(path)",
+      "                let addrs = lookup_host(url).await.map_err(Error::Connect)?;"
+    ],
+    "closesSurfaceIds": ["dsn-connection-target"]
+  }
+]
