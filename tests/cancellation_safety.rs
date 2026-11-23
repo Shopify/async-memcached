@@ -245,68 +245,75 @@ async fn validation_failure_sends_nothing_and_preserves_connection() {
 }
 
 #[tokio::test]
-async fn empty_meta_flags_or_flags_with_whitespace_or_control_bytes_send_nothing() {
+async fn invalid_meta_flags_send_nothing() {
     // A flag with a space in it would put more than one token on the command line, and an empty
-    // flag would put an empty token on it.
-    for flag in ["", "T60 T60", "v\tk", " ", "v\x0b", "\x0c", "\x1f", "v\x7f"] {
-        let (mut client, mut peer) = pair().await;
-        let flag = [flag];
-        let flags = Some(flag.as_slice());
-        let results = [
-            without_writes(&mut peer, client.meta_get("key", false, None, flags))
+    // flag would put an empty token on it. memcached 1.6.40 and newer reject an `ms` line whose
+    // flag starts with a byte that is neither a digit nor in `b'A'..=b'z'`, such as `!`, before
+    // they read the length of the value, and then run the value as commands. Every meta flag
+    // starts with a letter, so the client also rejects other first bytes, such as `1` and `[`.
+    for flag in [
+        "", "T60 T60", "v\tk", " ", "v\x0b", "\x0c", "\x1f", "v\x7f", "!", "#T60", "-1", "1", "@",
+        "[", "_", "{", "~", "é",
+    ] {
+        for flags in [&[flag][..], &["T60", flag][..]] {
+            let (mut client, mut peer) = pair().await;
+            let flags = Some(flags);
+            let results = [
+                without_writes(&mut peer, client.meta_get("key", false, None, flags))
+                    .await
+                    .map(|_| ()),
+                without_writes(
+                    &mut peer,
+                    client.meta_set("key", "value", false, None, flags),
+                )
                 .await
                 .map(|_| ()),
-            without_writes(
-                &mut peer,
-                client.meta_set("key", "value", false, None, flags),
-            )
-            .await
-            .map(|_| ()),
-            without_writes(&mut peer, client.meta_delete("key", false, None, flags))
+                without_writes(&mut peer, client.meta_delete("key", false, None, flags))
+                    .await
+                    .map(|_| ()),
+                without_writes(
+                    &mut peer,
+                    client.meta_increment("key", false, None, None, flags),
+                )
                 .await
                 .map(|_| ()),
-            without_writes(
-                &mut peer,
-                client.meta_increment("key", false, None, None, flags),
-            )
-            .await
-            .map(|_| ()),
-            without_writes(
-                &mut peer,
-                client.meta_decrement("key", false, None, None, flags),
-            )
-            .await
-            .map(|_| ()),
-            without_writes(&mut peer, client.meta_get_multi(&["key"], flags))
+                without_writes(
+                    &mut peer,
+                    client.meta_decrement("key", false, None, None, flags),
+                )
                 .await
                 .map(|_| ()),
-            without_writes(&mut peer, client.meta_set_multi(&[("key", "value")], flags))
+                without_writes(&mut peer, client.meta_get_multi(&["key"], flags))
+                    .await
+                    .map(|_| ()),
+                without_writes(&mut peer, client.meta_set_multi(&[("key", "value")], flags))
+                    .await
+                    .map(|_| ()),
+            ];
+            for result in results {
+                assert!(
+                    matches!(
+                        result,
+                        Err(Error::Protocol(Status::Error(ErrorKind::Client(_))))
+                    ),
+                    "{:?}: {:?}",
+                    flags,
+                    result
+                );
+            }
+            assert!(!client.is_closed());
+            assert_eq!(
+                exchange(
+                    &mut peer,
+                    b"mg next v\r\n",
+                    b"EN\r\n",
+                    client.meta_get("next", false, None, Some(&["v"])),
+                )
                 .await
-                .map(|_| ()),
-        ];
-        for result in results {
-            assert!(
-                matches!(
-                    result,
-                    Err(Error::Protocol(Status::Error(ErrorKind::Client(_))))
-                ),
-                "{:?}: {:?}",
-                flag,
-                result
+                .unwrap(),
+                None
             );
         }
-        assert!(!client.is_closed());
-        assert_eq!(
-            exchange(
-                &mut peer,
-                b"mg next v\r\n",
-                b"EN\r\n",
-                client.meta_get("next", false, None, Some(&["v"])),
-            )
-            .await
-            .unwrap(),
-            None
-        );
     }
 }
 

@@ -136,19 +136,22 @@ impl Client {
         self.drive_receive(parse_ascii_response).await
     }
 
+    /// Reads the replies to a `set_multi` or `add_multi` pipeline. `keys` holds the result of
+    /// `validate_key` for each item of `kv`, as the pipeline used it, so the call reads one reply
+    /// for each key that the pipeline wrote and reports the error for each other key.
     pub(crate) async fn map_set_multi_responses<'a, K, V>(
         &mut self,
         kv: &'a [(K, V)],
+        keys: Vec<Result<&[u8], Error>>,
     ) -> Result<FxHashMap<&'a K, Result<(), Error>>, Error>
     where
-        K: AsRef<[u8]> + Eq + std::hash::Hash,
+        K: Eq + std::hash::Hash,
         V: AsMemcachedValue,
     {
         let mut results = FxHashMap::with_capacity_and_hasher(kv.len(), Default::default());
 
-        for (key, _) in kv {
-            let kr = key.as_ref();
-            if let Err(error) = Self::validate_key(kr) {
+        for ((key, _), checked) in kv.iter().zip(keys) {
+            if let Err(error) = checked {
                 results.insert(key, Err(error));
                 continue;
             }
@@ -349,6 +352,12 @@ impl Client {
         )))
     }
 
+    fn meta_flag_without_letter_error() -> Error {
+        Error::Protocol(Status::Error(ErrorKind::Client(
+            "Meta flag does not start with an ASCII letter".to_string(),
+        )))
+    }
+
     /// Whether `kr` is safe to write as one key in a text-protocol command line: 1 to
     /// `MAX_KEY_LENGTH` bytes with no whitespace, control characters, or DEL byte. An empty key
     /// would leave the key token out of the line, so the server would read the next argument in
@@ -388,12 +397,18 @@ impl Client {
 
     /// Each meta flag is written as one token, so it must not be empty or contain whitespace,
     /// control characters, or the DEL byte. Otherwise it could add an empty token or more tokens
-    /// to the command, or end the line.
+    /// to the command, or end the line. It must also start with a letter, as every meta flag does:
+    /// memcached 1.6.40 and newer reject an `ms` line whose flag starts with a byte that is
+    /// neither a digit nor in `b'A'..=b'z'`, such as `!`, before they read the length of the
+    /// value, and then read the value as commands.
     fn validate_meta_flags(meta_flags: Option<&[&str]>) -> Result<(), Error> {
         if let Some(meta_flags) = meta_flags {
             for flag in meta_flags {
                 if flag.is_empty() || !flag.bytes().all(Self::is_valid_token_byte) {
                     return Err(Self::invalid_meta_flag_error());
+                }
+                if !flag.starts_with(|c: char| c.is_ascii_alphabetic()) {
+                    return Err(Self::meta_flag_without_letter_error());
                 }
             }
         }

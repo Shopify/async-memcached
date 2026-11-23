@@ -747,21 +747,35 @@ fn invalid_read_delete_and_arithmetic_flags_leave_the_connection_usable() {
         let mut client = server.client().await;
         client.set("key", "123", None, None).await.unwrap();
         for quiet in [false, true] {
-            let bad = Some(["!"].as_slice());
+            // memcached answers `CLIENT_ERROR` to this unknown flag. Pinning the server text
+            // confirms that the request reached memcached instead of failing in the client. These
+            // commands carry no value, so the connection stays in step.
+            let bad = Some(["y"].as_slice());
             let results = [
-                client.meta_get("key", quiet, None, bad).await,
-                client.meta_delete("key", quiet, None, bad).await,
-                client.meta_increment("key", quiet, None, None, bad).await,
-                client.meta_decrement("key", quiet, None, None, bad).await,
+                (
+                    client.meta_get("key", quiet, None, bad).await,
+                    "invalid flag",
+                ),
+                (
+                    client.meta_delete("key", quiet, None, bad).await,
+                    "invalid flag",
+                ),
+                (
+                    client.meta_increment("key", quiet, None, None, bad).await,
+                    "invalid or duplicate flag",
+                ),
+                (
+                    client.meta_decrement("key", quiet, None, None, bad).await,
+                    "invalid or duplicate flag",
+                ),
             ];
-            for result in results {
-                assert!(
-                    matches!(
-                        result,
-                        Err(Error::Protocol(Status::Error(ErrorKind::Client(_))))
-                    ),
-                    "{:?}",
-                    result
+            for (result, message) in results {
+                assert_eq!(
+                    result,
+                    Err(Error::Protocol(Status::Error(ErrorKind::Client(
+                        message.into()
+                    )))),
+                    "quiet: {quiet}"
                 );
             }
             assert_value(&mut client, "key", b"123").await;
@@ -771,6 +785,51 @@ fn invalid_read_delete_and_arithmetic_flags_leave_the_connection_usable() {
             );
             assert_value(&mut client, "key", b"123").await;
         }
+    });
+}
+
+/// memcached 1.6.40 and newer reject an `ms` line whose flag starts with `!` before they read the
+/// length of the value, and then read the value as commands. The client must refuse such a flag
+/// before it writes anything.
+#[test]
+#[ignore = "Requires the memcached executable"]
+fn storage_flags_that_do_not_start_with_a_letter_send_nothing() {
+    run(async {
+        let server = Memcached::tcp();
+        let mut client = server.client().await;
+        client
+            .set("victimkey", "SECRETVAL", None, None)
+            .await
+            .unwrap();
+        let bad = Some(["!"].as_slice());
+        let results = [
+            client
+                .meta_set("key", "get victimkey", false, None, bad)
+                .await
+                .map(|_| ()),
+            client
+                .meta_set_multi(&[("key", "get victimkey")], bad)
+                .await
+                .map(|_| ()),
+        ];
+        for result in results {
+            assert!(
+                matches!(
+                    result,
+                    Err(Error::Protocol(Status::Error(ErrorKind::Client(_))))
+                ),
+                "{:?}",
+                result
+            );
+        }
+        assert!(!client.is_closed());
+        // The next request on the connection must receive its own reply.
+        assert_eq!(
+            client.get("otherkey").await.unwrap(),
+            None,
+            "a later request received the reply to a value sent as a command"
+        );
+        assert_eq!(client.get("key").await.unwrap(), None);
     });
 }
 

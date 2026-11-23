@@ -186,13 +186,14 @@ impl AsciiProtocol for Client {
 
         operation.conn.write_all(b"get").await?;
         for key in keys {
+            let kr = key.as_ref();
             // Skip invalid keys, as overlength ones always were: a space or CRLF inside a key
             // would otherwise split it or start a second command on the wire.
-            if !Self::is_valid_key(key.as_ref()) {
+            if !Self::is_valid_key(kr) {
                 continue;
             }
             operation.conn.write_all(b" ").await?;
-            operation.conn.write_all(key.as_ref()).await?;
+            operation.conn.write_all(kr).await?;
         }
         operation.conn.write_all(b"\r\n").await?;
         operation.conn.flush().await?;
@@ -275,13 +276,19 @@ impl AsciiProtocol for Client {
         K: AsRef<[u8]> + Eq + std::hash::Hash + std::fmt::Debug,
         V: AsMemcachedValue,
     {
+        // One `as_ref` call per key: the client writes the bytes that it checked, and reads a
+        // reply for each key that it wrote.
+        let keys: Vec<_> = kv
+            .iter()
+            .map(|(key, _)| Self::validate_key(key.as_ref()))
+            .collect();
+
         let mut operation = self.start_operation()?;
 
-        for (key, value) in kv {
-            let kr = key.as_ref();
-            if Self::validate_key(kr).is_err() {
+        for ((_, value), key) in kv.iter().zip(&keys) {
+            let Ok(kr) = key else {
                 continue;
-            }
+            };
 
             let vr = value.as_bytes();
 
@@ -306,7 +313,7 @@ impl AsciiProtocol for Client {
         }
         operation.conn.flush().await?;
 
-        let results = operation.map_set_multi_responses(kv).await?;
+        let results = operation.map_set_multi_responses(kv, keys).await?;
         operation.complete();
 
         Ok(results)
@@ -372,13 +379,19 @@ impl AsciiProtocol for Client {
         K: AsRef<[u8]> + Eq + std::hash::Hash + std::fmt::Debug,
         V: AsMemcachedValue,
     {
+        // One `as_ref` call per key: the client writes the bytes that it checked, and reads a
+        // reply for each key that it wrote.
+        let keys: Vec<_> = kv
+            .iter()
+            .map(|(key, _)| Self::validate_key(key.as_ref()))
+            .collect();
+
         let mut operation = self.start_operation()?;
 
-        for (key, value) in kv {
-            let kr = key.as_ref();
-            if Self::validate_key(kr).is_err() {
+        for ((_, value), key) in kv.iter().zip(&keys) {
+            let Ok(kr) = key else {
                 continue;
-            }
+            };
 
             let vr = value.as_bytes();
 
@@ -403,7 +416,7 @@ impl AsciiProtocol for Client {
         }
         operation.conn.flush().await?;
 
-        let results = operation.map_set_multi_responses(kv).await?;
+        let results = operation.map_set_multi_responses(kv, keys).await?;
         operation.complete();
 
         Ok(results)

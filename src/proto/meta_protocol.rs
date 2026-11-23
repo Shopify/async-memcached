@@ -31,10 +31,11 @@ async fn drain_quiet_noop_response(
 
 /// Trait defining Meta protocol-specific methods for the Client.
 ///
-/// Every meta flag is written as one token. An empty flag, or a flag that contains whitespace,
-/// control characters, or the DEL byte, is rejected before anything is written. So is an empty
-/// opaque or one longer than 31 bytes, and an `ms` command with more than 16 meta flags, counting
-/// the `q`, `k` and `O` flags that the client adds.
+/// Every meta flag is written as one token that starts with an ASCII letter. An empty flag, a flag
+/// that starts with any other byte, or a flag that contains whitespace, control characters, or the
+/// DEL byte, is rejected before anything is written. So is an empty opaque or one longer than 31
+/// bytes, and an `ms` command with more than 16 meta flags, counting the `q`, `k` and `O` flags
+/// that the client adds.
 pub trait MetaProtocol {
     /// Gets the given key with additional metadata.
     ///
@@ -628,16 +629,18 @@ impl MetaProtocol for Client {
             return Ok(Vec::new());
         }
 
-        for key in keys {
-            Self::validate_key(key.as_ref())?;
-        }
+        // One `as_ref` call per key, so the client writes the bytes that it checked.
+        let keys: Vec<&[u8]> = keys
+            .iter()
+            .map(|key| Self::validate_key(key.as_ref()))
+            .collect::<Result<_, _>>()?;
         Self::validate_meta_flags(meta_flags)?;
 
         let mut operation = self.start_operation()?;
 
         for key in keys {
             operation.conn.write_all(b"mg ").await?;
-            operation.conn.write_all(key.as_ref()).await?;
+            operation.conn.write_all(key).await?;
             write_pipeline_meta_flags(&mut operation, meta_flags).await?;
             operation.conn.write_all(b" k q\r\n").await?;
         }
@@ -663,9 +666,11 @@ impl MetaProtocol for Client {
             return Ok(Vec::new());
         }
 
-        for (key, _) in items {
-            Self::validate_key(key.as_ref())?;
-        }
+        // One `as_ref` call per key, so the client writes the bytes that it checked.
+        let keys: Vec<&[u8]> = items
+            .iter()
+            .map(|(key, _)| Self::validate_key(key.as_ref()))
+            .collect::<Result<_, _>>()?;
         Self::validate_meta_flags(meta_flags)?;
         let caller_flags = meta_flags.map_or(0, |flags| {
             flags
@@ -678,11 +683,11 @@ impl MetaProtocol for Client {
 
         let mut operation = self.start_operation()?;
 
-        for (key, value) in items {
+        for (key, (_, value)) in keys.into_iter().zip(items) {
             let vr = value.as_bytes();
 
             operation.conn.write_all(b"ms ").await?;
-            operation.conn.write_all(key.as_ref()).await?;
+            operation.conn.write_all(key).await?;
             operation.conn.write_all(b" ").await?;
             operation
                 .conn

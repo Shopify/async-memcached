@@ -4,7 +4,8 @@
 //! character or DEL byte. Otherwise it could drop a token from a command, split a command or start
 //! a second one. A scripted peer reads exactly the request that each accepted key produces, and
 //! the peer must read nothing for a rejected key. One regression test per entry point checks the
-//! empty key.
+//! empty key. One regression test per batch entry point checks a key whose `as_ref` returns other
+//! bytes on a later call: the client must write, and read replies for, the bytes that it checked.
 
 mod support;
 
@@ -12,8 +13,10 @@ use async_memcached::{AsciiProtocol, Client, Error, ErrorKind, MetaProtocol, Sta
 use proptest::collection::vec;
 use proptest::prelude::*;
 use proptest::sample::{select, Index};
+use std::cell::Cell;
 use std::collections::HashSet;
 use std::future::Future;
+use std::hash::{Hash, Hasher};
 use std::time::Duration;
 use support::{runtime, within, MAX_KEY_LENGTH};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -529,6 +532,150 @@ fn meta_set_multi_rejects_an_empty_key_before_writing() -> Result<(), TestCaseEr
         let items: [(&[u8], &str); 2] = [(b"key", "v"), (b"", "v")];
         let result = without_writes(&mut peer, client.meta_set_multi(&items, None)).await?;
         prop_assert!(rejects(&result, Rejection::Empty), "{:?}", result);
+        prop_assert!(!client.is_closed());
+        assert_no_further_writes(client, &mut peer).await
+    }))
+}
+
+/// A key whose `as_ref` returns `first` on its first call and `later` on every call after it.
+/// `Eq` and `Hash` do not call `as_ref`.
+#[derive(Debug)]
+struct ChangingKey {
+    first: &'static [u8],
+    later: &'static [u8],
+    calls: Cell<usize>,
+}
+
+impl ChangingKey {
+    fn new(first: &'static [u8], later: &'static [u8]) -> Self {
+        Self {
+            first,
+            later,
+            calls: Cell::new(0),
+        }
+    }
+}
+
+impl AsRef<[u8]> for ChangingKey {
+    fn as_ref(&self) -> &[u8] {
+        let calls = self.calls.get();
+        self.calls.set(calls + 1);
+        if calls == 0 {
+            self.first
+        } else {
+            self.later
+        }
+    }
+}
+
+impl PartialEq for ChangingKey {
+    fn eq(&self, other: &Self) -> bool {
+        (self.first, self.later) == (other.first, other.later)
+    }
+}
+
+impl Eq for ChangingKey {}
+
+impl Hash for ChangingKey {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        (self.first, self.later).hash(state);
+    }
+}
+
+#[test]
+fn get_multi_writes_the_key_bytes_that_it_checked() -> Result<(), TestCaseError> {
+    runtime().block_on(within(async {
+        let (mut client, mut peer) = pair().await;
+        let keys = [ChangingKey::new(b"key", b"other key")];
+        let reply = b"VALUE key 0 1\r\nv\r\nEND\r\n";
+        let values = exchange(&mut peer, b"get key\r\n", reply, client.get_multi(&keys)).await?;
+        let returned: Vec<Vec<u8>> = values.unwrap().into_iter().map(|value| value.key).collect();
+        prop_assert_eq!(returned, vec![b"key".to_vec()]);
+        prop_assert!(!client.is_closed());
+        assert_no_further_writes(client, &mut peer).await
+    }))
+}
+
+#[test]
+fn meta_get_multi_writes_the_key_bytes_that_it_checked() -> Result<(), TestCaseError> {
+    runtime().block_on(within(async {
+        let (mut client, mut peer) = pair().await;
+        let keys = [ChangingKey::new(b"key", b"other key")];
+        let call = client.meta_get_multi(&keys, None);
+        let values = exchange(&mut peer, b"mg key k q\r\nmn\r\n", b"MN\r\n", call).await?;
+        prop_assert_eq!(values, Ok(Vec::new()));
+        prop_assert!(!client.is_closed());
+        assert_no_further_writes(client, &mut peer).await
+    }))
+}
+
+#[test]
+fn meta_set_multi_writes_the_key_bytes_that_it_checked() -> Result<(), TestCaseError> {
+    runtime().block_on(within(async {
+        let (mut client, mut peer) = pair().await;
+        let items = [(ChangingKey::new(b"key", b"other key"), "v")];
+        let call = client.meta_set_multi(&items, None);
+        let values = exchange(&mut peer, b"ms key 1 k q\r\nv\r\nmn\r\n", b"MN\r\n", call).await?;
+        prop_assert_eq!(values, Ok(Vec::new()));
+        prop_assert!(!client.is_closed());
+        assert_no_further_writes(client, &mut peer).await
+    }))
+}
+
+/// `set_multi` and `add_multi` must read a reply for each key that they wrote, and for no other
+/// key. The first key is empty when the call writes the items and valid when it reads the
+/// replies. The second key is valid when the call writes the items and empty when it reads the
+/// replies. `ChangingKey` hashes and compares only its fixed fields, so its call counter
+/// cannot move it in the map of results.
+#[allow(clippy::mutable_key_type)]
+fn storage_multi_reads_replies_for_the_keys_that_it_wrote(verb: &str) -> Result<(), TestCaseError> {
+    runtime().block_on(within(async {
+        let (mut client, mut peer) = pair().await;
+        let items = [
+            (ChangingKey::new(b"", b"skipped"), "v"),
+            (ChangingKey::new(b"key", b""), "v"),
+        ];
+        let request = format!("{verb} key 0 0 1\r\nv\r\n");
+        let call = async {
+            if verb == "set" {
+                client.set_multi(&items, None, None).await
+            } else {
+                client.add_multi(&items, None, None).await
+            }
+        };
+        let results = exchange(&mut peer, request.as_bytes(), b"STORED\r\n", call).await?;
+        let results = results.unwrap();
+        prop_assert_eq!(results.len(), 2);
+        prop_assert!(
+            rejects(&results[&items[0].0], Rejection::Empty),
+            "{:?}",
+            results
+        );
+        prop_assert_eq!(&results[&items[1].0], &Ok(()));
+        let value = exchange(&mut peer, b"get next\r\n", b"END\r\n", client.get("next")).await?;
+        prop_assert_eq!(value, Ok(None));
+        assert_no_further_writes(client, &mut peer).await
+    }))
+}
+
+#[test]
+fn set_multi_reads_replies_for_the_keys_that_it_wrote() -> Result<(), TestCaseError> {
+    storage_multi_reads_replies_for_the_keys_that_it_wrote("set")
+}
+
+#[test]
+fn add_multi_reads_replies_for_the_keys_that_it_wrote() -> Result<(), TestCaseError> {
+    storage_multi_reads_replies_for_the_keys_that_it_wrote("add")
+}
+
+#[test]
+fn delete_multi_no_reply_writes_the_key_bytes_that_it_checked() -> Result<(), TestCaseError> {
+    runtime().block_on(within(async {
+        let (mut client, mut peer) = pair().await;
+        let keys = [ChangingKey::new(b"key", b"other key")];
+        let call = client.delete_multi_no_reply(&keys);
+        let result = exchange(&mut peer, b"delete key noreply\r\n", b"", call).await?;
+        prop_assert_eq!(result, Ok(()));
         prop_assert!(!client.is_closed());
         assert_no_further_writes(client, &mut peer).await
     }))

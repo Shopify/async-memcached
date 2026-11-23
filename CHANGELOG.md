@@ -10,6 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+## [0.11.1] - 2026-11-23
+
+### Fixed
+
+- Meta flags that do not start with an ASCII letter are rejected with an `ErrorKind::Client` error before anything is written ([GHSA-5f6h-jcc2-54mg](https://github.com/Shopify/async-memcached/security/advisories/GHSA-5f6h-jcc2-54mg)). memcached 1.6.40 and newer reject an `ms` line whose flag starts with a byte that is neither a digit nor in the ASCII range `A` to `z` (0x41 to 0x7a), such as `!`, before they read the length of the value. They then run the value as commands, which closing the connection cannot undo. Every meta flag starts with an ASCII letter, so the client also rejects other first bytes, such as `1` and `[`, which memcached rejects without running the value. Such a flag previously reached memcached, which answered `CLIENT_ERROR`. It now fails with `Meta flag does not start with an ASCII letter`, and `meta_set`, `meta_set_multi` and `meta_get_multi` keep the connection open.
+- `get_multi`, `meta_get_multi` and `meta_set_multi` write each key as the bytes that they checked, and `set_multi` and `add_multi` read a reply for each key that they wrote and for no other key ([GHSA-5f6h-jcc2-54mg](https://github.com/Shopify/async-memcached/security/advisories/GHSA-5f6h-jcc2-54mg)). They called `as_ref` on a key once to check it and again to write it or to match its reply, so a key type whose `as_ref` returns other bytes on a later call could put unchecked bytes on the wire or misalign the replies. Types that return the same bytes on every call, such as `&str`, `String`, `&[u8]` and `Vec<u8>`, were not affected.
+
 ## [0.11.0] - 2026-11-18
 
 ### Upgrade notes
